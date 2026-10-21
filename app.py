@@ -45,7 +45,7 @@ with gr.Blocks(title="Fund Report Agent") as ui:
     with gr.Column(visible=False) as results:
         summary = gr.Markdown(elem_id="dr-summary")
         pdf_file = gr.File(label="PDF report", interactive=False)
-        charts = gr.Gallery(label="Charts", columns=2, height="auto", object_fit="contain")
+        charts = gr.Gallery(label="Charts", columns=3, height="auto", object_fit="contain")
     report = gr.Markdown(elem_id="dr-report")
 
     inputs = [query_textbox, files]

@@ -24,10 +24,25 @@ Question + uploaded files (Gradio UI)
    ├─► charts.py          (Python)  growth of 100 + attribution charts
    ├─► Planner Agent      (LLM)     plans up to 5 searches to explain the results
    ├─► Search Agent × ≤5  (LLM)     web search, run in parallel
-   ├─► Writer Agent       (LLM)     brief commentary + short summary
-   ├─► pdf_builder.py     (Python)  tables + charts + commentary → PDF
+   ├─► Writer Agent       (LLM)     key messages, committee action, section commentary
+   ├─► report_builder.py  (Python)  report layout (HTML for the PDF, Markdown for app/email)
+   ├─► pdf_builder.py     (Python)  HTML → PDF
    └─► Notify Agent       (LLM)     tools: send_email_tool (PDF attached), send_push_tool
 ```
+
+### Report structure
+
+Modelled on investment committee and manager performance reports: the conclusion first,
+then the evidence.
+
+| Page | Content |
+|---|---|
+| 1. Executive summary | Status rating, headline figures, key messages, returns by period (3M, 6M, 1Y, 3Y, 5Y, since start), top contributors and detractors, recommended committee action |
+| 2. Performance and risk | Commentary, growth of 100 chart, drawdown chart, risk and return metrics |
+| 3. Attribution | Commentary, summary of effects, attribution chart, full Brinson-Fachler table |
+| 4. Context and appendix | Market context, outlook and risks to monitor, methodology, data sources, disclaimer |
+
+Every page has a footer with the fund name, report date and page number.
 
 ### Design choices
 
@@ -37,6 +52,8 @@ Question + uploaded files (Gradio UI)
   planner returns more.
 - **Run context keeps files away from the LLM.** The PDF path is passed to the notify tools
   through the SDK's `RunContextWrapper`, so the model decides *what* to send but never handles the file.
+- **Rule-based status, not an LLM opinion.** On track / Watch / Under review comes from a
+  documented rule on annualised excess return, shown in the appendix.
 - **Graceful failures.** A failed search is skipped; email or push without settings is
   reported as "skipped" instead of crashing.
 
