@@ -6,13 +6,11 @@ Run on your own computer (needs internet access):
 
     pip install yfinance
     python tools/fetch_nav.py --search "Marlborough Multi Cap Income"   # find the ticker
-python tools/fetch_nav.py --fund "Marlborough Multi Cap Income" --benchmark "Vanguard FTSE UK Equity Income" --years 5
+    python tools/fetch_nav.py --fund "Marlborough Multi Cap Income" --benchmark "Vanguard FTSE UK Equity Income" --years 5
 
---fund and --benchmark accept a Yahoo ticker (e.g. VUKG.L), an ISIN or a name. ISINs and names
-are looked up and the best match is used; check the printed match is the share class you meant.
-Yahoo often cannot find UK funds by ISIN, so a name usually works better. To see matches only:
-
-    python tools/fetch_nav.py --search "Marlborough Multi Cap Income"
+--fund and --benchmark accept a Yahoo ticker (e.g. VUKG.L), a name or an ISIN, and print what
+they matched; check it is the share class you meant. Yahoo often cannot find UK funds by ISIN,
+so a name or ticker usually works better.
 """
 import argparse
 import re
