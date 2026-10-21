@@ -115,6 +115,14 @@ funds by ISIN, so names or tickers work better). The script prints what it
 matched, so check it found the right share class. Then upload `nav_real.csv` with the fund's
 latest factsheet PDF: the Extractor Agent reads the fund facts, holdings and exposures from it.
 
+If Yahoo does not have the fund (common for UK unit trusts and OEICs), save its price history
+as a CSV with a date column and a price column, for example from the historical prices table on
+markets.ft.com, and pass it with `--fund-csv` instead of `--fund`:
+
+```bash
+python tools/fetch_nav.py --fund-csv fund_prices.csv --benchmark IUKD.L --years 5
+```
+
 Peer-group benchmarks (IA sectors) are not on Yahoo, so use an index tracker as a proxy and say
 so in the report. Attribution needs sector returns for the fund, which are rarely public, so
 real-fund reports usually skip that section.
