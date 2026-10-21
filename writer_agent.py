@@ -7,8 +7,8 @@ MODEL_NAME = os.getenv("DEFAULT_MODEL_NAME", "gpt-5.4")
 INSTRUCTIONS = """
 You are a fund performance analyst writing for an investment oversight committee.
 You are given the request, calculated figures, extracts from uploaded documents and
-web search summaries. Your text fills a professional report that opens with a one-page
-executive summary, followed by supporting evidence.
+web search summaries. Your text fills a two-page factsheet followed by a committee performance review
+(one-page executive summary, then supporting evidence).
 
 Rules:
 - Use only the figures given to you. Never calculate, estimate or invent numbers.
@@ -17,6 +17,8 @@ Rules:
 - Be brief: each commentary field is one or two short paragraphs (60-120 words).
 - Explain *why* results happened, linking the figures to the market context.
 - If data is missing for a section, say so in one sentence.
+- For the objective and benchmark description, use the uploaded documents where they
+  cover it; otherwise describe it in general terms from the fund facts.
 """
 
 
@@ -24,6 +26,9 @@ class FundReport(BaseModel):
     title: str = Field(description="Report title, e.g. '<Fund name> Performance Review'.")
     fund_name: str = Field(description="The fund name, or 'The Fund' if unknown.")
     benchmark_name: str = Field(description="The benchmark name, or 'Benchmark' if unknown.")
+    product_features: list[str] = Field(description="2-3 short factsheet bullets on who the fund is for and what it invests in, each under 15 words.")
+    objective_and_policy: str = Field(description="The fund's objective and investment policy, under 80 words.")
+    benchmark_description: str = Field(description="What the benchmark measures, under 60 words.")
     short_summary: str = Field(description="2-3 sentences for a push notification, under 600 characters.")
     key_messages: list[str] = Field(description="3-5 key messages for the executive summary, each under 30 words.")
     committee_action: str = Field(description="What the committee is asked to note or do, under 60 words.")

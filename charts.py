@@ -63,3 +63,37 @@ def attribution_chart(attribution: pd.DataFrame, path: str) -> str:
     fig.savefig(path)
     plt.close(fig)
     return path
+
+
+DONUT_COLOURS = ["#12355b", "#2e86ab", "#e0a100", "#c0392b", "#7b5ea7", "#3a9d5d",
+                 "#e67e22", "#5d6d7e", "#a3c4dc", "#d4a5a5", "#9aa5b1", "#c8d6e5"]
+
+
+def cumulative_chart(nav: pd.DataFrame, path: str) -> str:
+    """ Compact factsheet chart: fund (filled) vs benchmark, rebased to 100 """
+    fig, ax = plt.subplots(figsize=(4.6, 2.3), dpi=200)
+    fund = nav["fund"] / nav["fund"].iloc[0] * 100
+    bench = nav["benchmark"] / nav["benchmark"].iloc[0] * 100
+    ax.fill_between(nav["date"], fund, fund.min() * 0.95, color=FUND_COLOUR, alpha=0.85, label="Fund", linewidth=0)
+    ax.plot(nav["date"], bench, color=ACCENT_COLOUR, linewidth=1.4, label="Benchmark")
+    ax.set_ylim(fund.min() * 0.95, max(fund.max(), bench.max()) * 1.03)
+    ax.tick_params(labelsize=6.5)
+    ax.legend(frameon=False, fontsize=6.5, loc="upper left", ncol=2)
+    ax.grid(axis="y", alpha=0.3)
+    ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout(pad=0.4)
+    fig.savefig(path)
+    plt.close(fig)
+    return path
+
+
+def donut_chart(weights: pd.DataFrame, path: str) -> str:
+    """ Small donut of fund weights; the table next to it carries the labels """
+    fig, ax = plt.subplots(figsize=(1.6, 1.6), dpi=200)
+    ax.pie(weights["fund_weight"].clip(lower=0), colors=DONUT_COLOURS[:len(weights)], startangle=90,
+           counterclock=False, wedgeprops={"width": 0.38, "edgecolor": "white", "linewidth": 0.6})
+    ax.set_aspect("equal")
+    fig.tight_layout(pad=0.1)
+    fig.savefig(path, transparent=True)
+    plt.close(fig)
+    return path

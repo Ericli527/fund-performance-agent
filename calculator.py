@@ -180,3 +180,76 @@ def fmt_pct(value: float, signed: bool = False) -> str:
         return "n/a"
     value = round(value, 4) + 0.0
     return f"{value:+.2%}" if signed else f"{value:.2%}"
+
+
+def _level_near(nav: pd.DataFrame, when: pd.Timestamp, tolerance_days: int = 5) -> pd.Series | None:
+    """ The NAV row closest to a date, if one is within the tolerance """
+    gaps = (nav["date"] - when).abs()
+    i = gaps.idxmin()
+    return nav.loc[i] if gaps[i] <= pd.Timedelta(days=tolerance_days) else None
+
+
+def _discrete_returns(nav: pd.DataFrame, windows: list[tuple[str, pd.Timestamp, pd.Timestamp]]) -> pd.DataFrame:
+    columns = {}
+    for label, start, end in windows:
+        a, b = _level_near(nav, start), _level_near(nav, end)
+        if a is not None and b is not None:
+            columns[label] = {col.capitalize(): b[col] / a[col] - 1 for col in ("fund", "benchmark")}
+    return pd.DataFrame(columns)
+
+
+def rolling_12m_returns(nav: pd.DataFrame, n: int = 10) -> pd.DataFrame:
+    """ Returns for each 12-month period ending on the latest date, oldest first """
+    end = nav["date"].iloc[-1]
+    windows = []
+    for k in range(n - 1, -1, -1):
+        e = end - pd.DateOffset(years=k)
+        s = e - pd.DateOffset(years=1)
+        windows.append((f"{s:%b %y} - {e:%b %y}", s, e))
+    return _discrete_returns(nav, windows)
+
+
+def calendar_year_returns(nav: pd.DataFrame, n: int = 10) -> pd.DataFrame:
+    """ Returns for each complete calendar year in the data, oldest first """
+    last_year = nav["date"].iloc[-1].year - 1
+    windows = [(str(y), pd.Timestamp(f"{y - 1}-12-31"), pd.Timestamp(f"{y}-12-31"))
+               for y in range(last_year - n + 1, last_year + 1)]
+    return _discrete_returns(nav, windows)
+
+
+def risk_measures(nav: pd.DataFrame, months: int = 36) -> tuple[pd.DataFrame, str]:
+    """ Factsheet risk measures over the last `months` (or all data if shorter) """
+    start = nav["date"].iloc[-1] - pd.DateOffset(months=months)
+    window = nav[nav["date"] >= start - pd.Timedelta(days=5)]
+    label = f"{months // 12} years" if window["date"].iloc[0] <= start + pd.Timedelta(days=5) else "full period"
+    if label == "full period":
+        window = nav
+    n = _periods_per_year(window["date"])
+    r = window[["fund", "benchmark"]].pct_change().dropna()
+    years = len(r) / n
+    ann = {c: (window[c].iloc[-1] / window[c].iloc[0]) ** (1 / years) - 1 for c in ("fund", "benchmark")}
+    vol = {c: r[c].std() * np.sqrt(n) for c in ("fund", "benchmark")}
+    beta = r["fund"].cov(r["benchmark"]) / r["benchmark"].var()
+    tracking_error = (r["fund"] - r["benchmark"]).std() * np.sqrt(n)
+    rows = {
+        "Annualised volatility (%)": (vol["fund"], vol["benchmark"]),
+        "Relative volatility": (vol["fund"] / vol["benchmark"], None),
+        "Sharpe ratio": ((ann["fund"] - RISK_FREE_RATE) / vol["fund"], (ann["benchmark"] - RISK_FREE_RATE) / vol["benchmark"]),
+        "Annualised alpha (%)": (ann["fund"] - (RISK_FREE_RATE + beta * (ann["benchmark"] - RISK_FREE_RATE)), None),
+        "Beta": (beta, None),
+        "Annualised tracking error (%)": (tracking_error, None),
+        "Information ratio": ((ann["fund"] - ann["benchmark"]) / tracking_error, None),
+        "R²": (r["fund"].corr(r["benchmark"]) ** 2, None),
+    }
+    return pd.DataFrame(rows, index=["Fund", "Benchmark"]).T, label
+
+
+SRRI_BANDS = [0.005, 0.02, 0.05, 0.10, 0.15, 0.25]
+
+
+def risk_indicator(nav: pd.DataFrame) -> int:
+    """ SRRI-style 1-7 score from annualised volatility over up to 5 years """
+    start = nav["date"].iloc[-1] - pd.DateOffset(years=5)
+    window = nav[nav["date"] >= start - pd.Timedelta(days=5)]
+    vol = window["fund"].pct_change().dropna().std() * np.sqrt(_periods_per_year(window["date"]))
+    return 1 + sum(vol >= band for band in SRRI_BANDS)

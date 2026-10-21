@@ -8,8 +8,9 @@ sdk_version: 6.14.0
 # Fund Report Agent
 
 A multi-agent app that analyses a fund's **performance and attribution** from uploaded
-data, adds market context from up to **5 web searches**, and delivers a brief report as
-a **PDF**, by **email** (PDF attached) and as a **Pushover** notification with a short summary.
+data, adds market context from up to **5 web searches**, and delivers a **factsheet and
+committee performance review** as a **PDF**, by **email** (PDF attached) and as a
+**Pushover** notification with a short summary.
 
 Built with the [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/) and Gradio.
 Based on the structure of [Deep-Research-Agent](https://github.com/ericli527/Deep-Research-Agent).
@@ -20,6 +21,7 @@ Based on the structure of [Deep-Research-Agent](https://github.com/ericli527/Dee
 Question + uploaded files (Gradio UI)
    │
    ├─► file_parser.py     (Python)  reads CSV / Excel / PDF / Word / text
+   ├─► Extractor Agent    (LLM)     only if factsheet data is missing: reads it from documents
    ├─► calculator.py      (Python)  performance metrics + Brinson-Fachler attribution
    ├─► charts.py          (Python)  growth of 100 + attribution charts
    ├─► Planner Agent      (LLM)     plans up to 5 searches to explain the results
@@ -32,15 +34,17 @@ Question + uploaded files (Gradio UI)
 
 ### Report structure
 
-Modelled on investment committee and manager performance reports: the conclusion first,
-then the evidence.
+Pages 1-2 follow the layout of a fund manager's monthly factsheet. Pages 3 onwards follow
+investment committee reports: the conclusion first, then the evidence.
 
 | Page | Content |
 |---|---|
-| 1. Executive summary | Status rating, headline figures, key messages, returns by period (3M, 6M, 1Y, 3Y, 5Y, since start), top contributors and detractors, recommended committee action |
-| 2. Performance and risk | Commentary, growth of 100 chart, drawdown chart, risk and return metrics |
-| 3. Attribution | Commentary, summary of effects, attribution chart, full Brinson-Fachler table |
-| 4. Context and appendix | Market context, outlook and risks to monitor, methodology, data sources, disclaimer |
+| 1. Factsheet | Product features, fund facts, benchmark description, objective, 12-month and calendar-year returns, cumulative chart, risk indicator (1-7) |
+| 2. Factsheet | Top 10 holdings, sector and geographic exposure (donut charts), risk measures (volatility, Sharpe, alpha, beta, tracking error, information ratio, R²) |
+| 3. Executive summary | Status rating, headline figures, key messages, returns by period (3M, 6M, 1Y, 3Y, 5Y, since start), top contributors and detractors, recommended committee action |
+| 4. Performance and risk | Commentary, growth of 100 chart, drawdown chart, risk and return metrics |
+| 5. Attribution | Commentary, summary of effects, attribution chart, full Brinson-Fachler table |
+| 6. Context and appendix | Market context, outlook and risks to monitor, methodology, glossary, data sources, disclaimer |
 
 Every page has a footer with the fund name, report date and page number.
 
@@ -54,6 +58,9 @@ Every page has a footer with the fund name, report date and page number.
   through the SDK's `RunContextWrapper`, so the model decides *what* to send but never handles the file.
 - **Rule-based status, not an LLM opinion.** On track / Watch / Under review comes from a
   documented rule on annualised excess return, shown in the appendix.
+- **Supplied data beats AI extraction.** CSV data is always used first. The extractor only
+  fills gaps, its weights are checked (0-100%, total at most 105%), and anything it supplies is
+  labelled "AI-extracted, please verify" in the PDF.
 - **Graceful failures.** A failed search is skipped; email or push without settings is
   reported as "skipped" instead of crashing.
 
@@ -77,7 +84,20 @@ Values are NAV, price or index levels (not returns). Daily, weekly, monthly or q
 
 Use either percentages (weights sum to 100) or decimals (weights sum to 1) for all four columns.
 
+**Top holdings** (`security, fund_weight, benchmark_weight`). The benchmark column is optional.
+
+**Exposures** (`category, name, fund_weight, benchmark_weight`), with `category` set to `sector` or
+`country`. Separate files with a `sector` or `country` column also work. If no sector file is given,
+sector weights are taken from the attribution data.
+
+**Fund facts** (`field, value`), e.g. Fund name, ISIN, Benchmark, Launch date, Ongoing charges,
+Fund size, Risk indicator. If no risk indicator is given, it is estimated from volatility.
+
+Weights can be in percent or decimals.
+
 **Documents** (PDF, Word, text, or any unrecognised table) are passed to the writer as reference.
+If fund facts, holdings or exposures are missing, the Extractor Agent tries to read them from
+these documents (for example, an existing factsheet or KID).
 
 ## Metrics
 
@@ -94,7 +114,7 @@ cp .env.example .env   # then add your OPENAI_API_KEY (email and Pushover are op
 python app.py
 ```
 
-Upload the two files in `samples/` to try it.
+Upload the files in `samples/` to try it.
 
 > Uploaded data is sent to OpenAI. Do not upload confidential client data.
 > Reports are for demonstration only and are not investment advice.

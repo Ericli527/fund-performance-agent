@@ -3,7 +3,8 @@ import asyncio
 import tempfile
 from agents import Runner, trace, gen_trace_id
 from file_parser import parse_files
-from analysis import FundAnalysis
+from analysis import FundAnalysis, merge_extract, missing_factsheet_data
+from extractor_agent import extractor_agent, FactsheetExtract
 from report_builder import build_html, build_markdown
 from pdf_builder import build_pdf
 from planner_agent import planner_agent, WebSearchItem, WebSearchPlan, HOW_MANY_SEARCHES
@@ -27,9 +28,16 @@ class AgentManager:
             yield update(f"Starting. [View trace](https://platform.openai.com/traces/trace?trace_id={trace_id})")
             out_dir = Path(tempfile.mkdtemp(prefix="fund_report_"))
 
-            analysis = FundAnalysis.build(parse_files(files), out_dir)
-            for note in analysis.parsed.notes:
+            parsed = parse_files(files)
+            for note in parsed.notes:
                 yield update(note)
+            if parsed.documents and missing_factsheet_data(parsed):
+                yield update("Some factsheet data is missing, extracting it from the documents...")
+                notes_before = len(parsed.notes)
+                merge_extract(parsed, await self.extract(parsed.documents), [n for n, _ in parsed.documents])
+                for note in parsed.notes[notes_before:]:
+                    yield update(note)
+            analysis = FundAnalysis.build(parsed, out_dir)
             yield update("Calculations done, planning searches...")
 
             plan = await self.plan_searches(query, analysis)
@@ -45,7 +53,13 @@ class AgentManager:
 
             notify_result = await self.notify(report, report_md, pdf_path)
             yield update(notify_result)
-            yield report_md, f"**{report.title}**\n\n{report.short_summary}", pdf_path, list(analysis.charts.values())
+            yield report_md, f"**{report.title}**\n\n{report.short_summary}", pdf_path, [analysis.charts[k] for k in ("growth", "drawdown", "attribution") if k in analysis.charts]
+
+    async def extract(self, documents: list[tuple[str, str]]) -> FactsheetExtract:
+        """ Read fund facts, holdings and exposures from documents when no CSV was given """
+        text = "\n\n".join(f"--- {name} ---\n{content}" for name, content in documents)
+        result = await Runner.run(extractor_agent, text)
+        return result.final_output
 
     async def plan_searches(self, query: str, analysis: FundAnalysis) -> WebSearchPlan:
         """ Plan the searches, with a hard limit in code as well as in the prompt """
