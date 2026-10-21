@@ -106,10 +106,12 @@ and saves a NAV CSV in the format above. Run it on your own computer:
 
 ```bash
 pip install yfinance
-python tools/fetch_nav.py --fund GB00B907VX32 --benchmark "Vanguard FTSE UK Equity Income" --years 5
+python tools/fetch_nav.py --search "Marlborough Multi Cap Income"   # find the ticker
+python tools/fetch_nav.py --fund "Marlborough Multi Cap Income" --benchmark "Vanguard FTSE UK Equity Income" --years 5
 ```
 
-`--fund` and `--benchmark` take a Yahoo ticker, an ISIN or a name. The script prints what it
+`--fund` and `--benchmark` take a Yahoo ticker, a name or an ISIN (Yahoo often cannot find UK
+funds by ISIN, so names or tickers work better). The script prints what it
 matched, so check it found the right share class. Then upload `nav_real.csv` with the fund's
 latest factsheet PDF: the Extractor Agent reads the fund facts, holdings and exposures from it.
 
