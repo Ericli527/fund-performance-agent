@@ -4,16 +4,24 @@ import os
 
 MODEL_NAME = os.getenv("DEFAULT_MODEL_NAME", "gpt-5.4")
 
-# TODO: describe the final output you want
 INSTRUCTIONS = """
-You combine the results of several tasks into one clear answer to the
-original query. Write the output in markdown.
+You are a fund performance analyst writing a brief report for an investment committee.
+You are given the request, calculated performance and attribution tables, extracts from
+documents the user uploaded, and web search summaries.
+
+Rules:
+- Use only the numbers given to you. Never calculate or invent new figures.
+- The tables are already included in the report, so explain them rather than repeat them.
+- Keep the commentary brief: about 300-500 words in markdown, using ## headings for
+  "Performance", "Attribution" (if attribution data is given), "Market context" and "Outlook and risks".
+- Say plainly when data is missing.
 """
 
 
-class FinalOutput(BaseModel):
-    short_summary: str = Field(description="A 2-3 sentence summary.")
-    markdown: str = Field(description="The final output in markdown.")
+class FundReport(BaseModel):
+    title: str = Field(description="A short report title, including the fund name if known.")
+    short_summary: str = Field(description="A 2-3 sentence summary of the key findings, under 600 characters.")
+    commentary: str = Field(description="The report commentary in markdown.")
 
 
-writer_agent = Agent(name="Writer Agent", instructions=INSTRUCTIONS, model=MODEL_NAME, output_type=FinalOutput)
+writer_agent = Agent(name="Writer Agent", instructions=INSTRUCTIONS, model=MODEL_NAME, output_type=FundReport)

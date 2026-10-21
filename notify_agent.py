@@ -1,33 +1,60 @@
-from agents import Agent, function_tool, ModelSettings
-from messenger import send_email, push
+from dataclasses import dataclass
+from agents import Agent, RunContextWrapper, function_tool, ModelSettings
+from messenger import send_email, push, email_configured, push_configured
 import os
 
 MODEL_NAME = os.getenv("NOTIFY_MODEL_NAME", "gpt-5.4-mini")
-USE_EMAIL = os.getenv("USE_EMAIL", "true").lower() == "true"
 
-settings = ModelSettings(tool_choice="required")
+
+@dataclass
+class NotifyContext:
+    """ Local data the tools can use but the LLM never sees """
+    pdf_path: str
 
 
 @function_tool
-def send_notification(subject: str, text_body: str, html_body: str) -> str:
+def send_email_tool(ctx: RunContextWrapper[NotifyContext], subject: str, text_body: str, html_body: str) -> str:
     """
-    Send the output by email, or as a push notification if email is turned off
+    Email the report, with the PDF version attached
 
     Args:
-        subject: The subject line
-        text_body: The body as plain text
-        html_body: The body as HTML
+        subject: The subject of the email
+        text_body: The body of the email as plain text
+        html_body: The body of the email as HTML
     """
-    if USE_EMAIL:
-        send_email(subject, text_body, html_body)
-    else:
-        push(f"Subject: {subject}\n\n{text_body}")
-    return "Notification sent successfully"
+    if not email_configured():
+        return "Email skipped: email settings are not configured"
+    send_email(subject, text_body, html_body, attachment_path=ctx.context.pdf_path)
+    return "Email sent successfully with the PDF attached"
+
+
+@function_tool
+def send_push_tool(message: str) -> str:
+    """
+    Send a short push notification to the user's phone
+
+    Args:
+        message: The notification text, under 1000 characters
+    """
+    if not push_configured():
+        return "Push skipped: Pushover settings are not configured"
+    push(message[:1000])
+    return "Push notification sent successfully"
 
 
 INSTRUCTIONS = """
-You are given a markdown document. Use your tool to send it, converting it into
-a clean, well presented HTML email with a fitting subject line.
+You deliver a finished fund report. You are given the short summary and the full report
+in markdown. Do both of these:
+1. Use send_email_tool to send a clean, well presented HTML email with a fitting subject.
+   Open with the short summary, then the report. Mention that the PDF is attached.
+2. Use send_push_tool to send the short summary as a push notification.
+Then reply with one line saying what was sent.
 """
 
-notify_agent = Agent(name="Notify Agent", instructions=INSTRUCTIONS, tools=[send_notification], model=MODEL_NAME, model_settings=settings)
+notify_agent = Agent[NotifyContext](
+    name="Notify Agent",
+    instructions=INSTRUCTIONS,
+    tools=[send_email_tool, send_push_tool],
+    model=MODEL_NAME,
+    model_settings=ModelSettings(tool_choice="required"),
+)
