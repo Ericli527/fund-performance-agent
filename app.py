@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 # Load .env before importing modules that read settings at import time
 load_dotenv(override=True)
 
+import os
 import gradio as gr
 from agent_manager import AgentManager
 from styles import CSS, JS, EXAMPLES, HEADER_HTML
@@ -54,5 +55,19 @@ with gr.Blocks(title="Fund Report Agent") as ui:
     query_textbox.submit(run, inputs=inputs, outputs=outputs)
 
 
+def login() -> tuple[str, str] | None:
+    """ Optional password protection, so a public demo can't spend your API credit """
+    username, password = os.getenv("APP_USERNAME"), os.getenv("APP_PASSWORD")
+    return (username, password) if username and password else None
+
+
 if __name__ == "__main__":
-    ui.launch(css=CSS, js=JS, theme=gr.themes.Base())
+    # Hosts such as Render set PORT and need the app to listen on all interfaces
+    on_host = "PORT" in os.environ
+    ui.queue(default_concurrency_limit=int(os.getenv("MAX_CONCURRENT_RUNS", 2)))
+    ui.launch(
+        css=CSS, js=JS, theme=gr.themes.Base(),
+        server_name="0.0.0.0" if on_host else None,
+        server_port=int(os.environ["PORT"]) if on_host else None,
+        auth=login(),
+    )
