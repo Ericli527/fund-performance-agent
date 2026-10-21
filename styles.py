@@ -1,6 +1,6 @@
 EXAMPLES = [
-    "Example task 1",
-    "Example task 2",
+    "Analyse the fund's performance and attribution vs its benchmark over the period",
+    "Which sectors drove the fund's active return, and why?",
 ]
 
 HEADER_HTML = """
@@ -11,8 +11,8 @@ HEADER_HTML = """
         <span class="dr-bar dr-bar-3"></span>
     </div>
     <div class="dr-titles">
-        <h1>My<span class="dr-sep">/</span>Agent</h1>
-        <p>Multi-agent workflow</p>
+        <h1>Fund<span class="dr-sep">/</span>Report</h1>
+        <p>Performance &amp; attribution analysis</p>
     </div>
 </div>
 """
@@ -331,6 +331,15 @@ body { background: var(--dr-bg, #fafaf7); }
     background: var(--dr-surface);
     font-weight: 800;
     color: var(--dr-blue);
+}
+
+#dr-files { margin-top: 1.25rem !important; border-radius: 0 !important; }
+
+#dr-summary:not(:empty) {
+    margin-top: 2rem !important;
+    padding: 1rem 1.25rem !important;
+    border-left: 6px solid var(--dr-amber) !important;
+    background: var(--dr-surface) !important;
 }
 
 footer { display: none !important; }

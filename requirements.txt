@@ -4,3 +4,11 @@ openai
 openai-agents
 gradio
 requests
+pandas
+numpy
+openpyxl
+pypdf
+python-docx
+matplotlib
+markdown
+xhtml2pdf

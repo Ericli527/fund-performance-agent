@@ -1,52 +1,100 @@
-from agents import Runner, trace, gen_trace_id
-from planner_agent import planner_agent, Task, TaskPlan
-from worker_agent import worker_agent
-from writer_agent import writer_agent, FinalOutput
-from notify_agent import notify_agent
+from pathlib import Path
 import asyncio
-import os
-
-USE_NOTIFY = os.getenv("USE_NOTIFY", "false").lower() == "true"
+import tempfile
+from agents import Runner, trace, gen_trace_id
+from file_parser import parse_files
+from analysis import FundAnalysis, merge_extract, missing_factsheet_data
+from extractor_agent import extractor_agent, FactsheetExtract
+from report_builder import build_html, build_markdown
+from pdf_builder import build_pdf
+from planner_agent import planner_agent, WebSearchItem, WebSearchPlan, HOW_MANY_SEARCHES
+from search_agent import search_agent
+from writer_agent import writer_agent, FundReport
+from notify_agent import notify_agent, NotifyContext
 
 
 class AgentManager:
 
-    async def run(self, query: str):
-        """ Run the workflow, yielding status updates and the final output """
-        trace_id = gen_trace_id()
-        with trace("Agent trace", trace_id=trace_id):
-            yield f"Starting. Trace: https://platform.openai.com/traces/trace?trace_id={trace_id}"
-            plan = await self.plan(query)
-            yield f"Plan ready, running {len(plan.tasks)} tasks..."
-            results = await self.run_tasks(plan)
-            yield f"{len(results)} of {len(plan.tasks)} tasks succeeded, writing output..."
-            output = await self.write(query, results)
-            if USE_NOTIFY:
-                yield "Output written, sending notification..."
-                await self.notify(output)
-            yield output.markdown
+    async def run(self, query: str, files: list[str] | None):
+        """ Run the fund report workflow, yielding (report, summary, pdf, charts) updates """
+        status: list[str] = []
 
-    async def plan(self, query: str) -> TaskPlan:
-        """ Break the query into smaller tasks """
-        result = await Runner.run(planner_agent, f"Query: {query}")
+        def update(message: str):
+            status.append(message)
+            return "\n".join(f"- {s}" for s in status), "", None, []
+
+        trace_id = gen_trace_id()
+        with trace("Fund report trace", trace_id=trace_id):
+            yield update(f"Starting. [View trace](https://platform.openai.com/traces/trace?trace_id={trace_id})")
+            out_dir = Path(tempfile.mkdtemp(prefix="fund_report_"))
+
+            parsed = parse_files(files)
+            for note in parsed.notes:
+                yield update(note)
+            if parsed.documents and missing_factsheet_data(parsed):
+                yield update("Some factsheet data is missing, extracting it from the documents...")
+                notes_before = len(parsed.notes)
+                merge_extract(parsed, await self.extract(parsed.documents), [n for n, _ in parsed.documents])
+                for note in parsed.notes[notes_before:]:
+                    yield update(note)
+            analysis = FundAnalysis.build(parsed, out_dir)
+            yield update("Calculations done, planning searches...")
+
+            plan = await self.plan_searches(query, analysis)
+            yield update(f"Running {len(plan.searches)} searches...")
+            search_results = await self.perform_searches(plan)
+            yield update(f"{len(search_results)} of {len(plan.searches)} searches succeeded, writing report...")
+
+            report = await self.write_report(query, analysis, search_results)
+            searches = [s.query for s in plan.searches]
+            report_md = build_markdown(report, analysis, searches)
+            pdf_path = build_pdf(build_html(report, analysis, searches), str(out_dir / self.pdf_name(report)))
+            yield update("PDF created, sending email and push notification...")
+
+            notify_result = await self.notify(report, report_md, pdf_path)
+            yield update(notify_result)
+            yield report_md, f"**{report.title}**\n\n{report.short_summary}", pdf_path, [analysis.charts[k] for k in ("growth", "drawdown", "attribution") if k in analysis.charts]
+
+    async def extract(self, documents: list[tuple[str, str]]) -> FactsheetExtract:
+        """ Read fund facts, holdings and exposures from documents when no CSV was given """
+        text = "\n\n".join(f"--- {name} ---\n{content}" for name, content in documents)
+        result = await Runner.run(extractor_agent, text)
         return result.final_output
 
-    async def run_tasks(self, plan: TaskPlan) -> list[str]:
-        """ Run all tasks in parallel, skipping any that fail """
-        results = await asyncio.gather(*(self.run_task(t) for t in plan.tasks), return_exceptions=True)
+    async def plan_searches(self, query: str, analysis: FundAnalysis) -> WebSearchPlan:
+        """ Plan the searches, with a hard limit in code as well as in the prompt """
+        input_message = f"Request: {query}\n\nCalculated results:\n{analysis.facts_markdown()}"
+        result = await Runner.run(planner_agent, input_message)
+        plan = result.final_output
+        plan.searches = plan.searches[:HOW_MANY_SEARCHES]
+        return plan
+
+    async def perform_searches(self, plan: WebSearchPlan) -> list[str]:
+        """ Run the searches in parallel, skipping any that fail """
+        results = await asyncio.gather(*(self.search(item) for item in plan.searches), return_exceptions=True)
         return [r for r in results if isinstance(r, str)]
 
-    async def run_task(self, task: Task) -> str:
-        """ Run a single task with the worker agent """
-        input_message = f"Task: {task.description}\nReason: {task.reason}"
-        result = await Runner.run(worker_agent, input_message)
+    async def search(self, item: WebSearchItem) -> str:
+        input_message = f"Search term: {item.query}\nReason for searching: {item.reason}"
+        result = await Runner.run(search_agent, input_message)
         return result.final_output
 
-    async def write(self, query: str, results: list[str]) -> FinalOutput:
-        """ Combine the task results into the final output """
-        input_message = f"Original query: {query}\nTask results: {results}"
+    async def write_report(self, query: str, analysis: FundAnalysis, search_results: list[str]) -> FundReport:
+        input_message = (
+            f"Request: {query}\n\n"
+            f"Calculated figures:\n{analysis.facts_markdown()}\n\n"
+            f"Uploaded documents:\n{analysis.documents_text()}\n\n"
+            f"Web search summaries:\n{search_results}"
+        )
         result = await Runner.run(writer_agent, input_message)
         return result.final_output
 
-    async def notify(self, output: FinalOutput) -> None:
-        await Runner.run(notify_agent, output.markdown)
+    @staticmethod
+    def pdf_name(report: FundReport) -> str:
+        slug = "".join(c if c.isalnum() else "_" for c in report.fund_name).strip("_") or "fund"
+        return f"{slug}_performance_review.pdf"
+
+    async def notify(self, report: FundReport, report_md: str, pdf_path: str) -> str:
+        input_message = f"Short summary:\n{report.short_summary}\n\nFull report:\n{report_md}"
+        result = await Runner.run(notify_agent, input_message, context=NotifyContext(pdf_path=pdf_path))
+        return result.final_output
