@@ -116,5 +116,16 @@ python app.py
 
 Upload the files in `samples/` to try it.
 
+## Deploy on Render
+
+1. In the [Render dashboard](https://dashboard.render.com), choose **New > Blueprint** and pick this repo.
+   Render reads `render.yaml` (free web service, `pip install -r requirements.txt`, `python app.py`).
+2. Fill in the secrets it asks for. `OPENAI_API_KEY` is required. Set `APP_USERNAME` and
+   `APP_PASSWORD` to put a login in front of the app. Email and Pushover are optional.
+3. Click **Apply**. Every push to `main` then redeploys automatically.
+
+Keys live in Render's environment settings, never in the repo. The free plan sleeps after
+about 15 minutes without traffic, so the first visit afterwards takes a minute to wake up.
+
 > Uploaded data is sent to OpenAI. Do not upload confidential client data.
 > Reports are for demonstration only and are not investment advice.

@@ -1,0 +1,37 @@
+# Render Blueprint: New > Blueprint in the Render dashboard, then pick this repo
+services:
+  - type: web
+    name: fund-report-agent
+    runtime: python
+    plan: free
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    autoDeploy: true
+    envVars:
+      # Secrets: Render asks for these when you create the Blueprint; they never go in the repo
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: APP_USERNAME
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
+      - key: EMAIL_ADDRESS
+        sync: false
+      - key: EMAIL_SMTP_SERVER
+        sync: false
+      - key: EMAIL_APP_PASSWORD
+        sync: false
+      - key: PUSHOVER_USER
+        sync: false
+      - key: PUSHOVER_TOKEN
+        sync: false
+      # Plain settings
+      - key: DEFAULT_MODEL_NAME
+        value: gpt-5.4
+      - key: NOTIFY_MODEL_NAME
+        value: gpt-5.4-mini
+      - key: HOW_MANY_SEARCHES
+        value: "5"
+      - key: MAX_CONCURRENT_RUNS
+        value: "2"
