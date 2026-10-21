@@ -121,7 +121,9 @@ Upload the files in `samples/` to try it.
 1. In the [Render dashboard](https://dashboard.render.com), choose **New > Blueprint** and pick this repo.
    Render reads `render.yaml` (free web service, `pip install -r requirements.txt`, `python app.py`).
 2. Fill in the secrets it asks for. `OPENAI_API_KEY` is required. Set `APP_USERNAME` and
-   `APP_PASSWORD` to put a login in front of the app. Email and Pushover are optional.
+   `APP_PASSWORD` to put a login in front of the app. Email and Pushover are optional:
+   `EMAIL_ADDRESS`, `EMAIL_SMTP_SERVER` and `EMAIL_APP_PASSWORD` are the sending account, and
+   `EMAIL_TO` lists where reports go (blank sends them to the sending account).
 3. Click **Apply**. Every push to `main` then redeploys automatically.
 
 Keys live in Render's environment settings, never in the repo. The free plan sleeps after
