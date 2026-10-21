@@ -158,13 +158,15 @@ def period_returns_to_markdown(periods: pd.DataFrame) -> str:
     return "\n".join(lines)
 
 
-def status_rating(excess_return: float) -> tuple[str, str, str]:
-    """ Simple rule-based status: (label, colour, explanation) """
+def status_rating(excess_return: float, horizon: str) -> tuple[str, str, str, str]:
+    """ Simple rule-based status for one horizon: (horizon, label, colour, explanation) """
+    # Attribution periods have no known length, so their gap is not quoted per year
+    gap = fmt_pct(excess_return, signed=True) + ("" if horizon == "Attribution period" else " a year")
     if excess_return >= 0:
-        return "On track", "#2e7d32", "The fund is ahead of its benchmark over the period."
+        return horizon, "On track", "#2e7d32", f"Ahead of the benchmark ({gap})."
     if excess_return >= STATUS_WATCH_THRESHOLD:
-        return "Watch", "#e0a100", "The fund is slightly behind its benchmark (within 1% a year)."
-    return "Under review", "#c62828", "The fund is behind its benchmark by more than 1% a year."
+        return horizon, "Watch", "#e0a100", f"Slightly behind the benchmark ({gap})."
+    return horizon, "Under review", "#c62828", f"Behind the benchmark by more than 1% ({gap})."
 
 
 def top_and_bottom(attribution: pd.DataFrame, n: int = 3) -> tuple[pd.DataFrame, pd.DataFrame]:

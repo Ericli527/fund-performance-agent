@@ -157,7 +157,7 @@ def _methodology() -> str:
         "Volatility and tracking error are annualised standard deviations of periodic returns (fund and fund minus benchmark). The data frequency is detected from the dates.",
         "Sharpe ratio = (annualised return - risk-free rate) / volatility. Information ratio = annualised excess return / tracking error. Beta = covariance(fund, benchmark) / variance(benchmark).",
         "Attribution uses the Brinson-Fachler model: Allocation = (wp - wb) x (Rb,i - Rb); Selection = wb x (Rp,i - Rb,i); Interaction = (wp - wb) x (Rp,i - Rb,i). The effects sum to the active return.",
-        f"Status rule: On track if annualised excess return >= 0; Watch if within {abs(STATUS_WATCH_THRESHOLD):.0%} a year below; otherwise Under review. This is an illustrative rule, not a formal rating.",
+        f"Status rule, applied to the last 1 year and to the annualised return since start: On track if the fund's excess return is >= 0; Watch if within {abs(STATUS_WATCH_THRESHOLD):.0%} a year below; otherwise Under review. Showing both separates recent results from the long-term record. This is an illustrative rule, not a formal rating.",
     ])
 
 
@@ -183,12 +183,12 @@ def build_html(report: FundReport, analysis: FundAnalysis, searches: list[str]) 
     fund_name, benchmark = factsheet_names(report, analysis)
     sub = (f"Fund: {escape(fund_name)} &nbsp;|&nbsp; Benchmark: {escape(benchmark)} "
            f"&nbsp;|&nbsp; Period: {analysis.period_label} &nbsp;|&nbsp; Report date: {today}")
-    status_html = ""
-    if analysis.status:
-        label, colour, why = analysis.status
-        status_html = (f'<table cellspacing="0"><tr><td width="22%" style="background-color: {colour}; color: white; '
-                       f'font-weight: bold; padding: 5px 8px; text-align: center;">STATUS: {label.upper()}</td>'
-                       f'<td style="padding: 5px 8px; color: {GREY};">{why}</td></tr></table>')
+    status_cells = "".join(
+        f'<td width="17%" style="background-color: {colour}; color: white; font-weight: bold; padding: 5px 6px; '
+        f'text-align: center;"><span style="font-size: 6.5pt;">{horizon.upper()}</span><br/>{label.upper()}</td>'
+        f'<td style="padding: 5px 8px; color: {GREY};">{why}</td>'
+        for horizon, label, colour, why in analysis.status)
+    status_html = f'<table cellspacing="0"><tr>{status_cells}</tr></table>' if status_cells else ""
 
     exec_parts = [
         f'<table class="banner" cellspacing="0"><tr><td><span class="banner-label">EXECUTIVE SUMMARY</span><br/><br/>'
@@ -248,8 +248,8 @@ def build_markdown(report: FundReport, analysis: FundAnalysis, searches: list[st
     parts = [f"# {report.title}",
              f"*{report.fund_name} vs {report.benchmark_name} · {analysis.period_label} · {date.today():%d %B %Y}*",
              "## Executive summary"]
-    if analysis.status:
-        parts.append(f"**Status: {analysis.status[0]}** — {analysis.status[2]}")
+    for horizon, label, _, why in analysis.status:
+        parts.append(f"**Status ({horizon}): {label}** — {why}")
     parts.append("\n".join(f"- {m}" for m in report.key_messages))
     if analysis.periods is not None:
         parts.append("**Returns by period**\n\n" + period_returns_to_markdown(analysis.periods))

@@ -17,6 +17,8 @@ Rules:
 - Be brief: each commentary field is one or two short paragraphs (60-120 words).
 - Explain *why* results happened, linking the figures to the market context.
 - If data is missing for a section, say so in one sentence.
+- When the short-term and long-term statuses differ, explain the difference in the key
+  messages and reflect it in the committee action.
 - For the objective and benchmark description, use the uploaded documents where they
   cover it; otherwise describe it in general terms from the fund facts.
 """

@@ -65,7 +65,7 @@ class FundAnalysis:
     attribution: pd.DataFrame | None = None
     sectors: pd.DataFrame | None = None
     charts: dict[str, str] = field(default_factory=dict)
-    status: tuple[str, str, str] | None = None
+    status: list[tuple[str, str, str, str]] = field(default_factory=list)
 
     @classmethod
     def build(cls, parsed: ParsedFiles, out_dir: Path) -> "FundAnalysis":
@@ -80,12 +80,15 @@ class FundAnalysis:
             a.charts["cumulative"] = cumulative_chart(a.nav, str(out_dir / "cumulative.png"))
             a.charts["growth"] = growth_chart(a.nav, str(out_dir / "growth.png"))
             a.charts["drawdown"] = drawdown_chart(a.nav, str(out_dir / "drawdown.png"))
-            a.status = status_rating(a.metrics.at["Excess return (annualised)", "Relative"])
+            # Short and long horizons side by side, as committees review both
+            if "1Y" in a.periods.columns:
+                a.status.append(status_rating(a.periods.at["Relative", "1Y"], "Last 1 year"))
+            a.status.append(status_rating(a.metrics.at["Excess return (annualised)", "Relative"], "Since start"))
         if parsed.attribution is not None:
             a.attribution = brinson_attribution(parsed.attribution)
             a.charts["attribution"] = attribution_chart(a.attribution, str(out_dir / "attribution.png"))
-            if a.status is None:
-                a.status = status_rating(a.attribution["Total"].iloc[-1])
+            if not a.status:
+                a.status.append(status_rating(a.attribution["Total"].iloc[-1], "Attribution period"))
 
         a.sectors = parsed.sectors
         if a.sectors is None and parsed.attribution is not None:
@@ -127,8 +130,8 @@ class FundAnalysis:
         parts = []
         if self.parsed.fund_facts:
             parts.append("### Fund facts\n\n" + "\n".join(f"- {f}: {v}" for f, v in self.parsed.fund_facts))
-        if self.status:
-            parts.append(f"Status (rule-based): {self.status[0]}. {self.status[2]}")
+        for horizon, label, _, why in self.status:
+            parts.append(f"Status (rule-based), {horizon}: {label}. {why}")
         if self.metrics is not None:
             parts.append(f"### Period: {self.period_label}")
             parts.append("### Returns by period\n\n" + period_returns_to_markdown(self.periods))
