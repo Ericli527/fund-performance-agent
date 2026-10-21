@@ -99,6 +99,24 @@ Weights can be in percent or decimals.
 If fund facts, holdings or exposures are missing, the Extractor Agent tries to read them from
 these documents (for example, an existing factsheet or KID).
 
+## Testing with a real fund
+
+`tools/fetch_nav.py` downloads monthly prices for a real fund and a benchmark from Yahoo Finance
+and saves a NAV CSV in the format above. Run it on your own computer:
+
+```bash
+pip install yfinance
+python tools/fetch_nav.py --fund GB00B907VX32 --benchmark "Vanguard FTSE UK Equity Income" --years 5
+```
+
+`--fund` and `--benchmark` take a Yahoo ticker, an ISIN or a name. The script prints what it
+matched, so check it found the right share class. Then upload `nav_real.csv` with the fund's
+latest factsheet PDF: the Extractor Agent reads the fund facts, holdings and exposures from it.
+
+Peer-group benchmarks (IA sectors) are not on Yahoo, so use an index tracker as a proxy and say
+so in the report. Attribution needs sector returns for the fund, which are rarely public, so
+real-fund reports usually skip that section.
+
 ## Metrics
 
 - Total and annualised return, annualised volatility, Sharpe ratio, max drawdown
