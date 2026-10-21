@@ -22,6 +22,8 @@ services:
         sync: false
       - key: EMAIL_APP_PASSWORD
         sync: false
+      - key: EMAIL_TO
+        sync: false
       - key: PUSHOVER_USER
         sync: false
       - key: PUSHOVER_TOKEN
