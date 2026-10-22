@@ -12,6 +12,8 @@ services:
       # Secrets: Render asks for these when you create the Blueprint; they never go in the repo
       - key: OPENAI_API_KEY
         sync: false
+      - key: EODHD_API_KEY
+        sync: false
       - key: APP_USERNAME
         sync: false
       - key: APP_PASSWORD

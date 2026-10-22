@@ -20,6 +20,7 @@ Based on the structure of [Deep-Research-Agent](https://github.com/ericli527/Dee
 ```
 Question + uploaded files (Gradio UI)
    │
+   ├─► market_data.py     (Python)  optional: downloads fund and benchmark prices from EODHD
    ├─► file_parser.py     (Python)  reads CSV / Excel / PDF / Word / text
    ├─► Extractor Agent    (LLM)     only if factsheet data is missing: reads it from documents
    ├─► calculator.py      (Python)  performance metrics + Brinson-Fachler attribution
@@ -101,6 +102,17 @@ these documents (for example, an existing factsheet or KID).
 
 ## Testing with a real fund
 
+### Option 1: download prices in the app (EODHD)
+
+Set `EODHD_API_KEY` (from [eodhd.com](https://eodhd.com)) in `.env` or in Render's Environment
+settings. Then type the fund's ISIN or ticker and a benchmark ticker in the app, for example
+`GB00B5L8VH15` and `IUKD.LSE`. The app downloads daily prices (dividends added back), takes
+month-ends and uses them as the NAV series. An uploaded NAV file takes priority. EODHD covers many
+UK unit trusts and OEICs that Yahoo does not; its free plan has a daily request limit and may
+only include about a year of history, so a paid plan is needed for 3-5 year reports.
+
+### Option 2: build a NAV file with the script
+
 `tools/fetch_nav.py` downloads monthly prices for a real fund and a benchmark from Yahoo Finance
 and saves a NAV CSV in the format above. Run it on your own computer:
 
@@ -148,7 +160,7 @@ Upload the files in `samples/` to try it.
 
 1. In the [Render dashboard](https://dashboard.render.com), choose **New > Blueprint** and pick this repo.
    Render reads `render.yaml` (free web service, `pip install -r requirements.txt`, `python app.py`).
-2. Fill in the secrets it asks for. `OPENAI_API_KEY` is required. Set `APP_USERNAME` and
+2. Fill in the secrets it asks for. `OPENAI_API_KEY` is required; `EODHD_API_KEY` enables price downloads. Set `APP_USERNAME` and
    `APP_PASSWORD` to put a login in front of the app. Email and Pushover are optional:
    `EMAIL_ADDRESS`, `EMAIL_SMTP_SERVER` and `EMAIL_APP_PASSWORD` are the sending account, and
    `EMAIL_TO` lists where reports go (blank sends them to the sending account).
