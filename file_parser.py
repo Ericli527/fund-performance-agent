@@ -38,6 +38,7 @@ FACTS_ALIASES = {"field": ["field", "item", "label", "key"], "value": ["value"]}
 class ParsedFiles:
     nav: pd.DataFrame | None = None
     attribution: pd.DataFrame | None = None
+    attribution_period: str = ""
     holdings: pd.DataFrame | None = None
     sectors: pd.DataFrame | None = None
     countries: pd.DataFrame | None = None
@@ -85,7 +86,11 @@ def _classify_table(df: pd.DataFrame, name: str, parsed: ParsedFiles) -> None:
         nav["date"] = pd.to_datetime(nav["date"])
         parsed.nav = nav.sort_values("date").dropna().reset_index(drop=True)
         parsed.notes.append(f"{name}: read as NAV series ({len(parsed.nav)} rows)")
-    elif (attr := _match_columns(df, ATTRIBUTION_ALIASES)) is not None:
+    elif (attr := _match_columns(df, ATTRIBUTION_ALIASES, {"period": ["period", "attribution_period"]})) is not None:
+        if "period" in attr.columns:
+            # An optional period column (e.g. "Q3 2026") says what time the effects cover
+            periods = attr.pop("period").dropna().astype(str).unique()
+            parsed.attribution_period = periods[0] if len(periods) else ""
         parsed.attribution = attr.dropna().reset_index(drop=True)
         parsed.notes.append(f"{name}: read as attribution data ({len(parsed.attribution)} segments)")
     elif (exp := _match_columns(df, EXPOSURE_ALIASES, WEIGHT_OPTIONAL)) is not None:

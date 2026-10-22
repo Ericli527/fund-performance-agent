@@ -84,6 +84,8 @@ Values are NAV, price or index levels (not returns). Daily, weekly, monthly or q
 | Information Technology | 28.0 | 24.0 | 14.2 | 12.5 |
 
 Use either percentages (weights sum to 100) or decimals (weights sum to 1) for all four columns.
+An optional `period` column (e.g. `Q3 2026`) says what time the attribution covers; without it the
+report says the period is not stated and the AI does not guess one.
 
 **Top holdings** (`security, fund_weight, benchmark_weight`). The benchmark column is optional.
 
@@ -174,9 +176,12 @@ Upload the files in `samples/` to try it.
 1. In the [Render dashboard](https://dashboard.render.com), choose **New > Blueprint** and pick this repo.
    Render reads `render.yaml` (free web service, `pip install -r requirements.txt`, `python app.py`).
 2. Fill in the secrets it asks for. `OPENAI_API_KEY` is required; `EODHD_API_KEY` enables price downloads. Set `APP_USERNAME` and
-   `APP_PASSWORD` to put a login in front of the app. Email and Pushover are optional:
-   `EMAIL_ADDRESS`, `EMAIL_SMTP_SERVER` and `EMAIL_APP_PASSWORD` are the sending account, and
-   `EMAIL_TO` lists where reports go (blank sends them to the sending account).
+   `APP_PASSWORD` to put a login in front of the app. Email and Pushover are optional.
+   For email on Render, use **Resend** (`RESEND_API_KEY`, `EMAIL_TO`, optionally `EMAIL_FROM`):
+   Render's free plan blocks the ports SMTP email uses, while Resend sends over HTTPS.
+   Resend's test sender only delivers to the email address you signed up to Resend with, so sign
+   up with the inbox you want reports in, or verify a domain to send anywhere.
+   SMTP (`EMAIL_ADDRESS`, `EMAIL_SMTP_SERVER`, `EMAIL_APP_PASSWORD`) is used when no Resend key is set.
 3. Click **Apply**. Every push to `main` then redeploys automatically.
 
 Keys live in Render's environment settings, never in the repo. The free plan sleeps after

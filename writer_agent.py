@@ -19,6 +19,11 @@ Rules:
 - If data is missing for a section, say so in one sentence.
 - When the short-term and long-term statuses differ, explain the difference in the key
   messages and reflect it in the committee action.
+- Attribution covers its own period, given with the attribution table. If the period is
+  "not stated in the data", do not call it long-term, recent or any other time frame, and do
+  not link it to the period returns; say "in the attribution period".
+- Risk figures come in two windows: the full period and the factsheet's 3-year window. Name the
+  window whenever you quote a risk figure, and use the full-period figures in the risk commentary.
 - For the objective and benchmark description, use the uploaded documents where they
   cover it; otherwise describe it in general terms from the fund facts.
 """
