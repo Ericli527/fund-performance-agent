@@ -6,8 +6,10 @@ load_dotenv(override=True)
 import os
 import gradio as gr
 from agent_manager import AgentManager
-from styles import CSS, JS, EXAMPLES, HEADER_HTML
+from pathlib import Path
+from styles import CSS, JS, DEMO_SCENARIOS, DEMO_NOTE, HEADER_HTML
 
+DEMO_DIR = Path(__file__).parent / "demo"
 FILE_TYPES = [".csv", ".xlsx", ".xls", ".pdf", ".docx", ".txt", ".md"]
 
 
@@ -46,8 +48,14 @@ with gr.Blocks(title="Fund Report Agent") as ui:
         benchmark_id = gr.Textbox(label="Benchmark ticker", placeholder="e.g. IUKD.LSE",
                                   info="An index fund or ETF to compare against")
 
-    gr.HTML('<div class="dr-examples-label">Try one</div>')
-    gr.Examples(examples=EXAMPLES, inputs=query_textbox, elem_id="dr-examples")
+    gr.HTML('<div class="dr-examples-label">Try a demo</div>')
+    gr.Examples(
+        examples=[[question, [str(DEMO_DIR / f) for f in demo_files]] for _, question, demo_files in DEMO_SCENARIOS],
+        example_labels=[label for label, _, _ in DEMO_SCENARIOS],
+        inputs=[query_textbox, files],
+        elem_id="dr-examples",
+    )
+    gr.HTML(f'<p class="dr-demo-note">{DEMO_NOTE}</p>')
 
     with gr.Column(visible=False) as results:
         summary = gr.Markdown(elem_id="dr-summary")

@@ -1,7 +1,23 @@
-EXAMPLES = [
-    "Analyse the fund's performance and attribution vs its benchmark over the period",
-    "Which sectors drove the fund's active return, and why?",
+# One-click demos: (button label, question, files under demo/). Expected results are in demo/TEST_GUIDE.md
+DEMO_SCENARIOS = [
+    ("Demo A · Full data + manager commentary",
+     "Analyse the Sample Global Equity Fund's performance and attribution against the MSCI World over the period, "
+     "and explain why it lagged over the last 12 months.",
+     ["test_A_full_data/nav_sample.csv", "test_A_full_data/attribution_sample.csv",
+      "test_A_full_data/holdings_sample.csv", "test_A_full_data/exposures_sample.csv",
+      "test_A_full_data/fund_facts_sample.csv", "test_A_full_data/manager_commentary_Q3_2026.docx"]),
+    ("Demo B · AI reads a factsheet PDF",
+     "Produce a factsheet and performance review for the Sample Global Equity Fund.",
+     ["test_B_ai_extraction/nav_sample.csv", "test_B_ai_extraction/attribution_sample.csv",
+      "test_B_ai_extraction/sample_factsheet_Sep2026.pdf"]),
+    ("Demo C · Attribution data only",
+     "Which sectors drove the fund's active return, and why?",
+     ["test_C_edge_cases/attribution_sample.csv"]),
 ]
+
+DEMO_NOTE = ("Demo data is fictional. Click a demo to load its question and files, then press Analyse. "
+             "Expected results: <a href=\"https://github.com/Ericli527/my-new-agent/blob/main/demo/TEST_GUIDE.md\" "
+             "target=\"_blank\">demo/TEST_GUIDE.md</a>")
 
 HEADER_HTML = """
 <div class="dr-brand">
@@ -189,7 +205,7 @@ body { background: var(--dr-bg, #fafaf7); }
     box-shadow: none !important;
 }
 
-#dr-examples label, #dr-examples .label-wrap, #dr-examples > div > .label-wrap {
+#dr-examples label, #dr-examples .label-wrap, #dr-examples > div > .label-wrap, #dr-examples > .label {
     display: none !important;
 }
 
@@ -341,6 +357,9 @@ body { background: var(--dr-bg, #fafaf7); }
     border-left: 6px solid var(--dr-amber) !important;
     background: var(--dr-surface) !important;
 }
+
+.dr-demo-note { font-size: 0.8rem; color: var(--dr-muted); margin: 0.6rem 0 0 0; }
+.dr-demo-note a { color: var(--dr-blue); }
 
 footer { display: none !important; }
 
