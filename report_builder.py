@@ -65,8 +65,9 @@ def _figure(analysis: FundAnalysis, key: str, number: int, caption: str) -> str:
     path = analysis.charts.get(key)
     if not path:
         return ""
-    return (f'<img src="{path}"/><p class="caption">Figure {number}: {caption} '
-            f'Source: uploaded data, agent calculations.</p>')
+    # A one-cell table cannot split across pages, so the chart and its caption stay together
+    return (f'<table cellspacing="0"><tr><td><img src="{path}"/><p class="caption">Figure {number}: {caption} '
+            f'Source: uploaded data, agent calculations.</p></td></tr></table>')
 
 
 # ---------- HTML (PDF) ----------
@@ -79,7 +80,7 @@ def _kpi_tiles(analysis: FundAnalysis, report: FundReport) -> str:
             ("FUND RETURN", fmt_pct(m.at["Total return", "Fund"]), "cumulative, full period"),
             ("BENCHMARK RETURN", fmt_pct(m.at["Total return", "Benchmark"]), escape(report.benchmark_name)),
             ("EXCESS RETURN P.A.", fmt_pct(m.at["Excess return (annualised)", "Relative"], signed=True), "fund minus benchmark"),
-            ("TRACKING ERROR", fmt_pct(m.at["Tracking error", "Relative"]), f"information ratio {m.at['Information ratio', 'Relative']:.2f}"),
+            ("TRACKING ERROR", fmt_pct(m.at["Tracking error", "Relative"]), f"full period, IR {m.at['Information ratio', 'Relative']:.2f}"),
             ("MAX DRAWDOWN", fmt_pct(m.at["Max drawdown", "Fund"]), f"benchmark {fmt_pct(m.at['Max drawdown', 'Benchmark'])}"),
         ]
     elif analysis.attribution is not None:
@@ -215,8 +216,10 @@ def build_html(report: FundReport, analysis: FundAnalysis, searches: list[str]) 
     if analysis.metrics is not None:
         body.append(_figure(analysis, "drawdown", fig, "Drawdown from previous peak."))
         fig += 1
-        body.append("<h3>Risk and return metrics</h3>" + _metrics_table(analysis.metrics))
+        body.append(f"<h3>Risk and return metrics (full period, {analysis.period_label})</h3>" + _metrics_table(analysis.metrics))
     body.append("<h2>3. Attribution</h2>" + _md(report.attribution_commentary))
+    if analysis.attribution is not None:
+        body.append(f'<p class="small">Attribution period: {escape(analysis.attribution_period)}.</p>')
     if analysis.attribution is not None:
         summary, full = _attribution_tables(analysis.attribution)
         body.append("<h3>Summary of effects</h3>" + summary)
@@ -262,10 +265,10 @@ def build_markdown(report: FundReport, analysis: FundAnalysis, searches: list[st
     parts.append(f"## 1. Performance\n\n{report.performance_commentary}")
     parts.append(f"## 2. Risk\n\n{report.risk_commentary}")
     if analysis.metrics is not None:
-        parts.append(metrics_to_markdown(analysis.metrics))
+        parts.append(f"**Risk and return (full period, {analysis.period_label})**\n\n" + metrics_to_markdown(analysis.metrics))
     parts.append(f"## 3. Attribution\n\n{report.attribution_commentary}")
     if analysis.attribution is not None:
-        parts.append(attribution_to_markdown(analysis.attribution))
+        parts.append(f"*Attribution period: {analysis.attribution_period}.*\n\n" + attribution_to_markdown(analysis.attribution))
     parts.append(f"## 4. Market context\n\n{report.market_context}")
     parts.append("## 5. Outlook and risks to monitor\n\n" + "\n".join(f"- {r}" for r in report.outlook_and_risks))
     parts.append("## Sources\n\n" + "\n".join(f"- {s}" for s in searches))

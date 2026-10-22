@@ -26,13 +26,13 @@ You can also upload the files from the `demo/` folders yourself. One run takes a
 - [ ] **No** "extracting from documents" step (all factsheet data came from the CSVs)
 - [ ] "Running **5** searches" (or fewer), then PDF created, then email and push lines
 
-### Expected: PDF, 6 pages
+### Expected: PDF, 6-7 pages (longer AI text can add a page)
 | Page | Check |
 |---|---|
 | 1 | Header "Sample Global Equity Fund", fund facts incl. **Fund size GBP 412.6m**, risk indicator **6** with the note "Estimated from up to 5 years of fund volatility" |
 | 2 | Top holding **Northwind Semiconductors 6.2**, top 10 total **30.8**, sector source "attribution data", country **United States 68.5** |
 | 3 | Executive summary with two badges: **Last 1 year: UNDER REVIEW** and **Since start: ON TRACK** |
-| 4-6 | Performance, risk, attribution, market context, outlook, appendix with glossary |
+| 4 onwards | Performance, risk, attribution, market context, outlook, appendix with glossary. Each chart keeps its caption on the same page |
 
 ### Expected: key figures (all must match)
 | Figure | Fund | Benchmark | Relative |
@@ -46,6 +46,10 @@ You can also upload the files from the `demo/` folders yourself. One run takes a
 | Since start p.a. | 9.89% | 9.09% | **+0.79%** |
 | Max drawdown | -38.19% | -35.79% | |
 | Tracking error / information ratio (full period, page 3 tile) | | | 2.72% / 0.29 |
+| Volatility / Sharpe / beta (full period, "Risk and return metrics" table) | 18.48% / 0.54 / 1.03 | 17.68% / 0.51 | |
+
+The factsheet's risk measures (page 2) cover **3 years**, so they differ from the full-period table on
+purpose. The AI text should name the window when it quotes a risk figure.
 
 **Calendar years (%), page 1:** 2020 -4.2 / -3.6 · 2021 -16.8 / -15.1 · 2022 12.9 / 12.0 · 2023 0.6 / 0.9 · 2024 19.8 / 15.5 · 2025 39.4 / 36.5 (fund / benchmark)
 
@@ -61,9 +65,14 @@ The commentary (Word file) says these things. At least some should appear in the
 - [ ] **Litware Bank** / stock selection in financials held back returns
 - [ ] Outlook is **cautious** (technology valuations, AI spending, concentration in technology)
 
+### Expected: no time frame invented for attribution
+The attribution file has no period, so the report shows "Attribution period: not stated in the data".
+- [ ] The AI does **not** call the attribution effects long-term or recent
+
 ### Expected: delivery
-- [ ] Email arrives at your `EMAIL_TO` address, **from** your own mailbox, with the PDF attached (check spam the first time)
+- [ ] Email arrives at your `EMAIL_TO` address with the PDF attached (check spam the first time)
 - [ ] Pushover shows the short summary
+- [ ] If email fails, the status list says why in one line, the Notify Agent does **not** retry, and the run still finishes quickly
 
 ---
 

@@ -135,12 +135,14 @@ class FundAnalysis:
         if self.metrics is not None:
             parts.append(f"### Period: {self.period_label}")
             parts.append("### Returns by period\n\n" + period_returns_to_markdown(self.periods))
-            parts.append("### Risk and return\n\n" + metrics_to_markdown(self.metrics))
+            parts.append(f"### Risk and return (full period, {self.period_label})\n\n" + metrics_to_markdown(self.metrics))
+            parts.append(f"### Risk measures over {self.risk_window} (shown on the factsheet)\n\n" + self.risk_markdown())
             parts.append("### 12-month periods\n\n" + period_returns_to_markdown(self.rolling))
             if not self.calendar.empty:
                 parts.append("### Calendar years\n\n" + period_returns_to_markdown(self.calendar))
         if self.attribution is not None:
-            parts.append("### Attribution (Brinson-Fachler)\n\n" + attribution_to_markdown(self.attribution))
+            parts.append(f"### Attribution (Brinson-Fachler), period: {self.attribution_period}\n\n"
+                         + attribution_to_markdown(self.attribution))
             top, bottom = top_and_bottom(self.attribution)
             parts.append("Top contributors: " + ", ".join(f"{r.Segment} ({fmt_pct(r.Total, True)})" for r in top.itertuples()))
             parts.append("Top detractors: " + ", ".join(f"{r.Segment} ({fmt_pct(r.Total, True)})" for r in bottom.itertuples()))
@@ -150,6 +152,18 @@ class FundAnalysis:
                 parts.append(f"### {title} (fund weight, relative to benchmark)\n\n" + "\n".join(
                     f"- {r.name}: {fmt_pct(r.fund_weight)} ({fmt_pct(r.relative, True)})" for r in df.head(10).itertuples()))
         return "\n\n".join(parts) or "No fund data was uploaded."
+
+    @property
+    def attribution_period(self) -> str:
+        return self.parsed.attribution_period or "not stated in the data"
+
+    def risk_markdown(self) -> str:
+        lines = ["| Measure | Fund | Benchmark |", "|---|---|---|"]
+        for name, r in self.risk.iterrows():
+            fmt = (lambda v: fmt_pct(v)) if "(%)" in name else (lambda v: f"{v:.2f}")
+            cells = [("n/a" if pd.isna(v) else fmt(v)) for v in (r.Fund, r.Benchmark)]
+            lines.append(f"| {name.replace(' (%)', '')} | {cells[0]} | {cells[1]} |")
+        return "\n".join(lines)
 
     def documents_text(self) -> str:
         return "\n\n".join(f"--- {name} ---\n{text}" for name, text in self.parsed.documents) or "None"
