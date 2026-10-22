@@ -100,6 +100,19 @@ Weights can be in percent or decimals.
 If fund facts, holdings or exposures are missing, the Extractor Agent tries to read them from
 these documents (for example, an existing factsheet or KID).
 
+## One-click demos
+
+Under the upload box, **Try a demo** has three buttons that load a question and fictional files
+from `demo/`:
+
+| Demo | Files | Shows |
+|---|---|---|
+| A · Full data + manager commentary | NAV, attribution, holdings, exposures, fund facts, a Word commentary | The full factsheet and review, with the AI using the manager's commentary |
+| B · AI reads a factsheet PDF | NAV, attribution, a factsheet PDF | The Extractor Agent filling gaps from a PDF, with "please verify" labels |
+| C · Attribution data only | Attribution | A report built from partial data |
+
+`demo/TEST_GUIDE.md` lists the exact figures each demo should produce and what to check.
+
 ## Testing with a real fund
 
 ### Option 1: download prices in the app (EODHD)
