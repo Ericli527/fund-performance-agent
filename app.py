@@ -11,12 +11,12 @@ from styles import CSS, JS, EXAMPLES, HEADER_HTML
 FILE_TYPES = [".csv", ".xlsx", ".xls", ".pdf", ".docx", ".txt", ".md"]
 
 
-async def run(query: str, files: list[str] | None):
+async def run(query: str, files: list[str] | None, fund_id: str, benchmark_id: str):
     if not query.strip():
         yield "Please describe what you want analysed.", "", None, [], gr.update(visible=False)
         return
     try:
-        async for report_md, summary_md, pdf_path, chart_paths in AgentManager().run(query, files):
+        async for report_md, summary_md, pdf_path, chart_paths in AgentManager().run(query, files, fund_id, benchmark_id):
             # Results stay hidden until the PDF is ready
             yield report_md, summary_md, pdf_path, chart_paths, gr.update(visible=pdf_path is not None)
     except Exception as e:
@@ -40,6 +40,12 @@ with gr.Blocks(title="Fund Report Agent") as ui:
     files = gr.File(label="Fund data and documents (CSV, Excel, PDF, Word, text)",
                     file_count="multiple", file_types=FILE_TYPES, type="filepath", elem_id="dr-files")
 
+    with gr.Row():
+        fund_id = gr.Textbox(label="Fund ISIN or ticker (optional)", placeholder="e.g. GB00B5L8VH15",
+                             info="Downloads prices from EODHD instead of uploading a NAV file")
+        benchmark_id = gr.Textbox(label="Benchmark ticker", placeholder="e.g. IUKD.LSE",
+                                  info="An index fund or ETF to compare against")
+
     gr.HTML('<div class="dr-examples-label">Try one</div>')
     gr.Examples(examples=EXAMPLES, inputs=query_textbox, elem_id="dr-examples")
 
@@ -49,7 +55,7 @@ with gr.Blocks(title="Fund Report Agent") as ui:
         charts = gr.Gallery(label="Charts", columns=3, height="auto", object_fit="contain")
     report = gr.Markdown(elem_id="dr-report")
 
-    inputs = [query_textbox, files]
+    inputs = [query_textbox, files, fund_id, benchmark_id]
     outputs = [report, summary, pdf_file, charts, results]
     run_button.click(run, inputs=inputs, outputs=outputs)
     query_textbox.submit(run, inputs=inputs, outputs=outputs)

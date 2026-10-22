@@ -1,8 +1,10 @@
 from pathlib import Path
 import asyncio
+import pandas as pd
 import tempfile
 from agents import Runner, trace, gen_trace_id
 from file_parser import parse_files
+from market_data import fetch_nav, MarketDataError
 from analysis import FundAnalysis, merge_extract, missing_factsheet_data
 from extractor_agent import extractor_agent, FactsheetExtract
 from report_builder import build_html, build_markdown
@@ -15,7 +17,7 @@ from notify_agent import notify_agent, NotifyContext
 
 class AgentManager:
 
-    async def run(self, query: str, files: list[str] | None):
+    async def run(self, query: str, files: list[str] | None, fund_id: str = "", benchmark_id: str = ""):
         """ Run the fund report workflow, yielding (report, summary, pdf, charts) updates """
         status: list[str] = []
 
@@ -31,6 +33,9 @@ class AgentManager:
             parsed = parse_files(files)
             for note in parsed.notes:
                 yield update(note)
+            if fund_id.strip():
+                # Network calls run in a thread so the app stays responsive for other users
+                yield update(await asyncio.to_thread(self.add_prices, parsed, fund_id, benchmark_id))
             if parsed.documents and missing_factsheet_data(parsed):
                 yield update("Some factsheet data is missing, extracting it from the documents...")
                 notes_before = len(parsed.notes)
@@ -54,6 +59,23 @@ class AgentManager:
             notify_result = await self.notify(report, report_md, pdf_path)
             yield update(notify_result)
             yield report_md, f"**{report.title}**\n\n{report.short_summary}", pdf_path, [analysis.charts[k] for k in ("growth", "drawdown", "attribution") if k in analysis.charts]
+
+    @staticmethod
+    def add_prices(parsed, fund_id: str, benchmark_id: str) -> str:
+        """ Download NAV history unless the user uploaded their own; problems become status notes """
+        if parsed.nav is not None:
+            return "NAV file uploaded, so prices were not downloaded."
+        if not benchmark_id.strip():
+            return "Price download skipped: add a benchmark ticker as well as the fund."
+        try:
+            nav, note = fetch_nav(fund_id, benchmark_id)
+        except MarketDataError as e:
+            return f"Price download failed: {e}"
+        nav["date"] = pd.to_datetime(nav["date"])
+        parsed.nav = nav
+        parsed.sources["nav"] = note
+        parsed.notes.append(note)
+        return note
 
     async def extract(self, documents: list[tuple[str, str]]) -> FactsheetExtract:
         """ Read fund facts, holdings and exposures from documents when no CSV was given """

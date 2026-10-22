@@ -20,6 +20,7 @@ Based on the structure of [Deep-Research-Agent](https://github.com/ericli527/Dee
 ```
 Question + uploaded files (Gradio UI)
    │
+   ├─► market_data.py     (Python)  optional: downloads fund and benchmark prices from EODHD
    ├─► file_parser.py     (Python)  reads CSV / Excel / PDF / Word / text
    ├─► Extractor Agent    (LLM)     only if factsheet data is missing: reads it from documents
    ├─► calculator.py      (Python)  performance metrics + Brinson-Fachler attribution
@@ -99,6 +100,45 @@ Weights can be in percent or decimals.
 If fund facts, holdings or exposures are missing, the Extractor Agent tries to read them from
 these documents (for example, an existing factsheet or KID).
 
+## Testing with a real fund
+
+### Option 1: download prices in the app (EODHD)
+
+Set `EODHD_API_KEY` (from [eodhd.com](https://eodhd.com)) in `.env` or in Render's Environment
+settings. Then type the fund's ISIN or ticker and a benchmark ticker in the app, for example
+`GB00B5L8VH15` and `IUKD.LSE`. The app downloads daily prices (dividends added back), takes
+month-ends and uses them as the NAV series. An uploaded NAV file takes priority. EODHD covers many
+UK unit trusts and OEICs that Yahoo does not; its free plan has a daily request limit and may
+only include about a year of history, so a paid plan is needed for 3-5 year reports.
+
+### Option 2: build a NAV file with the script
+
+`tools/fetch_nav.py` downloads monthly prices for a real fund and a benchmark from Yahoo Finance
+and saves a NAV CSV in the format above. Run it on your own computer:
+
+```bash
+pip install yfinance
+python tools/fetch_nav.py --search "Marlborough Multi Cap Income"   # find the ticker
+python tools/fetch_nav.py --fund "Marlborough Multi Cap Income" --benchmark "Vanguard FTSE UK Equity Income" --years 5
+```
+
+`--fund` and `--benchmark` take a Yahoo ticker, a name or an ISIN (Yahoo often cannot find UK
+funds by ISIN, so names or tickers work better). The script prints what it
+matched, so check it found the right share class. Then upload `nav_real.csv` with the fund's
+latest factsheet PDF: the Extractor Agent reads the fund facts, holdings and exposures from it.
+
+If Yahoo does not have the fund (common for UK unit trusts and OEICs), save its price history
+as a CSV with a date column and a price column, for example from the historical prices table on
+markets.ft.com, and pass it with `--fund-csv` instead of `--fund`:
+
+```bash
+python tools/fetch_nav.py --fund-csv fund_prices.csv --benchmark IUKD.L --years 5
+```
+
+Peer-group benchmarks (IA sectors) are not on Yahoo, so use an index tracker as a proxy and say
+so in the report. Attribution needs sector returns for the fund, which are rarely public, so
+real-fund reports usually skip that section.
+
 ## Metrics
 
 - Total and annualised return, annualised volatility, Sharpe ratio, max drawdown
@@ -120,7 +160,7 @@ Upload the files in `samples/` to try it.
 
 1. In the [Render dashboard](https://dashboard.render.com), choose **New > Blueprint** and pick this repo.
    Render reads `render.yaml` (free web service, `pip install -r requirements.txt`, `python app.py`).
-2. Fill in the secrets it asks for. `OPENAI_API_KEY` is required. Set `APP_USERNAME` and
+2. Fill in the secrets it asks for. `OPENAI_API_KEY` is required; `EODHD_API_KEY` enables price downloads. Set `APP_USERNAME` and
    `APP_PASSWORD` to put a login in front of the app. Email and Pushover are optional:
    `EMAIL_ADDRESS`, `EMAIL_SMTP_SERVER` and `EMAIL_APP_PASSWORD` are the sending account, and
    `EMAIL_TO` lists where reports go (blank sends them to the sending account).

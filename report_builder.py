@@ -232,6 +232,7 @@ def build_html(report: FundReport, analysis: FundAnalysis, searches: list[str]) 
     body.append("<h3>Glossary</h3>" + _glossary())
     ai_sources = sorted({v for v in analysis.parsed.sources.values() if "AI-extracted" in v})
     body.append("<h3>Data sources</h3>" + _bullets([f"Uploaded: {f}" for f in files]
+                                                   + ([analysis.parsed.sources["nav"]] if "EODHD" in analysis.parsed.sources.get("nav", "") else [])
                                                    + [f"Some factsheet data was {s}" for s in ai_sources] or ["No files uploaded"])
                 + "<h3>Web searches</h3>" + _bullets(searches or ["None"]))
     body.append(f'<p class="small">{DISCLAIMER}</p>')
