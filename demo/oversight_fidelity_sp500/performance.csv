@@ -1,0 +1,13 @@
+period,fund,benchmark,peer,as_of,source
+3M,2.2,2.2,,30 Sep 2026,"Fund and index: Fidelity factsheet (Singapore), P USD Acc, NAV to NAV in USD, 30 Sep 2026"
+6M,17.6,17.7,,,
+YTD,12.3,12.5,,,
+1Y,15.3,15.3,15.48,,"Peer: State Street SPDR S&P 500 UCITS ETF (Dist), NAV in USD, ssga.com, 30 Sep 2026 - check the factsheet"
+3Y p.a.,22.4,22.4,22.58,,
+5Y p.a.,13.3,13.3,13.48,,
+Since launch p.a.,14.1,14.2,,,
+2021,28.1,28.2,,,
+2022,-18.5,-18.5,,,
+2023,25.7,25.7,,,
+2024,24.5,24.5,,,
+2025,17.4,17.4,,,

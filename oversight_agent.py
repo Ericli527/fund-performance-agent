@@ -17,6 +17,10 @@ Rules:
 - Only describe the fund's own positioning if the documents say it; market commentary is market context.
 - If attribution data is given, use it to explain why the fund beat or lagged its benchmark, naming its period.
 - If something could not be assessed, say what data would be needed.
+- "Official figures" are the fund manager's reported returns after fees; say so when you use them.
+- A "Check data" rating means the figures from downloaded prices look unreliable. Say the data must be
+  checked against the fund's factsheet before any conclusion; do not treat it as poor performance.
+- Quote fees exactly as given for the fund and the peer.
 """
 
 

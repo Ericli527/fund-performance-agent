@@ -1,9 +1,10 @@
 # One-click demos: (button label, question, files under demo/, fund ISIN or ticker, benchmark ticker).
-# D and E use real funds and need EODHD_API_KEY; F uses fictional data from files only, so it always works.
+# D uses a real fund's official factsheet figures; E downloads prices and needs EODHD_API_KEY; F is fictional.
 DEMO_SCENARIOS = [
-    ("Demo D · Fidelity S&P 500 (index fund)",
+    ("Demo D · Fidelity S&P 500 (index fund, official figures)",
      "Prepare an oversight review: is this index fund meeting its mandate, and is its fee justified against a cheaper peer?",
-     ["oversight_fidelity_sp500/fund_facts.csv", "oversight_fidelity_sp500/peer.csv"], "IE00BYX5MX67", "SXR8.XETRA"),
+     ["oversight_fidelity_sp500/fund_facts.csv", "oversight_fidelity_sp500/performance.csv",
+      "oversight_fidelity_sp500/peer.csv"], "", ""),
     ("Demo E · Marlborough 8 (active fund)",
      "Prepare an oversight review: is this active multi-asset fund delivering value for its fee compared with a low-cost alternative?",
      ["oversight_marlborough8/fund_facts.csv", "oversight_marlborough8/peer.csv"], "GB00B84KX912", "VWRL.LSE"),
@@ -15,8 +16,8 @@ DEMO_SCENARIOS = [
       "oversight_sample_fund/manager_commentary_Q3_2026.docx"], "", ""),
 ]
 
-DEMO_NOTE = ("D and E use real funds and need an EODHD key for prices. F uses fictional data from files only, so it works "
-             "without any data subscription. Click a demo, then press Analyse. Expected results: "
+DEMO_NOTE = ("D uses the Fidelity fund's official factsheet figures. E downloads prices and needs an EODHD key. F uses "
+             "fictional data. Click a demo, then press Analyse. Expected results: "
              "<a href=\"https://github.com/Ericli527/my-new-agent/blob/main/demo/TEST_GUIDE.md\" "
              "target=\"_blank\">demo/TEST_GUIDE.md</a>")
 

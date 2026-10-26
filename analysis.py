@@ -1,10 +1,10 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 import pandas as pd
-from file_parser import ParsedFiles, weights_table
+from file_parser import ParsedFiles, weights_table, performance_table
 from calculator import (performance_metrics, brinson_attribution, period_returns, top_and_bottom,
                         metrics_to_markdown, attribution_to_markdown, period_returns_to_markdown, fmt_pct)
-from charts import growth_chart, attribution_chart
+from charts import growth_chart, attribution_chart, calendar_chart
 from extractor_agent import FactsheetExtract
 
 AI_SOURCE = "AI-extracted from {docs}, please verify"
@@ -17,6 +17,15 @@ def merge_extract(parsed: ParsedFiles, extract: FactsheetExtract, doc_names: lis
         parsed.fund_facts = [(f.field, f.value) for f in extract.fund_facts]
         parsed.sources["fund_facts"] = source
         parsed.notes.append(f"Fund facts: {len(parsed.fund_facts)} items {source}")
+    if parsed.performance is None and parsed.nav is None and extract.performance:
+        df = performance_table(pd.DataFrame([i.model_dump() for i in extract.performance]))
+        if df.empty or df.abs().max().max() > 10:  # a return above 1,000% is a misread
+            parsed.notes.append("Performance: extracted figures failed checks, not used")
+        else:
+            parsed.performance = df
+            parsed.performance_as_of = extract.performance_as_of
+            parsed.sources["performance"] = source
+            parsed.notes.append(f"Performance: {len(df)} periods {source}")
     for attr in ("holdings", "sectors", "countries"):
         items = getattr(extract, attr)
         if getattr(parsed, attr) is not None or not items:
@@ -50,6 +59,8 @@ class FundAnalysis:
     nav: pd.DataFrame | None = None
     metrics: pd.DataFrame | None = None
     periods: pd.DataFrame | None = None
+    calendar: pd.DataFrame | None = None
+    official: bool = False
     attribution: pd.DataFrame | None = None
     sectors: pd.DataFrame | None = None
     charts: dict[str, str] = field(default_factory=dict)
@@ -62,6 +73,16 @@ class FundAnalysis:
             a.metrics = performance_metrics(a.nav)
             a.periods = period_returns(a.nav)
             a.charts["growth"] = growth_chart(a.nav, str(out_dir / "growth.png"))
+        if parsed.performance is not None:
+            # The fund manager's reported figures take priority over returns calculated from downloaded prices
+            perf = parsed.performance
+            is_year = perf.index.str.fullmatch(r"\d{4}")
+            if (~is_year).any():
+                a.periods = cls._rows(perf[~is_year])
+                a.official = True
+            if is_year.any():
+                a.calendar = cls._rows(perf[is_year].sort_index())
+                a.charts["calendar"] = calendar_chart(a.calendar, str(out_dir / "calendar.png"))
         if parsed.attribution is not None:
             a.attribution = brinson_attribution(parsed.attribution)
             a.charts["attribution"] = attribution_chart(a.attribution, str(out_dir / "attribution.png"))
@@ -73,6 +94,28 @@ class FundAnalysis:
         if a.sectors is not None:
             a.sectors = _sort_weights(a.sectors)
         return a
+
+    @staticmethod
+    def _rows(perf: pd.DataFrame) -> pd.DataFrame:
+        """ Periods as columns with Fund, Benchmark and Relative rows, the same shape as calculated returns """
+        df = perf[["fund", "benchmark"]].T.rename(index={"fund": "Fund", "benchmark": "Benchmark"})
+        df.loc["Relative"] = df.loc["Fund"] - df.loc["Benchmark"]
+        df.columns.name = None
+        return df
+
+    @property
+    def as_of(self) -> str:
+        """ Date the data runs to """
+        if self.official and self.parsed.performance_as_of:
+            return self.parsed.performance_as_of
+        return f"{self.nav['date'].iloc[-1]:%d %b %Y}" if self.nav is not None else ""
+
+    @property
+    def data_label(self) -> str:
+        """ What the performance figures are, for the report header """
+        if self.official:
+            return f"Official figures to {self.as_of}" if self.as_of else "Official figures"
+        return self.period_label
 
     def fact(self, name: str) -> str | None:
         """ Look up a fund fact by name, ignoring case """
@@ -93,9 +136,15 @@ class FundAnalysis:
         parts = []
         if self.parsed.fund_facts:
             parts.append("### Fund facts\n\n" + "\n".join(f"- {f}: {v}" for f, v in self.parsed.fund_facts))
+        if self.official:
+            parts.append(f"### Official returns reported by the fund manager ({self.data_label}; "
+                         "periods over 1 year are a year)\n\n" + period_returns_to_markdown(self.periods))
+            if self.calendar is not None:
+                parts.append("### Calendar-year returns (official)\n\n" + period_returns_to_markdown(self.calendar))
         if self.metrics is not None:
-            parts.append(f"### Period: {self.period_label}")
-            parts.append("### Returns by period\n\n" + period_returns_to_markdown(self.periods))
+            parts.append(f"### Period of downloaded or uploaded prices: {self.period_label}")
+            if not self.official:
+                parts.append("### Returns by period\n\n" + period_returns_to_markdown(self.periods))
             parts.append(f"### Risk and return (full period, {self.period_label})\n\n" + metrics_to_markdown(self.metrics))
         if self.attribution is not None:
             parts.append(f"### Attribution (Brinson-Fachler), period: {self.attribution_period}\n\n"

@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
+import re
 import pandas as pd
 from pypdf import PdfReader
 from docx import Document
@@ -33,6 +34,12 @@ HOLDINGS_ALIASES = {
 }
 FACTS_ALIASES = {"field": ["field", "item", "label", "key"], "value": ["value"]}
 PEER_ALIASES = {"name": ["peer", "peer_name", "name"], "ticker": ["ticker", "symbol", "isin"]}
+PERFORMANCE_ALIASES = {
+    "period": ["period", "horizon"],
+    "fund": ["fund"],
+    "benchmark": ["benchmark", "index"],
+}
+PERFORMANCE_OPTIONAL = {"peer": ["peer", "peer_return"], "as_of": ["as_of", "as_of_date"], "source": ["source"]}
 
 
 @dataclass
@@ -44,6 +51,8 @@ class ParsedFiles:
     sectors: pd.DataFrame | None = None
     countries: pd.DataFrame | None = None
     peers: pd.DataFrame | None = None
+    performance: pd.DataFrame | None = None
+    performance_as_of: str = ""
     fund_facts: list[tuple[str, str]] = field(default_factory=list)
     documents: list[tuple[str, str]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -67,6 +76,36 @@ def _match_columns(df: pd.DataFrame, aliases: dict[str, list[str]],
     return df[list(mapping)].rename(columns=mapping)
 
 
+def period_key(label: str) -> str:
+    """ Standard names for factsheet periods, e.g. '1yr (cum)' -> '1Y', '5 years' -> '5Y p.a.', '2025' -> '2025' """
+    text = str(label).strip().lower().replace(" ", "")
+    if re.fullmatch(r"(19|20)\d\d", text):
+        return text
+    if "ytd" in text or "yeartodate" in text:
+        return "YTD"
+    if "since" in text or "launch" in text or "inception" in text:
+        return "Since launch p.a."
+    for months, key in ((r"(3m|3month)", "3M"), (r"(6m|6month)", "6M")):
+        if re.match(months, text):
+            return key
+    if match := re.match(r"(\d+)(y|yr|year)", text):
+        years = int(match.group(1))
+        return "1Y" if years == 1 else f"{years}Y p.a."
+    if re.match(r"12m", text):
+        return "1Y"
+    return str(label).strip()
+
+
+def performance_table(df: pd.DataFrame) -> pd.DataFrame:
+    """ Reported returns by period, as decimals, indexed by standard period names """
+    df = df.copy()
+    df["period"] = df["period"].map(period_key)
+    cols = [c for c in ("fund", "benchmark", "peer") if c in df.columns]
+    for col in cols:
+        df[col] = pd.to_numeric(df[col].astype(str).str.rstrip("%"), errors="coerce") / 100
+    return df.dropna(subset=["fund", "benchmark"]).set_index("period")[cols]
+
+
 def weights_table(df: pd.DataFrame) -> pd.DataFrame:
     """ Clean a name/weight table: weights as decimals, benchmark column always present """
     df = df.copy()
@@ -84,7 +123,17 @@ def weights_table(df: pd.DataFrame) -> pd.DataFrame:
 
 def _classify_table(df: pd.DataFrame, name: str, parsed: ParsedFiles) -> None:
     """ Decide what kind of table this is, checking the most specific formats first """
-    if (nav := _match_columns(df, NAV_ALIASES, {"peer": ["peer", "peer_nav", "peer_price"]})) is not None:
+    if (perf := _match_columns(df, PERFORMANCE_ALIASES, PERFORMANCE_OPTIONAL)) is not None:
+        # Official returns reported by the fund manager, in percent. Checked first, as the as_of column looks like a NAV date
+        if "as_of" in perf.columns:
+            dates = perf.pop("as_of").dropna().astype(str).unique()
+            parsed.performance_as_of = dates[0] if len(dates) else ""
+        sources = perf.pop("source").dropna().astype(str).unique() if "source" in perf.columns else []
+        parsed.performance = performance_table(perf)
+        parsed.sources["performance"] = f"{name}: " + "; ".join(sources) if len(sources) else name
+        extra = " with peer returns" if "peer" in parsed.performance.columns else ""
+        parsed.notes.append(f"{name}: read as official performance{extra} ({len(parsed.performance)} periods)")
+    elif (nav := _match_columns(df, NAV_ALIASES, {"peer": ["peer", "peer_nav", "peer_price"]})) is not None:
         # An optional peer column lets the peer comparison run from the file, without downloading prices
         nav["date"] = pd.to_datetime(nav["date"])
         parsed.nav = nav.sort_values("date").dropna(subset=["fund", "benchmark"]).reset_index(drop=True)

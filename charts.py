@@ -47,3 +47,21 @@ def attribution_chart(attribution: pd.DataFrame, path: str) -> str:
     return path
 
 
+def calendar_chart(calendar: pd.DataFrame, path: str) -> str:
+    """ Calendar-year returns, fund vs benchmark """
+    years = list(calendar.columns)
+    x = np.arange(len(years))
+    fig, ax = plt.subplots(figsize=(8, 2.8), dpi=150)
+    for offset, row, colour in ((-0.2, "Fund", FUND_COLOUR), (0.2, "Benchmark", BENCHMARK_COLOUR)):
+        ax.bar(x + offset, calendar.loc[row] * 100, width=0.4, label=row, color=colour)
+    ax.set_xticks(x, years)
+    ax.axhline(0, color="black", linewidth=0.8)
+    ax.set_ylabel("Return (%)")
+    ax.set_title("Calendar-year returns", loc="left", fontweight="bold")
+    ax.legend(frameon=False, fontsize=8)
+    ax.grid(axis="y", alpha=0.3)
+    ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+    return path

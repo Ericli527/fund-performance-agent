@@ -1,10 +1,15 @@
 field,value
-Fund name,Fidelity S&P 500 Index Fund P-ACC-EUR
-ISIN,IE00BYX5MX67
+Fund name,Fidelity S&P 500 Index Fund P USD Acc
+ISIN,IE00BYX5MS15
 Benchmark,S&P 500 Index (Net)
-Management approach,Passive (physical replication)
-Share class currency,EUR
-Ongoing charges,0.06%
-Objective,"To provide a total return, from capital and income, that reflects the return of the S&P 500 Index before fees and expenses."
-Fund size,"USD 2,405.2m"
-Source,Fund factsheet 30.09.2026
+Management approach,Passive (index fund)
+Base currency,USD
+Share class launch,20 Mar 2018
+Annual management fee,0.06%
+Fund size,"US$2,732m"
+Number of positions,501
+Objective,"To provide investors with a total return, taking into account both capital and income returns, which reflects, before fees and expenses, the return of the S&P 500 Index."
+Annualised volatility (3 years),Fund 12.42% vs index 12.41%
+Beta (3 years),1.00
+Sharpe ratio (3 years),Fund 1.42 vs index 1.43
+Source,"Fidelity factsheet (Singapore), 30 Sep 2026"

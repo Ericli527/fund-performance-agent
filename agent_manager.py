@@ -40,13 +40,15 @@ class AgentManager:
             if fund_id.strip():
                 # Network calls run in a thread so the app stays responsive for other users
                 yield update(await asyncio.to_thread(self.add_prices, parsed, fund_id, benchmark_id))
-            if parsed.documents and not parsed.fund_facts:
-                yield update("No fund facts file, so the Extractor Agent is reading them from the documents...")
+            if parsed.documents and (not parsed.fund_facts or (parsed.performance is None and parsed.nav is None)):
+                yield update("Extractor Agent is reading fund facts and reported performance from the documents...")
                 notes_before = len(parsed.notes)
                 merge_extract(parsed, await self.extract(parsed.documents), [n for n, _ in parsed.documents])
                 for note in parsed.notes[notes_before:]:
                     yield update(note)
             analysis = FundAnalysis.build(parsed, out_dir)
+            if analysis.official:
+                yield update(f"Using the fund manager's official performance figures ({analysis.data_label}).")
 
             # 2. What the fund promised
             yield update("Mandate Agent is reading what the fund promises...")
@@ -59,6 +61,8 @@ class AgentManager:
             yield update(note)
             fund_name = analysis.fact("fund name") or "The Fund"
             benchmark = analysis.fact("benchmark") or benchmark_id or "Benchmark"
+            if "nav" in parsed.sources and benchmark_id.strip() and not analysis.official:
+                benchmark += f" (prices: stand-in {benchmark_id.strip()})"
             result = assess(analysis, mandate.fund_type, fund_name, peer, peer_levels)
             yield update("Scorecard (rules in code): " + ", ".join(f"{p.name} {p.rating}" for p in result.pillars)
                          + f". Draft verdict: {result.verdict}.")
@@ -79,7 +83,7 @@ class AgentManager:
                                  str(out_dir / self.pdf_name(fund_name, analysis)))
             yield update("PDF created, sending email and push notification...")
             yield update(await self.notify(report.short_summary, report_md, pdf_path))
-            charts = [analysis.charts[k] for k in ("growth", "attribution") if k in analysis.charts]
+            charts = [analysis.charts[k] for k in ("growth", "calendar", "attribution") if k in analysis.charts]
             yield report_md, f"**{report.title}**\n\n{report.short_summary}", pdf_path, charts
 
     @staticmethod
@@ -118,8 +122,11 @@ class AgentManager:
             return None, None, "No peer file uploaded, so value and fees cannot be compared."
         row = peers.iloc[0]
         peer = {"name": str(row["name"]), "ocf": None if pd.isna(row["ocf"]) else parse_percent(row["ocf"])}
+        perf = analysis.parsed.performance
+        if perf is not None and "peer" in perf.columns and perf["peer"].notna().any():
+            return peer, None, f"Peer {peer['name']}: reported returns taken from the performance file."
         if analysis.nav is None:
-            return peer, None, f"Peer {peer['name']}: no fund prices to compare with."
+            return peer, None, f"Peer {peer['name']}: no fund prices or reported peer returns to compare with."
         if "peer" in analysis.nav.columns:
             # Peer prices supplied in the NAV file, so no download is needed
             levels = analysis.nav.set_index("date")["peer"].dropna()
@@ -163,7 +170,8 @@ class AgentManager:
     def pdf_name(fund_name: str, analysis: FundAnalysis) -> str:
         """ Fund name plus the data date, so monthly reports for the same fund don't overwrite each other """
         slug = "".join(c if c.isalnum() else "_" for c in fund_name).strip("_") or "fund"
-        as_of = f"{analysis.nav['date'].iloc[-1]:%Y-%m-%d}" if analysis.nav is not None else f"{date.today():%Y-%m-%d}"
+        as_of = pd.to_datetime(analysis.as_of, errors="coerce", dayfirst=True) if analysis.as_of else pd.NaT
+        as_of = f"{as_of:%Y-%m-%d}" if pd.notna(as_of) else f"{date.today():%Y-%m-%d}"
         return f"{slug}_oversight_report_{as_of}.pdf"
 
     async def notify(self, short_summary: str, report_md: str, pdf_path: str) -> str:

@@ -5,11 +5,12 @@ import pandas as pd
 from analysis import FundAnalysis
 from calculator import fmt_pct, top_and_bottom
 from mandate_agent import Mandate
-from oversight import OversightResult, RULES, GREEN, AMBER, RED, FEE_EXAMPLE_AMOUNT, FEE_HORIZON_YEARS, comparison_markdown
+from oversight import (OversightResult, RULES, GREEN, AMBER, RED, CHECK_DATA, FEE_EXAMPLE_AMOUNT, FEE_HORIZON_YEARS,
+                       comparison_markdown, comparison_cell)
 from oversight_agent import OversightReport
 
 NAVY, GREY, LIGHT = "#12355b", "#6b7785", "#f2f5f8"
-COLOURS = {GREEN: "#2e7d32", AMBER: "#e0a100", RED: "#c62828"}
+COLOURS = {GREEN: "#2e7d32", AMBER: "#e0a100", RED: "#c62828", CHECK_DATA: "#6d4c9f"}
 VERDICT_COLOURS = {"Retain": "#2e7d32", "Monitor": "#e0a100", "Review": "#c62828", "Incomplete data": "#6b7785"}
 DISCLAIMER = ("Draft prepared by an AI agent for demonstration; not investment advice. Ratings follow the fixed rules above, "
               "all figures are calculated from the data listed, and the verdict needs human approval.")
@@ -95,13 +96,12 @@ def _scorecard(result: OversightResult, report: OversightReport) -> str:
 
 def _comparison_table(result: OversightResult) -> str:
     df = result.comparison
-    head = "".join(f"<th>{c}</th>" for c in ("Fee (OCF)", "Annualised return", "1-year return", "Volatility", "Sharpe ratio"))
+    head = "".join(f"<th>{escape(c)}</th>" for c in df.columns)
     rows = ""
     for i, (name, r) in enumerate(df.iterrows()):
-        fee = "n/a" if pd.isna(r["Fee"]) else fmt_pct(r["Fee"])
         css = ' class="total"' if i == 0 else ""
-        rows += (f'<tr{css}><td class="left">{escape(str(name))}</td><td>{fee}</td><td>{fmt_pct(r["Annualised return"])}</td>'
-                 f'<td>{fmt_pct(r["1-year return"])}</td><td>{fmt_pct(r["Volatility"])}</td><td>{r["Sharpe ratio"]:.2f}</td></tr>')
+        cells = "".join(f"<td>{comparison_cell(c, r[c])}</td>" for c in df.columns)
+        rows += f'<tr{css}><td class="left">{escape(str(name))}</td>{cells}</tr>'
     return f'<table class="data" cellspacing="0"><tr><th class="left" width="34%">Fund</th>{head}</tr>{rows}</table>'
 
 
@@ -124,12 +124,12 @@ def build_oversight_html(report: OversightReport, analysis: FundAnalysis, mandat
     peer_name = result.peer["name"] if result.peer else "none"
     banner = (f'<table class="banner" cellspacing="0"><tr><td><span class="b0">INVESTMENT OVERSIGHT REPORT</span><br/><br/>'
               f'<span class="b1">{escape(fund_name)}</span><br/><span class="b2">Benchmark: {escape(benchmark)} &nbsp;|&nbsp; '
-              f'Peer: {escape(peer_name)} &nbsp;|&nbsp; Data: {analysis.period_label} &nbsp;|&nbsp; Prepared: {today}</span></td></tr></table>')
+              f'Peer: {escape(peer_name)} &nbsp;|&nbsp; Data: {escape(analysis.data_label)} &nbsp;|&nbsp; Prepared: {today}</span></td></tr></table>')
     verdict = (f'<table cellspacing="0" style="margin-top: 6px;"><tr><td width="22%" style="background-color: {colour}; color: white; '
                f'font-weight: bold; font-size: 13pt; text-align: center; padding: 8px;">{result.verdict.upper()}</td>'
                f'<td style="padding: 6px 10px; background-color: {LIGHT};"><b>Draft verdict.</b> {escape(report.verdict_reason)}</td></tr></table>')
-    approval = ('<table class="box" cellspacing="0"><tr><td><b>Human approval</b> &nbsp; Reviewed by: ______________________ &nbsp; '
-                'Date: ____________ &nbsp; Decision: [ &nbsp; ] Retain &nbsp; [ &nbsp; ] Monitor &nbsp; [ &nbsp; ] Review</td></tr></table>')
+    approval = ('<table class="box" cellspacing="0"><tr><td><b>Human approval</b> &nbsp; Reviewed by: _______________ &nbsp; '
+                'Date: _________ &nbsp; Decision: [ &nbsp; ] Retain &nbsp; [ &nbsp; ] Monitor &nbsp; [ &nbsp; ] Review</td></tr></table>')
 
     page1 = (banner + verdict + "<h2>Oversight scorecard</h2>" + _scorecard(result, report)
              + "<h2>Key findings</h2>" + _bullets(report.key_findings)
@@ -141,19 +141,30 @@ def build_oversight_html(report: OversightReport, analysis: FundAnalysis, mandat
              f"The objective is tested in the scorecard; the commitments below are listed for the reviewer to confirm.</p>"
              + "<h3>Commitments in the fund documents</h3>" + commitments)
     if analysis.periods is not None:
-        page2 += ("<h2>2. Performance against the benchmark</h2><h3>Returns by period</h3>" + _periods_table(analysis.periods)
-                  + "<h3>Risk</h3>" + _risk_table(analysis))
+        title = f"Returns by period ({analysis.data_label})" if analysis.official else "Returns by period"
+        page2 += "<h2>2. Performance against the benchmark</h2>" + f"<h3>{escape(title)}</h3>" + _periods_table(analysis.periods)
+        if analysis.official:
+            page2 += '<p class="small">Reported by the fund manager, after fees. Periods over 1 year are a year.</p>'
+        if analysis.calendar is not None:
+            page2 += "<h3>Calendar-year returns</h3>" + _periods_table(analysis.calendar)
+        if analysis.metrics is not None:
+            page2 += "<h3>Risk (from prices)</h3>" + _risk_table(analysis)
         if analysis.attribution is not None:
             page2 += _attribution_block(analysis)
         if "growth" in analysis.charts:
             page2 += (f'<table cellspacing="0"><tr><td><img src="{analysis.charts["growth"]}"/><p class="small">'
                       f"Growth of 100, {analysis.period_label}. Source: price data listed on page 3.</p></td></tr></table>")
+        elif "calendar" in analysis.charts:
+            page2 += (f'<table cellspacing="0"><tr><td><img src="{analysis.charts["calendar"]}"/><p class="small">'
+                      "Calendar-year returns, official figures. Source: listed on page 3.</p></td></tr></table>")
     else:
-        page2 += "<h2>2. Performance against the benchmark</h2><p>No price data was supplied.</p>"
+        page2 += "<h2>2. Performance against the benchmark</h2><p>No performance figures or price data were supplied.</p>"
 
     page3 = "<h2>3. Value for investors and fees</h2>"
     if result.comparison is not None:
-        page3 += f"<p>Compared with one peer over the same months ({result.comparison_period}).</p>" + _comparison_table(result)
+        intro = ("Compared with one peer, using both funds' reported returns after fees"
+                 if result.comparison_period.startswith("official") else "Compared with one peer over the same months")
+        page3 += f"<p>{intro} ({escape(result.comparison_period)}).</p>" + _comparison_table(result)
         if result.fee_costs:
             costs = " &nbsp;vs&nbsp; ".join(f"{escape(k)}: <b>£{v:,.0f}</b>" for k, v in result.fee_costs.items())
             page3 += f"<h3>What the fee costs</h3><p>Fees on £{FEE_EXAMPLE_AMOUNT:,} over {FEE_HORIZON_YEARS} years (ignoring growth): {costs}.</p>"
@@ -162,8 +173,10 @@ def build_oversight_html(report: OversightReport, analysis: FundAnalysis, mandat
                       + ("Yes: after fees, the fund returned more than the cheaper peer." if result.fee_justified
                          else "No: after fees, the fund returned less than the cheaper peer.") + "</p>")
     else:
-        page3 += "<p>No peer comparison: add a peer file and price data to assess value and fees.</p>"
-    sources = ([analysis.parsed.sources["nav"]] if "nav" in analysis.parsed.sources else [])
+        reason = next((p.evidence for p in result.pillars if p.name == "Value for investors"), "")
+        page3 += f"<p>Value and fees could not be compared with a peer: {escape(reason)}</p>"
+    sources = [analysis.parsed.sources[k] for k in ("performance", "nav") if k in analysis.parsed.sources
+               and not analysis.parsed.sources[k].endswith((".csv", ".xlsx", ".xls"))]
     uploaded = list(dict.fromkeys([n.split(":")[0] for n in analysis.parsed.notes if "read as" in n]
                                   + [n for n, _ in analysis.parsed.documents]))
     sources += [f"Uploaded: {n}" for n in uploaded] + [f"Web search: {s}" for s in searches]
