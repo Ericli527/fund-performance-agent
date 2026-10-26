@@ -84,10 +84,12 @@ def weights_table(df: pd.DataFrame) -> pd.DataFrame:
 
 def _classify_table(df: pd.DataFrame, name: str, parsed: ParsedFiles) -> None:
     """ Decide what kind of table this is, checking the most specific formats first """
-    if (nav := _match_columns(df, NAV_ALIASES)) is not None:
+    if (nav := _match_columns(df, NAV_ALIASES, {"peer": ["peer", "peer_nav", "peer_price"]})) is not None:
+        # An optional peer column lets the peer comparison run from the file, without downloading prices
         nav["date"] = pd.to_datetime(nav["date"])
-        parsed.nav = nav.sort_values("date").dropna().reset_index(drop=True)
-        parsed.notes.append(f"{name}: read as NAV series ({len(parsed.nav)} rows)")
+        parsed.nav = nav.sort_values("date").dropna(subset=["fund", "benchmark"]).reset_index(drop=True)
+        extra = " with peer prices" if "peer" in parsed.nav.columns else ""
+        parsed.notes.append(f"{name}: read as NAV series{extra} ({len(parsed.nav)} rows)")
     elif (attr := _match_columns(df, ATTRIBUTION_ALIASES, {"period": ["period", "attribution_period"]})) is not None:
         if "period" in attr.columns:
             # An optional period column (e.g. "Q3 2026") says what time the effects cover

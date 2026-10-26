@@ -49,7 +49,7 @@ class OversightResult:
 
     def facts_markdown(self) -> str:
         """ The scoring results, for the Oversight Analyst agent (it explains them, it cannot change them) """
-        lines = [f"### Oversight scoring (rule-based, final)", f"Fund type: {self.fund_type}. Verdict: {self.verdict}."]
+        lines = ["### Oversight scoring (rule-based, final)", f"Fund type: {self.fund_type}. Verdict: {self.verdict}."]
         lines += [f"- {p.name}: {p.rating}. Evidence: {p.evidence}" for p in self.pillars]
         if self.comparison is not None:
             lines.append(f"\n### Fund vs peer, {self.comparison_period}\n\n" + comparison_markdown(self.comparison))

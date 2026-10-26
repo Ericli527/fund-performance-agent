@@ -1,0 +1,9 @@
+sector,fund_weight,benchmark_weight,fund_return,benchmark_return,period
+Information Technology,28.0,24.0,18.39,22.82,12 months to 30 Sep 2026
+Financials,14.0,16.0,5.39,10.82,12 months to 30 Sep 2026
+Health Care,13.0,12.0,7.39,7.82,12 months to 30 Sep 2026
+Consumer Discretionary,12.0,11.0,11.39,13.82,12 months to 30 Sep 2026
+Industrials,11.0,11.0,11.39,12.82,12 months to 30 Sep 2026
+Energy,4.0,6.0,-3.11,-2.18,12 months to 30 Sep 2026
+Consumer Staples,9.0,10.0,4.89,6.82,12 months to 30 Sep 2026
+Utilities,9.0,10.0,5.89,8.82,12 months to 30 Sep 2026
