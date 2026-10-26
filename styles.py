@@ -1,21 +1,31 @@
-# One-click demos: (button label, question, files under demo/). Expected results are in demo/TEST_GUIDE.md
+FACTSHEET, OVERSIGHT = "Factsheet & committee review", "Investment oversight report"
+
+# One-click demos: (button label, question, files under demo/, fund ISIN or ticker, benchmark ticker, report type).
+# Demos A-C use fictional data (expected results in demo/TEST_GUIDE.md); D and E use real funds and need EODHD_API_KEY.
 DEMO_SCENARIOS = [
     ("Demo A · Full data + manager commentary",
      "Analyse the Sample Global Equity Fund's performance and attribution against the MSCI World over the period, "
      "and explain why it lagged over the last 12 months.",
      ["test_A_full_data/nav_sample.csv", "test_A_full_data/attribution_sample.csv",
       "test_A_full_data/holdings_sample.csv", "test_A_full_data/exposures_sample.csv",
-      "test_A_full_data/fund_facts_sample.csv", "test_A_full_data/manager_commentary_Q3_2026.docx"]),
+      "test_A_full_data/fund_facts_sample.csv", "test_A_full_data/manager_commentary_Q3_2026.docx"], "", "", FACTSHEET),
     ("Demo B · AI reads a factsheet PDF",
      "Produce a factsheet and performance review for the Sample Global Equity Fund.",
      ["test_B_ai_extraction/nav_sample.csv", "test_B_ai_extraction/attribution_sample.csv",
-      "test_B_ai_extraction/sample_factsheet_Sep2026.pdf"]),
+      "test_B_ai_extraction/sample_factsheet_Sep2026.pdf"], "", "", FACTSHEET),
     ("Demo C · Attribution data only",
      "Which sectors drove the fund's active return, and why?",
-     ["test_C_edge_cases/attribution_sample.csv"]),
+     ["test_C_edge_cases/attribution_sample.csv"], "", "", FACTSHEET),
+    ("Demo D · Oversight: Fidelity S&P 500 (index fund)",
+     "Prepare an oversight review: is this index fund meeting its mandate, and is its fee justified against a cheaper peer?",
+     ["oversight_fidelity_sp500/fund_facts.csv", "oversight_fidelity_sp500/peer.csv"], "IE00BYX5MX67", "SXR8.XETRA", OVERSIGHT),
+    ("Demo E · Oversight: Marlborough 8 (active fund)",
+     "Prepare an oversight review: is this active multi-asset fund delivering value for its fee compared with a low-cost alternative?",
+     ["oversight_marlborough8/fund_facts.csv", "oversight_marlborough8/peer.csv"], "GB00B84KX912", "VWRL.LSE", OVERSIGHT),
 ]
 
-DEMO_NOTE = ("Demo data is fictional. Click a demo to load its question and files, then press Analyse. "
+DEMO_NOTE = ("Demos A-C use fictional data; D and E use real funds and need an EODHD key for prices. "
+             "Click a demo to load its question and files, then press Analyse. "
              "Expected results: <a href=\"https://github.com/Ericli527/my-new-agent/blob/main/demo/TEST_GUIDE.md\" "
              "target=\"_blank\">demo/TEST_GUIDE.md</a>")
 

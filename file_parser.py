@@ -32,6 +32,7 @@ HOLDINGS_ALIASES = {
     "fund_weight": ["fund_weight", "portfolio_weight", "weight"],
 }
 FACTS_ALIASES = {"field": ["field", "item", "label", "key"], "value": ["value"]}
+PEER_ALIASES = {"name": ["peer", "peer_name", "name"], "ticker": ["ticker", "symbol", "isin"]}
 
 
 @dataclass
@@ -42,6 +43,7 @@ class ParsedFiles:
     holdings: pd.DataFrame | None = None
     sectors: pd.DataFrame | None = None
     countries: pd.DataFrame | None = None
+    peers: pd.DataFrame | None = None
     fund_facts: list[tuple[str, str]] = field(default_factory=list)
     documents: list[tuple[str, str]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -101,6 +103,12 @@ def _classify_table(df: pd.DataFrame, name: str, parsed: ParsedFiles) -> None:
                 setattr(parsed, attr_name, weights_table(rows))
                 parsed.sources[attr_name] = name
         parsed.notes.append(f"{name}: read as exposure data")
+    elif (peers := _match_columns(df, PEER_ALIASES, {"ocf": ["ocf", "ongoing_charge", "ongoing_charges", "fee"]})) is not None:
+        if "ocf" not in peers.columns:
+            peers["ocf"] = float("nan")
+        peers["ocf"] = pd.to_numeric(peers["ocf"].astype(str).str.rstrip("%"), errors="coerce")
+        parsed.peers = peers.dropna(subset=["ticker"]).reset_index(drop=True)
+        parsed.notes.append(f"{name}: read as peer list ({len(parsed.peers)} peer(s))")
     elif (holdings := _match_columns(df, HOLDINGS_ALIASES, WEIGHT_OPTIONAL)) is not None and "sector" not in df.columns:
         parsed.holdings = weights_table(holdings).sort_values("fund_weight", ascending=False).reset_index(drop=True)
         parsed.sources["holdings"] = name

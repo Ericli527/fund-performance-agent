@@ -7,18 +7,18 @@ import os
 import gradio as gr
 from agent_manager import AgentManager
 from pathlib import Path
-from styles import CSS, JS, DEMO_SCENARIOS, DEMO_NOTE, HEADER_HTML
+from styles import CSS, JS, DEMO_SCENARIOS, DEMO_NOTE, HEADER_HTML, FACTSHEET, OVERSIGHT
 
 DEMO_DIR = Path(__file__).parent / "demo"
 FILE_TYPES = [".csv", ".xlsx", ".xls", ".pdf", ".docx", ".txt", ".md"]
 
 
-async def run(query: str, files: list[str] | None, fund_id: str, benchmark_id: str):
+async def run(query: str, files: list[str] | None, fund_id: str, benchmark_id: str, report_type: str):
     if not query.strip():
         yield "Please describe what you want analysed.", "", None, [], gr.update(visible=False)
         return
     try:
-        async for report_md, summary_md, pdf_path, chart_paths in AgentManager().run(query, files, fund_id, benchmark_id):
+        async for report_md, summary_md, pdf_path, chart_paths in AgentManager().run(query, files, fund_id, benchmark_id, report_type):
             # Results stay hidden until the PDF is ready
             yield report_md, summary_md, pdf_path, chart_paths, gr.update(visible=pdf_path is not None)
     except Exception as e:
@@ -48,11 +48,15 @@ with gr.Blocks(title="Fund Report Agent") as ui:
         benchmark_id = gr.Textbox(label="Benchmark ticker", placeholder="e.g. IUKD.LSE",
                                   info="An index fund or ETF to compare against")
 
+    report_type = gr.Radio([FACTSHEET, OVERSIGHT], value=FACTSHEET, label="Report type",
+                           info="Oversight report: mandate, performance, value and fees vs one peer, with a Retain / Monitor / Review verdict")
+
     gr.HTML('<div class="dr-examples-label">Try a demo</div>')
     gr.Examples(
-        examples=[[question, [str(DEMO_DIR / f) for f in demo_files]] for _, question, demo_files in DEMO_SCENARIOS],
-        example_labels=[label for label, _, _ in DEMO_SCENARIOS],
-        inputs=[query_textbox, files],
+        examples=[[question, [str(DEMO_DIR / f) for f in demo_files], fund, benchmark, kind]
+                  for _, question, demo_files, fund, benchmark, kind in DEMO_SCENARIOS],
+        example_labels=[demo[0] for demo in DEMO_SCENARIOS],
+        inputs=[query_textbox, files, fund_id, benchmark_id, report_type],
         elem_id="dr-examples",
     )
     gr.HTML(f'<p class="dr-demo-note">{DEMO_NOTE}</p>')
@@ -63,7 +67,7 @@ with gr.Blocks(title="Fund Report Agent") as ui:
         charts = gr.Gallery(label="Charts", columns=3, height="auto", object_fit="contain")
     report = gr.Markdown(elem_id="dr-report")
 
-    inputs = [query_textbox, files, fund_id, benchmark_id]
+    inputs = [query_textbox, files, fund_id, benchmark_id, report_type]
     outputs = [report, summary, pdf_file, charts, results]
     run_button.click(run, inputs=inputs, outputs=outputs)
     query_textbox.submit(run, inputs=inputs, outputs=outputs)
