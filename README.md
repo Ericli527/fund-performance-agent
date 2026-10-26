@@ -102,16 +102,37 @@ Weights can be in percent or decimals.
 If fund facts, holdings or exposures are missing, the Extractor Agent tries to read them from
 these documents (for example, an existing factsheet or KID).
 
+## Investment oversight report
+
+Choose **Investment oversight report** as the report type for a 3-page review built around four questions an
+oversight team asks, rated Green / Amber / Red by fixed rules in `oversight.py` (shown in the report):
+
+| Question | Test (in code) |
+|---|---|
+| Mandate: is it doing what it promised? | Index fund: 1-year tracking difference. Active fund: excess return over up to 5 years |
+| Performance vs benchmark | Index fund: tracking error. Active fund: 1-year excess return |
+| Value for investors | Sharpe ratio against one peer over the same months |
+| Is the fee justified? | Fee against the peer's; a higher fee counts as justified if the return after fees was higher |
+
+Any Red gives **Review**, any Amber **Monitor**, otherwise **Retain**; fewer than two assessed questions gives
+**Incomplete data**. The verdict is a draft with a human approval box.
+
+Two more agents take part: the **Mandate Agent** reads the fund's promises (objective, index or active, commitments) and
+the **Oversight Analyst** explains the ratings, which it cannot change. Upload a peer file (`peer,ticker,ocf` with the
+fee in %) and give the fund and benchmark tickers; peer prices come from EODHD.
+
 ## One-click demos
 
-Under the upload box, **Try a demo** has three buttons that load a question and fictional files
-from `demo/`:
+Under the upload box, **Try a demo** loads a question and files from `demo/`. Demos A-C use fictional
+data; D and E use real funds (fees from public sources as noted in the files) and need `EODHD_API_KEY`:
 
 | Demo | Files | Shows |
 |---|---|---|
 | A · Full data + manager commentary | NAV, attribution, holdings, exposures, fund facts, a Word commentary | The full factsheet and review, with the AI using the manager's commentary |
 | B · AI reads a factsheet PDF | NAV, attribution, a factsheet PDF | The Extractor Agent filling gaps from a PDF, with "please verify" labels |
 | C · Attribution data only | Attribution | A report built from partial data |
+| D · Oversight: Fidelity S&P 500 | Fund facts, peer (SPDR S&P 500, 0.03%); prices via EODHD | Oversight report for an index fund |
+| E · Oversight: Marlborough 8 | Fund facts, peer (Vanguard LifeStrategy 80%, 0.22%); prices via EODHD | Oversight report for an active fund |
 
 `demo/TEST_GUIDE.md` lists the exact figures each demo should produce and what to check.
 
