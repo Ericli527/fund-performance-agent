@@ -2,10 +2,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import pandas as pd
 from file_parser import ParsedFiles, weights_table
-from calculator import (performance_metrics, brinson_attribution, period_returns, status_rating, top_and_bottom,
-                        rolling_12m_returns, calendar_year_returns, risk_measures, risk_indicator,
+from calculator import (performance_metrics, brinson_attribution, period_returns, top_and_bottom,
                         metrics_to_markdown, attribution_to_markdown, period_returns_to_markdown, fmt_pct)
-from charts import growth_chart, drawdown_chart, attribution_chart, cumulative_chart, donut_chart
+from charts import growth_chart, attribution_chart
 from extractor_agent import FactsheetExtract
 
 AI_SOURCE = "AI-extracted from {docs}, please verify"
@@ -37,11 +36,6 @@ def merge_extract(parsed: ParsedFiles, extract: FactsheetExtract, doc_names: lis
         parsed.notes.append(f"{attr.capitalize()}: {len(df)} rows {source}")
 
 
-def missing_factsheet_data(parsed: ParsedFiles) -> bool:
-    no_sectors = parsed.sectors is None and parsed.attribution is None
-    return not parsed.fund_facts or parsed.holdings is None or parsed.countries is None or no_sectors
-
-
 def _sort_weights(df: pd.DataFrame) -> pd.DataFrame:
     """ Largest weight first, with any 'Other' bucket kept at the bottom """
     is_other = df["name"].astype(str).str.strip().str.lower().isin(["other", "others", "cash and other"])
@@ -56,16 +50,9 @@ class FundAnalysis:
     nav: pd.DataFrame | None = None
     metrics: pd.DataFrame | None = None
     periods: pd.DataFrame | None = None
-    rolling: pd.DataFrame | None = None
-    calendar: pd.DataFrame | None = None
-    risk: pd.DataFrame | None = None
-    risk_window: str = ""
-    srri: int | None = None
-    srri_source: str = ""
     attribution: pd.DataFrame | None = None
     sectors: pd.DataFrame | None = None
     charts: dict[str, str] = field(default_factory=dict)
-    status: list[tuple[str, str, str, str]] = field(default_factory=list)
 
     @classmethod
     def build(cls, parsed: ParsedFiles, out_dir: Path) -> "FundAnalysis":
@@ -74,41 +61,17 @@ class FundAnalysis:
             a.nav = parsed.nav
             a.metrics = performance_metrics(a.nav)
             a.periods = period_returns(a.nav)
-            a.rolling = rolling_12m_returns(a.nav)
-            a.calendar = calendar_year_returns(a.nav)
-            a.risk, a.risk_window = risk_measures(a.nav)
-            a.charts["cumulative"] = cumulative_chart(a.nav, str(out_dir / "cumulative.png"))
             a.charts["growth"] = growth_chart(a.nav, str(out_dir / "growth.png"))
-            a.charts["drawdown"] = drawdown_chart(a.nav, str(out_dir / "drawdown.png"))
-            # Short and long horizons side by side, as committees review both
-            if "1Y" in a.periods.columns:
-                a.status.append(status_rating(a.periods.at["Relative", "1Y"], "Last 1 year"))
-            a.status.append(status_rating(a.metrics.at["Excess return (annualised)", "Relative"], "Since start"))
         if parsed.attribution is not None:
             a.attribution = brinson_attribution(parsed.attribution)
             a.charts["attribution"] = attribution_chart(a.attribution, str(out_dir / "attribution.png"))
-            if not a.status:
-                a.status.append(status_rating(a.attribution["Total"].iloc[-1], "Attribution period"))
-
         a.sectors = parsed.sectors
         if a.sectors is None and parsed.attribution is not None:
             # Attribution data already holds sector weights, so reuse them
             weights = parsed.attribution.rename(columns={"sector": "name"})[["name", "fund_weight", "benchmark_weight"]]
             a.sectors = weights_table(weights)
-            parsed.sources["sectors"] = "attribution data"
         if a.sectors is not None:
             a.sectors = _sort_weights(a.sectors)
-            a.charts["sectors"] = donut_chart(a.sectors, str(out_dir / "sectors.png"))
-        if parsed.countries is not None:
-            parsed.countries = _sort_weights(parsed.countries)
-            a.charts["countries"] = donut_chart(parsed.countries, str(out_dir / "countries.png"))
-
-        given = a.fact("risk indicator") or a.fact("srri") or a.fact("sri")
-        if given and given.strip()[:1].isdigit() and 1 <= int(given.strip()[0]) <= 7:
-            a.srri, a.srri_source = int(given.strip()[0]), "As stated in the fund documents."
-        elif a.nav is not None:
-            a.srri = risk_indicator(a.nav)
-            a.srri_source = "Estimated from up to 5 years of fund volatility (SRRI bands), not an official rating."
         return a
 
     def fact(self, name: str) -> str | None:
@@ -122,24 +85,18 @@ class FundAnalysis:
         return f"{self.nav['date'].iloc[0]:%d %b %Y} to {self.nav['date'].iloc[-1]:%d %b %Y}"
 
     @property
-    def as_of(self) -> str:
-        return f"{self.nav['date'].iloc[-1]:%d.%m.%Y}" if self.nav is not None else ""
+    def attribution_period(self) -> str:
+        return self.parsed.attribution_period or "not stated in the data"
 
     def facts_markdown(self) -> str:
-        """ All calculated and supplied facts, for the planner and writer agents """
+        """ All calculated and supplied facts, for the planner and analyst agents """
         parts = []
         if self.parsed.fund_facts:
             parts.append("### Fund facts\n\n" + "\n".join(f"- {f}: {v}" for f, v in self.parsed.fund_facts))
-        for horizon, label, _, why in self.status:
-            parts.append(f"Status (rule-based), {horizon}: {label}. {why}")
         if self.metrics is not None:
             parts.append(f"### Period: {self.period_label}")
             parts.append("### Returns by period\n\n" + period_returns_to_markdown(self.periods))
             parts.append(f"### Risk and return (full period, {self.period_label})\n\n" + metrics_to_markdown(self.metrics))
-            parts.append(f"### Risk measures over {self.risk_window} (shown on the factsheet)\n\n" + self.risk_markdown())
-            parts.append("### 12-month periods\n\n" + period_returns_to_markdown(self.rolling))
-            if not self.calendar.empty:
-                parts.append("### Calendar years\n\n" + period_returns_to_markdown(self.calendar))
         if self.attribution is not None:
             parts.append(f"### Attribution (Brinson-Fachler), period: {self.attribution_period}\n\n"
                          + attribution_to_markdown(self.attribution))
@@ -152,18 +109,6 @@ class FundAnalysis:
                 parts.append(f"### {title} (fund weight, relative to benchmark)\n\n" + "\n".join(
                     f"- {r.name}: {fmt_pct(r.fund_weight)} ({fmt_pct(r.relative, True)})" for r in df.head(10).itertuples()))
         return "\n\n".join(parts) or "No fund data was uploaded."
-
-    @property
-    def attribution_period(self) -> str:
-        return self.parsed.attribution_period or "not stated in the data"
-
-    def risk_markdown(self) -> str:
-        lines = ["| Measure | Fund | Benchmark |", "|---|---|---|"]
-        for name, r in self.risk.iterrows():
-            fmt = (lambda v: fmt_pct(v)) if "(%)" in name else (lambda v: f"{v:.2f}")
-            cells = [("n/a" if pd.isna(v) else fmt(v)) for v in (r.Fund, r.Benchmark)]
-            lines.append(f"| {name.replace(' (%)', '')} | {cells[0]} | {cells[1]} |")
-        return "\n".join(lines)
 
     def documents_text(self) -> str:
         return "\n\n".join(f"--- {name} ---\n{text}" for name, text in self.parsed.documents) or "None"

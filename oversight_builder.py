@@ -3,11 +3,10 @@ from datetime import date
 from html import escape
 import pandas as pd
 from analysis import FundAnalysis
-from calculator import fmt_pct
+from calculator import fmt_pct, top_and_bottom
 from mandate_agent import Mandate
 from oversight import OversightResult, RULES, GREEN, AMBER, RED, FEE_EXAMPLE_AMOUNT, FEE_HORIZON_YEARS, comparison_markdown
 from oversight_agent import OversightReport
-from report_builder import _periods_table, _bullets
 
 NAVY, GREY, LIGHT = "#12355b", "#6b7785", "#f2f5f8"
 COLOURS = {GREEN: "#2e7d32", AMBER: "#e0a100", RED: "#c62828"}
@@ -38,6 +37,43 @@ table {{ width: 100%; }}
 img {{ width: 17.4cm; }}
 #footer {{ font-size: 7pt; color: {GREY}; border-top: 0.5px solid #d5dbe1; padding-top: 3px; }}
 """
+
+
+def _signed(value: float) -> str:
+    css = "pos" if round(value, 4) > 0 else "neg" if round(value, 4) < 0 else ""
+    return f'<span class="{css}">{fmt_pct(value, signed=True)}</span>'
+
+
+def _bullets(items: list[str]) -> str:
+    return "<ul>" + "".join(f"<li>{escape(i)}</li>" for i in items) + "</ul>"
+
+
+def _periods_table(periods: pd.DataFrame) -> str:
+    head = '<th class="left"></th>' + "".join(f"<th>{c}</th>" for c in periods.columns)
+    rows = ""
+    for name, row in periods.iterrows():
+        cells = "".join(f"<td>{_signed(v) if name == 'Relative' else fmt_pct(v)}</td>" for v in row)
+        css = ' class="total"' if name == "Relative" else ""
+        rows += f'<tr{css}><td class="left">{name}</td>{cells}</tr>'
+    return f'<table class="data" cellspacing="0"><tr>{head}</tr>{rows}</table>'
+
+
+def _attribution_block(analysis: FundAnalysis) -> str:
+    """ Why the fund beat or lagged its benchmark, by sector (Brinson-Fachler), when attribution data is uploaded """
+    total = analysis.attribution.iloc[-1]
+    effects = "".join(f'<tr><td class="left">{e}</td><td>{_signed(total[e])}</td></tr>'
+                      for e in ("Allocation", "Selection", "Interaction"))
+    top, bottom = top_and_bottom(analysis.attribution)
+    def names(df):
+        return ", ".join(f"{escape(str(r.Segment))} ({fmt_pct(r.Total, True)})" for r in df.itertuples()) or "none"
+    return (f"<h3>Why: attribution by sector (period: {escape(analysis.attribution_period)})</h3>"
+            '<table cellspacing="0"><tr><td width="42%" valign="top">'
+            f'<table class="data" cellspacing="0"><tr><th class="left">Effect</th><th>Contribution</th></tr>{effects}'
+            f'<tr class="total"><td class="left">Active return</td><td>{_signed(total["Total"])}</td></tr></table></td>'
+            f'<td valign="top" style="padding-left: 10px;"><p><b>Added most:</b> {names(top)}</p>'
+            f"<p><b>Took most away:</b> {names(bottom)}</p>"
+            '<p class="small">Allocation = being over- or under-weight in a sector; selection = picking better or worse '
+            "stocks within it.</p></td></tr></table>")
 
 
 def _chip(rating: str) -> str:
@@ -107,6 +143,8 @@ def build_oversight_html(report: OversightReport, analysis: FundAnalysis, mandat
     if analysis.periods is not None:
         page2 += ("<h2>2. Performance against the benchmark</h2><h3>Returns by period</h3>" + _periods_table(analysis.periods)
                   + "<h3>Risk</h3>" + _risk_table(analysis))
+        if analysis.attribution is not None:
+            page2 += _attribution_block(analysis)
         if "growth" in analysis.charts:
             page2 += (f'<table cellspacing="0"><tr><td><img src="{analysis.charts["growth"]}"/><p class="small">'
                       f"Growth of 100, {analysis.period_label}. Source: price data listed on page 3.</p></td></tr></table>")
@@ -126,7 +164,9 @@ def build_oversight_html(report: OversightReport, analysis: FundAnalysis, mandat
     else:
         page3 += "<p>No peer comparison: add a peer file and price data to assess value and fees.</p>"
     sources = ([analysis.parsed.sources["nav"]] if "nav" in analysis.parsed.sources else [])
-    sources += [f"Uploaded: {n}" for n, _ in analysis.parsed.documents] + [f"Web search: {s}" for s in searches]
+    uploaded = list(dict.fromkeys([n.split(":")[0] for n in analysis.parsed.notes if "read as" in n]
+                                  + [n for n, _ in analysis.parsed.documents]))
+    sources += [f"Uploaded: {n}" for n in uploaded] + [f"Web search: {s}" for s in searches]
     page3 += ("<h2>4. Market context</h2>" + f"<p>{escape(report.market_context)}</p>"
               + "<h2>5. What would change our view</h2>" + _bullets(report.triggers)
               + "<h3>How the ratings were decided</h3>" + f'<div class="small">{_bullets(RULES)}</div>'

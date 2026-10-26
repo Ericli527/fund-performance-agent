@@ -15,6 +15,7 @@ Rules:
 - Use only the figures given to you. Quote them exactly and name their period. Never invent numbers.
 - Plain, neutral British English for a non-technical reader. No hype. Keep to the word limits.
 - Only describe the fund's own positioning if the documents say it; market commentary is market context.
+- If attribution data is given, use it to explain why the fund beat or lagged its benchmark, naming its period.
 - If something could not be assessed, say what data would be needed.
 """
 
