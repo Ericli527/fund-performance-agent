@@ -15,7 +15,7 @@ This spec follows the design diagram `Fund_Performance_Agent_Overview.pdf` (work
 4. **Every number has a source.** Each figure carries a `source` field: `factsheet`, `calculated`, `ai_extracted` (must be labelled "please verify"), or `web`.
 5. **The AI explains but cannot change.** The Oversight Analyst may only quote numbers present in the facts JSON it is given (enforced by a validator, Section 8.3).
 6. **A person decides.** The verdict is a draft until the reviewer signs Retain / Monitor / Review.
-7. **Kept in bounds.** At most 5 web searches per run (demo setting, in config); public data only; no confidential client data uploaded.
+7. **Kept in bounds.** At most 5 web searches per run (demo setting, in config); public data only; no confidential client data uploaded. This API key has OpenAI data sharing on: public data only, never upload confidential or client data.
 9. **Code controls the flow.** A workflow controller in code runs the steps in a fixed order. No AI agent decides which step runs next.
 8. **All thresholds live in `config/thresholds.yaml`**, are printed in the report, and are clearly labelled as illustrative until agreed with the oversight team.
 
@@ -298,8 +298,12 @@ The report must state clearly: "This is an indicative assessment from public dat
 ## 8. AI agents (Steps 5 to 7)
 
 All agents return structured JSON validated with Pydantic. Use the OpenAI Agents SDK (or LangGraph). Temperature low (0 to 0.3).
-- v1 settings: a low-cost model (`gpt-4.1-mini` by default, changed with the `FUND_AGENT_MODEL` environment variable) at
-  temperature 0; the API key is read from the `OPENAI_API_KEY` environment variable only.
+- Models per agent in `config/models.yaml` (nothing hard-coded): Extractor, Mandate, Planner and Search `gpt-5.4-mini`;
+  Oversight Analyst `gpt-5.4`; Evaluator `gpt-6.1-sol` with its own strict checking prompt. `FUND_MODEL_<AGENT>` may
+  override one agent's model for testing (it must be listed in the file). Temperature 0 is sent only if the config
+  says the model supports it; otherwise a low reasoning effort is sent.
+- The API key is read from the `OPENAI_API_KEY` environment variable, loaded from `.env` (gitignored) by python-dotenv.
+- This API key has OpenAI data sharing on: public data only, never upload confidential or client data.
 - Invalid output (fails validation) is retried once, then the affected item is `CHECK DATA`. A failed call (network,
   key) is not retried.
 - Unit tests mock the AI calls; one live test per agent runs only with `pytest --run-live`.

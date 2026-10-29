@@ -3,7 +3,6 @@ import asyncio
 import json
 import pytest
 from agents.exceptions import AgentsException, ModelBehaviorError
-from fund_performance.agents import base
 from fund_performance.agents.mandate import MandateOutput, mandate_agent, read_mandate, reconcile
 from fund_performance.config import load_thresholds
 from fund_performance.io import read_json
@@ -33,10 +32,12 @@ def run(prof, *responses):
 
 
 def test_agent_settings(monkeypatch):
+    monkeypatch.delenv("FUND_MODEL_MANDATE", raising=False)
     agent = mandate_agent()
-    assert agent.model == base.DEFAULT_MODEL and agent.model_settings.temperature == 0
-    monkeypatch.setenv("FUND_AGENT_MODEL", "some-other-model")
-    assert mandate_agent().model == "some-other-model"
+    assert agent.model == "gpt-5.4-mini"                                   # from config/models.yaml
+    assert agent.model_settings.temperature is None and agent.model_settings.reasoning.effort == "low"
+    monkeypatch.setenv("FUND_MODEL_MANDATE", "gpt-5.4")                     # override one agent for testing
+    assert mandate_agent().model == "gpt-5.4"
 
 
 def test_agreeing_answer_gives_no_flags_and_only_the_objective_is_sent():

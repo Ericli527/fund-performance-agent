@@ -114,7 +114,7 @@ class ExtractionResult:
 
 
 def extractor_agent():
-    return build_agent("Extractor Agent", INSTRUCTIONS, ExtractorOutput)
+    return build_agent("Extractor Agent", INSTRUCTIONS, ExtractorOutput, "extractor")
 
 
 def to_factsheet(out: ExtractorOutput) -> FactsheetPerformance:

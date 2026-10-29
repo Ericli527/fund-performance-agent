@@ -17,6 +17,7 @@ Instructions for Claude Code in this project. The build specification is
    before starting the next.
 7. **Keep API keys in `.env`.** Never write a key into code, tests, docs or commits. `.env` stays
    in `.gitignore`.
+8. **Data sharing.** This API key has OpenAI data sharing on: public data only, never upload confidential or client data.
 
 ## Agreed decisions
 
@@ -56,8 +57,11 @@ Instructions for Claude Code in this project. The build specification is
 - CHECK DATA on Value or Fees: verdict "Monitor (data check needed: Value)".
 - `performance_fee_justification`: optional, written by a person only; an AI agent must never write it.
 - Agents: structured output validated with Pydantic; retry once on invalid output, then CHECK DATA.
-  Unit tests mock AI calls; live tests only with `pytest --run-live`. Model from `FUND_AGENT_MODEL`
-  (default gpt-4.1-mini), temperature 0, key from the `OPENAI_API_KEY` environment variable only.
+  Unit tests mock AI calls; live tests only with `pytest --run-live`. Each agent's model is set in
+  `config/models.yaml` (nothing hard-coded); `FUND_MODEL_<AGENT>` may override one agent for testing.
+  Temperature is sent only to models the config marks `supports_temperature`; others get a low
+  reasoning effort. The key comes from the `OPENAI_API_KEY` environment variable, loaded from `.env`
+  by python-dotenv.
 - Mandate Agent: the profile wins on any disagreement (flag); it classifies a free-text secondary
   objective into the six types, or CHECK DATA if it cannot.
 - Risk-free rate: 0 for v1, with a flag. Prefer the factsheet Sharpe ratios where supplied.

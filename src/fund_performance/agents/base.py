@@ -1,33 +1,48 @@
-""" Shared set-up for the AI agents (spec Section 8): one low-cost model at temperature 0, structured
-output validated with Pydantic, one retry on invalid output, then a CHECK DATA flag
+""" Shared set-up for the AI agents (spec Section 8): each agent's model comes from config/models.yaml,
+structured output is validated with Pydantic, invalid output is retried once, then a CHECK DATA flag
 
 The API key is read by the OpenAI SDK from the OPENAI_API_KEY environment variable only; no key is ever
-passed in code.
+passed in code. load_env() copies it from the project's .env file into the environment.
+Data sharing is on for this key: public data only, never confidential or client data.
 """
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 import os
 from typing import Any, Generic, TypeVar
+from pathlib import Path
 from agents import Agent, ModelSettings, Runner
 from agents.exceptions import AgentsException, ModelBehaviorError
+from dotenv import load_dotenv
 from openai import OpenAIError
+from openai.types.shared import Reasoning
 from pydantic import BaseModel, ValidationError
+from fund_performance.config import AgentName, ModelSpec, load_models
 
-DEFAULT_MODEL = "gpt-4.1-mini"     # low cost, supports temperature 0 and structured outputs
 MAX_ATTEMPTS = 2                   # the first try and one retry (owner decision)
+ENV_FILE = Path(__file__).resolve().parents[3] / ".env"     # gitignored
 
 T = TypeVar("T")
 RunFn = Callable[[Agent, str], Awaitable[Any]]
 
 
-def model_name() -> str:
-    """ The model can be changed with FUND_AGENT_MODEL without touching code """
-    return os.getenv("FUND_AGENT_MODEL", DEFAULT_MODEL)
+def load_env(path: Path = ENV_FILE) -> bool:
+    """ Copy OPENAI_API_KEY (and other settings) from .env into the environment. A value already set in
+    the environment is kept. Returns True if a .env file was found """
+    return load_dotenv(path, override=False)
 
 
-def build_agent(name: str, instructions: str, output_type: type[BaseModel]) -> Agent:
-    return Agent(name=name, instructions=instructions, model=model_name(), output_type=output_type,
-                 model_settings=ModelSettings(temperature=0))
+def model_settings(spec: ModelSpec) -> ModelSettings:
+    """ Temperature only for models that accept it; reasoning models get a low reasoning effort instead """
+    if spec.supports_temperature:
+        return ModelSettings(temperature=spec.temperature)
+    return ModelSettings(reasoning=Reasoning(effort=spec.reasoning_effort))
+
+
+def build_agent(name: str, instructions: str, output_type: type[BaseModel], agent: AgentName) -> Agent:
+    load_env()
+    model, spec = load_models().for_agent(agent)
+    return Agent(name=name, instructions=instructions, model=model, output_type=output_type,
+                 model_settings=model_settings(spec))
 
 
 def api_key_present() -> bool:

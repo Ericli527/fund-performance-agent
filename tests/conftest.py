@@ -26,11 +26,8 @@ def pytest_configure(config):
 def pytest_collection_modifyitems(config, items):
     import os
     if config.getoption("--run-live"):
-        try:
-            from dotenv import load_dotenv
-            load_dotenv(ROOT / ".env")          # puts the key into the environment; code reads it from there only
-        except ImportError:
-            pass
+        from fund_performance.agents.base import load_env
+        load_env()                              # .env -> environment; code reads the key from there only
         if os.getenv("OPENAI_API_KEY"):
             return
         reason = "OPENAI_API_KEY is not set"

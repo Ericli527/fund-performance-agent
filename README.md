@@ -17,6 +17,8 @@ Built with the [OpenAI Agents SDK](https://openai.github.io/openai-agents-python
 
 **Code does the maths, AI does the reading and writing, and a person makes the call.**
 
+> **Data sharing:** This API key has OpenAI data sharing on: public data only, never upload confidential or client data.
+
 ## How it works
 
 ```
@@ -134,5 +136,6 @@ Click **Demo F** to try it without any data subscription.
 
 The free plan sleeps after about 15 minutes without traffic, so open the app a minute before a demo.
 
+> **Data sharing:** This API key has OpenAI data sharing on: public data only, never upload confidential or client data.
 > Uploaded data is sent to OpenAI. Do not upload confidential client data.
 > Reports are drafts for demonstration only and are not investment advice.

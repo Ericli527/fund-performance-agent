@@ -59,7 +59,7 @@ class MandateResult:
 
 
 def mandate_agent():
-    return build_agent("Mandate Agent", INSTRUCTIONS, MandateOutput)
+    return build_agent("Mandate Agent", INSTRUCTIONS, MandateOutput, "mandate")
 
 
 def _flag(level: str, message: str) -> DataFlag:

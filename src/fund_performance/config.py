@@ -1,7 +1,10 @@
-""" Loads config/thresholds.yaml and checks it has every threshold the spec needs """
+""" Loads config/thresholds.yaml (every threshold the spec needs) and config/models.yaml (the model
+for each AI agent), and checks both """
 from pathlib import Path
+import os
+from typing import Literal, get_args
 import yaml
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 DEFAULT_PATH = Path(__file__).resolve().parents[2] / "config" / "thresholds.yaml"
 
@@ -101,3 +104,53 @@ class Thresholds(_Section):
 def load_thresholds(path: str | Path = DEFAULT_PATH) -> Thresholds:
     with open(path, encoding="utf-8") as f:
         return Thresholds.model_validate(yaml.safe_load(f))
+
+
+# --- config/models.yaml: the model for each AI agent ----------------------------------------------------
+
+MODELS_PATH = Path(__file__).resolve().parents[2] / "config" / "models.yaml"
+AgentName = Literal["extractor", "mandate", "planner", "search", "analyst", "evaluator"]
+
+
+class ModelSpec(_Section):
+    """ What a model accepts: a temperature, or (for reasoning models) a reasoning effort """
+    supports_temperature: bool
+    temperature: float | None = None
+    reasoning_effort: Literal["minimal", "low", "medium", "high"] | None = None
+
+    @model_validator(mode="after")
+    def _one_setting(self) -> "ModelSpec":
+        if self.supports_temperature and self.temperature is None:
+            raise ValueError("a model that supports temperature needs a temperature (e.g. 0)")
+        if not self.supports_temperature and self.temperature is not None:
+            raise ValueError("temperature given for a model that does not support it")
+        if not self.supports_temperature and self.reasoning_effort is None:
+            raise ValueError("a model without temperature needs a reasoning_effort (e.g. low)")
+        return self
+
+
+class ModelsConfig(_Section):
+    agents: dict[AgentName, str]
+    models: dict[str, ModelSpec]
+
+    @model_validator(mode="after")
+    def _every_agent_has_a_known_model(self) -> "ModelsConfig":
+        missing = set(get_args(AgentName)) - set(self.agents)
+        if missing:
+            raise ValueError(f"no model set for: {sorted(missing)}")
+        unknown = {a: m for a, m in self.agents.items() if m not in self.models}
+        if unknown:
+            raise ValueError(f"models not listed under 'models': {unknown}")
+        return self
+
+    def for_agent(self, agent: AgentName) -> tuple[str, ModelSpec]:
+        """ The agent's model and its settings. FUND_MODEL_<AGENT> overrides one agent, for testing """
+        model = os.getenv(f"FUND_MODEL_{agent.upper()}") or self.agents[agent]
+        if model not in self.models:
+            raise ValueError(f"FUND_MODEL_{agent.upper()}={model} is not listed under 'models' in models.yaml")
+        return model, self.models[model]
+
+
+def load_models(path: str | Path = MODELS_PATH) -> ModelsConfig:
+    with open(path, encoding="utf-8") as f:
+        return ModelsConfig.model_validate(yaml.safe_load(f))
