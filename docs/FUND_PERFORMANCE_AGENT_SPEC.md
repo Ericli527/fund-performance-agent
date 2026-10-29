@@ -604,6 +604,10 @@ Keep the manager's published Value Assessment Report out of the agent's inputs. 
     Value and Fees findings and reasons give the peer return gap and the fee gap (from `Pillar.values`). `render.yaml` keeps the old service name, so the existing Render service is updated. The
     old root-level app is removed.
 12. **Run all 4 test cases**, compare Test 1 with the published Value Assessment Report, and record results in `tests/RESULTS.md`.
+    As built: `tests/RESULTS.md` records Test 1 (passed: every expected figure, flag and rating; draft verdict
+    "Monitor until a peer is added"), the live AI runs and the design changes they led to, what the Evaluator
+    caught, and the comparison with Fidelity's 2025 Value Assessment (consistent conclusions). Tests 2 to 4 wait
+    for their input files.
 
 Definition of done: all unit tests pass; Test 1 and Test 2 expected values reproduced; no rating can be changed by the AI; every figure in the PDF has a source; the Evaluator rejects a bad draft in tests.
 
