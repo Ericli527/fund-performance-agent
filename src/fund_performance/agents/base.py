@@ -10,10 +10,11 @@ from dataclasses import dataclass, field
 import os
 from typing import Any, Generic, TypeVar
 from pathlib import Path
-from agents import Agent, ModelSettings, Runner
+from agents import Agent, ModelSettings, RunConfig, Runner
 from agents.exceptions import AgentsException, ModelBehaviorError
+from agents.models.openai_provider import OpenAIProvider
 from dotenv import load_dotenv
-from openai import OpenAIError
+from openai import AsyncOpenAI, OpenAIError
 from openai.types.shared import Reasoning
 from pydantic import BaseModel, ValidationError
 from fund_performance.config import AgentName, ModelSpec, load_models
@@ -45,6 +46,19 @@ def build_agent(name: str, instructions: str, output_type: type[BaseModel], agen
                  model_settings=model_settings(spec))
 
 
+async def run_with_fresh_client(agent: Agent, prompt: str) -> Any:
+    """ Run an agent with a new OpenAI client, closed afterwards.
+
+    The SDK otherwise reuses one shared client whose connections belong to the first event loop; once
+    that loop is closed (e.g. by asyncio.run), the next agent fails with "Event loop is closed". A client
+    per run keeps agents independent, so they can run one after another in any loop """
+    client = AsyncOpenAI()          # reads OPENAI_API_KEY from the environment
+    try:
+        return await Runner.run(agent, prompt, run_config=RunConfig(model_provider=OpenAIProvider(openai_client=client)))
+    finally:
+        await client.close()
+
+
 def api_key_present() -> bool:
     return bool(os.getenv("OPENAI_API_KEY"))
 
@@ -67,7 +81,7 @@ async def run_structured(agent: Agent, prompt: str, output_model: type[BaseModel
 
     `convert` turns the agent's output into the internal shape (it may raise ValueError, which counts as
     invalid output). `run` replaces the real model call in unit tests """
-    run = run or Runner.run
+    run = run or run_with_fresh_client
     errors: list[str] = []
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:

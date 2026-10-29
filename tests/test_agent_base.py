@@ -109,3 +109,56 @@ def test_one_retry_then_give_up():
     fake = FakeRun({"value": "x"}, ModelBehaviorError("bad"), {"value": 3})
     result = asyncio.run(run_structured(None, "p", Out, run=fake))
     assert not result.ok and result.attempts == 2 and len(fake.prompts) == 2
+
+
+# A fresh client per run, so agents can run one after another (the "Event loop is closed" fix)
+class _FakeClient:
+    """ Records the event loop it was made in, like a real client's connections """
+    instances: list["_FakeClient"] = []
+
+    def __init__(self):
+        self.loop = asyncio.get_running_loop()
+        self.closed = False
+        _FakeClient.instances.append(self)
+
+    async def close(self):
+        self.closed = True
+
+
+def _fake_runner(outputs):
+    """ Stands in for Runner.run: fails like the real client would if it were reused across loops """
+    from types import SimpleNamespace
+    async def run(agent, prompt, run_config=None):
+        client = run_config.model_provider._client
+        assert client is _FakeClient.instances[-1], "the run must use the client made for it"
+        assert client.loop is asyncio.get_running_loop() and not client.loop.is_closed(), "Event loop is closed"
+        assert not client.closed
+        return SimpleNamespace(final_output=outputs[agent.name])
+    return run
+
+
+def test_two_agents_back_to_back_each_get_their_own_open_client(monkeypatch):
+    from fund_performance.agents import base
+    from fund_performance.agents.extractor import extract
+    from fund_performance.agents.mandate import read_mandate
+    from test_agent_extractor import DOC, output
+    from test_agent_mandate import answer, profile
+
+    _FakeClient.instances = []
+    monkeypatch.setattr(base, "AsyncOpenAI", _FakeClient)
+    monkeypatch.setattr(base.Runner, "run", _fake_runner({"Mandate Agent": answer(), "Extractor Agent": output()}))
+
+    # As in the live tests: each agent in its own asyncio.run, so the first loop is closed before the second
+    mandate = asyncio.run(read_mandate(profile()))
+    extraction = asyncio.run(extract(DOC))
+    assert mandate.flags == [] and extraction.factsheet is not None
+    first, second = _FakeClient.instances
+    assert first is not second and first.loop is not second.loop
+    assert first.closed and second.closed
+
+    # As in the pipeline: one agent after another in the same loop
+    async def pipeline():
+        return await read_mandate(profile()), await extract(DOC)
+    m, e = asyncio.run(pipeline())
+    assert m.flags == [] and e.factsheet is not None
+    assert len(_FakeClient.instances) == 4 and all(c.closed for c in _FakeClient.instances)
