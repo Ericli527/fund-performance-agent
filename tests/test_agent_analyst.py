@@ -53,7 +53,8 @@ def test_agent_settings(monkeypatch):
 def test_prompt_carries_the_style_rules_and_glossary():
     from fund_performance.agents.analyst import INSTRUCTIONS, STYLE_EXAMPLE
     for rule in ("Draft verdict", "Plain meaning first", "under 20 words", "ongoing charge (OCF)",
-                 "below the surface", "what to do and when", STYLE_EXAMPLE):
+                 "below the surface", "says when to do it", "Never restate the verdict",
+                 "Never put a minus sign after", "Cite them as [1], [2]", STYLE_EXAMPLE):
         assert rule in INSTRUCTIONS
 
 
@@ -61,7 +62,7 @@ def test_a_good_draft_passes_first_time_without_search_summaries():
     fake = FakeRun(draft())
     result = asyncio.run(write_narrative(FACTS, run=fake))
     assert result.source == "ai" and result.flags == [] and len(fake.prompts) == 1
-    assert "Search summaries:\nnone" in fake.prompts[0]
+    assert fake.prompts[0].endswith("Sources:\nnone")
 
 
 def test_one_rewrite_with_the_list_of_bad_numbers():
@@ -149,3 +150,28 @@ def test_live_test1_analyst():
     print("Log:", *result.log, sep="\n  ")
     print("Flags:", [f.message for f in result.flags])
     assert problems(result.output, facts) == []
+
+
+# Wording rules checked by code
+def _out(**changes):
+    return AnalystOutput.model_validate(GOOD | changes)
+
+
+def test_no_minus_sign_after_behind_or_below():
+    bad = _out(key_findings=["The fund was behind by -0.10% a year.", "It sat below the index by \u22120.10 pp.", "c"])
+    found = [p for p in problems(bad, FACTS) if p.startswith("style")]
+    assert len(found) == 2
+    assert not [p for p in problems(_out(key_findings=["The fund was behind by 0.10% a year.", "b", "c"]), FACTS)
+                if p.startswith("style")]
+
+
+def test_minus_rule_triggers_one_rewrite():
+    bad = draft(key_findings=["The fund was behind its index by -0.10 pp a year."] + GOOD["key_findings"][1:])
+    fake = FakeRun(bad, draft())
+    result = asyncio.run(write_narrative(FACTS, run=fake))
+    assert result.source == "ai" and "minus sign after 'behind'" in fake.prompts[1]
+
+
+def test_template_actions_each_say_when():
+    for action in template(FACTS).actions:
+        assert "before" in action or "at this review" in action or "at the next" in action

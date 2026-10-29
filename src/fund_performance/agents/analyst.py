@@ -43,6 +43,7 @@ Numbers:
 Style:
 - Plain meaning first, technical term second, in brackets. For example: "The fund falls behind its
   index by about 0.10% a year (tracking difference -0.10 pp)."
+- Never put a minus sign after "behind" or "below": say "behind by 0.10%", not "behind by -0.10%".
 - Explain each technical term once, the first time you use it, in under 10 words, using the glossary
   below. After that, use the term alone.
 - No unexplained abbreviations: write "ongoing charge (OCF)", not "OCF".
@@ -62,11 +63,12 @@ Example of the target style (from another review; never copy its numbers):
 
 Output:
 - key_findings: exactly 3 findings.
-- actions: 2 or 3 actions. Each says what to do and when (e.g. "before signing off this review",
-  "at the next quarterly review").
+- actions: 2 or 3 actions. Each is a real task for the oversight team and says when to do it
+  (e.g. "before signing off this review", "at the next quarterly review"). Never restate the verdict
+  as an action, and never write an internal or technical note about the data or the system.
 - market_context: a short paragraph on what drove the market in the review period, based only on the
-  search summaries given, citing their URLs in brackets. Use no figures from the search summaries;
-  describe direction only (e.g. "US shares rose, led by technology"). If no search summaries are
+  numbered sources given. Cite them as [1], [2]; never write a web address. Use no figures from the
+  sources; describe direction only (e.g. "US shares rose, led by technology [1]"). If no sources are
   given, return null.
 """
 
@@ -87,6 +89,7 @@ class Narrative:
     source: Literal["ai", "template"]
     flags: list[DataFlag] = field(default_factory=list)
     log: list[str] = field(default_factory=list)
+    sources: list[dict] = field(default_factory=list)     # [n] -> query, url, date, for the report's sources list
 
 
 def analyst_agent():
@@ -102,22 +105,42 @@ def _check_shape(out: AnalystOutput) -> AnalystOutput:
     return out
 
 
-_URL = re.compile(r"https?://[^\s)\]]+")
+_URL = re.compile(r"https?://[^\s)\]]+|\bwww\.[^\s)\]]+")
+_MINUS_AFTER = re.compile(r"\b(behind|below)\b(\s+\w+){0,3}?\s*[-\u2212\u2013]\s?\d", re.IGNORECASE)
+_CITATION = re.compile(r"\[(\d+)\]")
 
 
-def problems(out: AnalystOutput, facts: dict) -> list[str]:
-    """ Everything wrong with a draft: numbers not in the facts, and changed ratings or verdict.
-    Cited URLs are taken out first: they are sources, not figures (e.g. ".../page=3.5") """
+def style_problems(out: AnalystOutput, sources: int) -> list[str]:
+    """ Wording rules checked by code: no minus after "behind"/"below", no web addresses in the text, and
+    citations only to sources that exist """
+    text = out.text()
+    found = [f"style: minus sign after '{m.group(1)}' in '{m.group(0)}'; write 'behind by 0.10%'"
+             for m in _MINUS_AFTER.finditer(text)]
+    found += [f"citation: web address in the text ({u}); cite the source as [n] instead" for u in _URL.findall(text)]
+    found += [f"citation: [{n}] does not match a source" for n in _CITATION.findall(text) if not 1 <= int(n) <= sources]
+    return found
+
+
+def problems(out: AnalystOutput, facts: dict, sources: int = 0) -> list[str]:
+    """ Everything wrong with a draft: numbers not in the facts, changed ratings or verdict, and the wording
+    rules above. Web addresses are taken out before the number check (they are reported as citation problems) """
     text = _URL.sub("[source]", out.text())
     bad = check_numbers(text, facts)
     return ([f"number not in the facts: {n}" for n in bad]
-            + check_ratings(text, facts["scorecard"]))
+            + check_ratings(text, facts["scorecard"]) + style_problems(out, sources))
+
+
+def numbered_sources(search_summaries: list[dict] | None) -> list[dict]:
+    """ Sources numbered [1], [2] ... for citing; the report lists each number with its URL """
+    return [{"number": i, **s} for i, s in enumerate(search_summaries or [], start=1)]
 
 
 def prompt(facts: dict, search_summaries: list[dict] | None = None) -> str:
+    # The Analyst sees each source's number, query, date and summary, but not its URL, so it cites [n] only
+    sources = [{"source": f"[{s['number']}]", "query": s["query"], "date": s["date"], "summary": s["summary"]}
+               for s in numbered_sources(search_summaries)]
     return ("Facts (decided by code; quote only these numbers):\n" + json.dumps(facts, indent=1, ensure_ascii=False)
-            + "\n\nSearch summaries:\n" + (json.dumps(search_summaries, indent=1, ensure_ascii=False)
-                                           if search_summaries else "none"))
+            + "\n\nSources:\n" + (json.dumps(sources, indent=1, ensure_ascii=False) if sources else "none"))
 
 
 def rewrite_prompt(original: str, draft: AnalystOutput, issues: list[str]) -> str:
@@ -138,14 +161,15 @@ def template(facts: dict) -> AnalystOutput:
                 f"Other questions: {others}."]
     actions = []
     if any(p["summary"] == "Add peer" for p in pillars.values()):
-        actions.append("Add a comparable peer fund so that value and fees can be assessed.")
+        actions.append("Choose a comparable peer fund before the next quarterly review, so value and fees can be judged.")
     if any(p["rating"] == "CHECK DATA" for p in pillars.values()):
-        actions.append("Resolve the data checks listed in the report before relying on the verdict.")
+        actions.append("Resolve the data checks listed in the report before signing off this review.")
     if any(p["rating"] == "MANUAL CHECK" for p in pillars.values()):
-        actions.append("Complete the manual checks in the approval section.")
-    actions.append("Confirm or change the draft verdict in the approval section.")
+        actions.append("Check the fund's style and holdings against its policy before signing off this review.")
     if len(actions) < MIN_ACTIONS:
-        actions.append("Check the figures and their sources on pages 2 and 3.")
+        actions.append("Read the figures and their sources on pages 2 and 3 before signing off this review.")
+    if len(actions) < MIN_ACTIONS:
+        actions.append("Record the decision and its reasons in the approval section at this review.")
     return AnalystOutput(key_findings=findings, actions=actions[:MAX_ACTIONS], market_context=None)
 
 
@@ -165,10 +189,11 @@ async def write_narrative(facts: dict, search_summaries: list[dict] | None = Non
             # Market context must come from cited search summaries (spec 8.2); without them it is dropped
             result.output.market_context = None
             log.append("Market context dropped: no search summaries were given")
-        issues = problems(result.output, facts)
+        issues = problems(result.output, facts, len(search_summaries or []))
         if not issues:
-            log.append("Analyst draft passed the number and rating checks" + (" after one rewrite" if attempt else ""))
-            return Narrative(result.output, "ai", [], log)
+            log.append("Analyst draft passed the number, rating and wording checks" + (" after one rewrite" if attempt else ""))
+            sources = numbered_sources(search_summaries) if result.output.market_context else []
+            return Narrative(result.output, "ai", [], log, sources)
         log.append(f"Analyst draft {attempt + 1} rejected: " + "; ".join(issues))
         request = rewrite_prompt(first, result.output, issues)
     return Narrative(template(facts), "template", [DataFlag(

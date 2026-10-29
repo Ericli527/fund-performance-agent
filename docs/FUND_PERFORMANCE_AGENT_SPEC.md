@@ -327,6 +327,8 @@ All agents return structured JSON validated with Pydantic. Use the OpenAI Agents
 - If any item is `CHECK DATA`, explain what needs checking instead of drawing a conclusion.
 - Plain English, short sentences, no jargon without a one-line explanation.
 - Structure: 3 key findings, 2 to 3 recommended actions, short market context with sources.
+- Never a minus sign after "behind" or "below" ("behind by 0.10%"); code checks this. Every action is a real
+  task with a when, never a restatement of the verdict or an internal technical note.
 - Readable for experts and newcomers: plain meaning first, technical term second in brackets; explain each
   term once in under 10 words using the shared glossary (`glossary.py`); no unexplained abbreviations
   ("ongoing charge (OCF)"); sentences under 20 words, at most 2 per finding; say "Draft verdict"; at least one
@@ -348,6 +350,15 @@ All agents return structured JSON validated with Pydantic. Use the OpenAI Agents
   overlong or repeated queries. Searches run in parallel, one web search each, no retries; a failed search or a
   summary without a URL is left out (info flag). If the Planner fails twice, the review goes on without market
   context (warning flag). The report lists the planned query, URL and date of every summary used.
+- Queries: market_drivers queries are about the market, never the fund (e.g. "S&P 500 performance drivers Oct 2025
+  to Sep 2026"); code drops any that name the fund. Only fund-specific searches (changes, manager, fees) use the
+  fund's name. Prefer news and index-provider sources over fund data pages.
+- Vetting (code, before the Analyst): a summary is excluded, with an info flag, if it has no date, is dated outside
+  the 12-month review period, or states a fund or index return more than 0.5 pp from the factsheet figure for the
+  same series (and period, where named): "web source figures differ from factsheet, likely different currency or
+  date: excluded". Test 1: Morningstar USD pages (11.99% vs 17.0%) are excluded.
+- Citations: the market context cites sources as [1], [2]; the Analyst never sees or writes URLs, and the report
+  lists each number with its URL under Sources.
 
 ### 8.3 Number-guard validator (code)
 After the Analyst responds: extract all numbers from its text (regex for decimals and %). Every number must match a value in the facts JSON (allowing rounding to 1 d.p.). If not, reject and re-prompt once; if it fails again, use a template-only narrative and flag it.
@@ -448,4 +459,5 @@ Definition of done: all unit tests pass; Test 1 and Test 2 expected values repro
 |---|---|
 | **v1: next two days** | Steps 1 to 11 above on Test 1 (Fidelity Index US Fund). Value and Fees show "Add peer" when no peer is supplied. |
 | **v2: next step** | Peer comparison for value and fees (e.g. SPDR S&P 500 UCITS ETF); run Tests 2, 3 and 4 (currency trap, dual objective, short history, active fund). |
+| **v2: sources** | Option to fetch from an approved source list in config through the MCP Fetch server, instead of open web search. |
 | **v3: later** | Agree thresholds and rating rules with the oversight team; adapt inputs to the team's own data and processes. |

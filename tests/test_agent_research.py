@@ -6,8 +6,8 @@ import pytest
 from agents import WebSearchTool
 from agents.exceptions import AgentsException
 from fund_performance.agents.analyst import AnalystOutput, problems, prompt as analyst_prompt, write_narrative
-from fund_performance.agents.research import (planner_agent, planner_input, research, search_agent, tidy_plan,
-                                              SearchPlan)
+from fund_performance.agents.research import (FIGURES_DIFFER, planner_agent, planner_input, research, search_agent,
+                                              tidy_plan, vet_summaries, SearchPlan)
 from fund_performance.config import load_thresholds
 from fund_performance.mandate import decision_path
 from fund_performance.models import FundProfile
@@ -29,8 +29,10 @@ def card(prof=None):
 
 
 def plan(n=5, **extra):
-    return {"searches": [{"topic": ["fund_news", "manager_changes", "market_drivers"][i % 3],
-                          "query": f"Sample World Index Fund question {chr(65 + i)}", "reason": "context"}
+    topics = ["fund_news", "manager_changes", "market_drivers"]
+    return {"searches": [{"topic": topics[i % 3],
+                          "query": (f"Global shares question {chr(65 + i)}" if topics[i % 3] == "market_drivers"
+                                    else f"Sample World Index Fund question {chr(65 + i)}"), "reason": "context"}
                          for i in range(n)] + extra.get("more", [])}
 
 
@@ -52,7 +54,8 @@ def test_limits_and_settings(monkeypatch):
 def test_planner_sees_public_fund_details_only():
     prof = profile()
     text = planner_input(prof, card(prof))
-    assert prof.fund_name in text and prof.benchmark_name in text and "Review period: 30 Sep 2025 to 30 Sep 2026" in text
+    assert prof.fund_name in text and prof.benchmark_name in text
+    assert "Review period: Oct 2025 to Sep 2026 (30 Sep 2025 to 30 Sep 2026" in text
     assert prof.objective_text not in text and "%" not in text          # no figures, no documents
 
 
@@ -120,7 +123,7 @@ def test_planner_failure_means_no_research_but_the_review_goes_on():
     assert out.summaries == [] and out.flags[0].level == "warning" and "no market context" in out.flags[0].message
 
 
-# The Analyst with search summaries
+# The Analyst with sources
 FACTS = {"scorecard": {"verdict": "Monitor until a peer is added", "verdict_reason": "x",
                        "pillars": [{"name": "Performance", "rating": "GREEN", "reason": "x", "summary": None,
                                     "sub_ratings": [], "notes": []}]},
@@ -129,25 +132,102 @@ SUMMARIES = [{"query": "US shares 2026", "summary": "US shares rose 25.3% in the
               "url": "https://example.com/markets?page=3.5", "date": "2026-09-30"}]
 
 
-def test_market_context_cites_urls_without_tripping_the_number_guard():
-    out = AnalystOutput(key_findings=["a", "b", "c"], actions=["x", "y"],
-                        market_context="US shares rose, led by technology (https://example.com/markets?page=3.5).")
-    assert problems(out, FACTS) == []
+def _context(text):
+    return AnalystOutput(key_findings=["a", "b", "c"], actions=["x", "y"], market_context=text)
 
 
-def test_figures_from_search_summaries_are_not_allowed():
-    out = AnalystOutput(key_findings=["a", "b", "c"], actions=["x", "y"],
-                        market_context="US shares rose 25.3% (https://example.com/markets?page=3.5).")
-    assert problems(out, FACTS) == ["number not in the facts: 25.3%"]
+def test_market_context_cites_numbered_sources():
+    assert problems(_context("US shares rose, led by technology [1]."), FACTS, sources=1) == []
 
 
-def test_summaries_reach_the_analyst_and_market_context_is_kept():
-    good = {"key_findings": ["a", "b", "c"], "actions": ["x", "y"],
-            "market_context": "US shares rose, led by technology (https://example.com/markets?page=3.5)."}
+def test_web_addresses_in_the_text_are_rejected():
+    found = problems(_context("US shares rose (https://example.com/markets?page=3.5)."), FACTS, sources=1)
+    assert found == ["citation: web address in the text (https://example.com/markets?page=3.5); "
+                     "cite the source as [n] instead"]
+
+
+def test_a_citation_without_a_source_is_rejected():
+    assert problems(_context("US shares rose [2]."), FACTS, sources=1) == ["citation: [2] does not match a source"]
+
+
+def test_figures_from_sources_are_not_allowed():
+    assert problems(_context("US shares rose 25.3% [1]."), FACTS, sources=1) == ["number not in the facts: 25.3%"]
+
+
+def test_the_analyst_sees_numbered_sources_without_urls_and_the_report_gets_them():
+    good = {"key_findings": ["a", "b", "c"], "actions": ["x", "y"], "market_context": "US shares rose, led by technology [1]."}
     fake = FakeRun(good)
     result = asyncio.run(write_narrative(FACTS, SUMMARIES, run=fake))
-    assert result.source == "ai" and result.output.market_context.startswith("US shares rose")
-    assert "https://example.com/markets?page=3.5" in fake.prompts[0] == analyst_prompt(FACTS, SUMMARIES)
+    assert result.source == "ai" and result.output.market_context.endswith("[1].")
+    assert '"source": "[1]"' in fake.prompts[0] and "https://" not in fake.prompts[0]
+    assert fake.prompts[0] == analyst_prompt(FACTS, SUMMARIES)
+    assert result.sources == [{"number": 1, **SUMMARIES[0]}]
+
+
+# Planner rules and vetting the summaries
+def test_planner_and_search_rules():
+    text = planner_agent(MAX).instructions
+    assert "never the fund" in text and "S&P 500 performance drivers Oct 2025 to Sep 2026" in text
+    assert "rather than fund data pages" in text
+    assert "index-provider sources" in search_agent().instructions
+
+
+def test_a_market_query_that_names_the_fund_is_dropped():
+    prof = profile()
+    raw = SearchPlan.model_validate({"searches": [
+        {"topic": "market_drivers", "query": "Sample World Index Fund drivers 2026", "reason": "x"},
+        {"topic": "market_drivers", "query": "XX0000000001 market news", "reason": "x"},
+        {"topic": "market_drivers", "query": "Global shares drivers Oct 2025 to Sep 2026", "reason": "x"},
+        {"topic": "fund_news", "query": "Sample World Index Fund fee change", "reason": "x"}]})
+    kept, log = tidy_plan(raw, MAX, prof)
+    assert [k.query for k in kept] == ["Global shares drivers Oct 2025 to Sep 2026", "Sample World Index Fund fee change"]
+    assert len(log) == 2 and all("names the fund" in line for line in log)
+
+
+def _s(summary, date="2026-06-30", url="https://news.example/a"):
+    return {"query": "q", "summary": summary, "url": url, "date": date}
+
+
+VET_FACTS = {"fund": {"as_of_date": "2026-09-30"},
+             "figures": [{"name": "fund_nav.cum.1y", "value": 17.5, "unit": "%"},
+                         {"name": "fund_pnav.cum.1y", "value": 17.0, "unit": "%"},
+                         {"name": "index.cum.1y", "value": 17.1, "unit": "%"},
+                         {"name": "fund_nav.calendar.2025", "value": 9.6, "unit": "%"},
+                         {"name": "index.ann.5y", "value": 13.9, "unit": "%"}]}
+
+
+@pytest.mark.parametrize("summary,kept", [
+    ("Sample World Index Fund returned 11.99% over 1 year.", False),        # e.g. a USD data page
+    ("Sample World Index Fund returned 17.3% over 1 year.", True),          # within 0.5 pp of 17.5
+    ("Sample World Index Fund gained 9.4% in 2025.", True),
+    ("Sample World Index Fund gained 12.0% in 2025.", False),
+    ("The Sample World market rose 13.9% a year over 5 years.", True),
+    ("Shares rose, and one sector gained 40% in the year.", True),          # not the fund or its index
+])
+def test_returns_that_differ_from_the_factsheet_exclude_the_summary(summary, kept):
+    out, flags, _ = vet_summaries([_s(summary)], profile(), VET_FACTS)
+    assert bool(out) == kept
+    if not kept:
+        assert flags[0].level == "info" and flags[0].message.startswith(FIGURES_DIFFER)
+
+
+@pytest.mark.parametrize("date,reason", [(None, "has no date"), ("2025-09-29", "outside the review period"),
+                                          ("2026-10-01", "outside the review period")])
+def test_undated_or_out_of_period_summaries_are_excluded(date, reason):
+    out, flags, _ = vet_summaries([_s("Shares rose.", date=date)], profile(), VET_FACTS)
+    assert out == [] and reason in flags[0].message and flags[0].level == "info"
+
+
+@requires_test1
+def test_test1_morningstar_usd_figure_is_excluded():
+    from test_agent_analyst import _test1_facts
+    from fund_performance.io import read_json
+    prof = read_json(TEST1_PROFILE)
+    morningstar = _s("Fidelity Index US P Acc returned 11.99% over 1 year in USD.", "2026-09-30",
+                     "https://www.morningstar.com/funds/x")
+    index = _s("The S&P 500 returned 17.1% over 1 year in sterling terms.", "2026-09-30")
+    out, flags, _ = vet_summaries([morningstar, index], prof, _test1_facts())
+    assert out == [index] and "11.99% (fund, 1y)" in flags[0].message
 
 
 @pytest.mark.live
@@ -169,16 +249,18 @@ def test_live_test1_research_and_analyst():
                       checked.comparison.fund_series, checked.comparison.extra_tolerance_pp)
 
     found = asyncio.run(research(prof, scorecard, MAX))
+    facts = _test1_facts()
+    vetted, vet_flags, vet_log = vet_summaries(found.summaries, prof, facts)
     print("\n--- Planner ---")
     for item in found.plan:
         print(f" [{item.topic}] {item.query}  ({item.reason})")
     print("--- Search summaries ---")
     for s in found.summaries:
         print(f" - {s['query']}\n   {s['summary']}\n   {s['url']} ({s['date']})")
-    print("Research log:", *found.log, sep="\n  ")
+    print("Research log:", *found.log, *vet_log, sep="\n  ")
+    print("Excluded:", *[f.message for f in vet_flags], sep="\n  ")
 
-    facts = _test1_facts()
-    narrative = asyncio.run(write_narrative(facts, found.summaries))
+    narrative = asyncio.run(write_narrative(facts, vetted))
     print(f"\n--- Oversight Analyst ({narrative.source}) ---")
     for f in narrative.output.key_findings:
         print(" -", f)
@@ -186,8 +268,9 @@ def test_live_test1_research_and_analyst():
     for a in narrative.output.actions:
         print(" -", a)
     print("Market context:", narrative.output.market_context)
+    print("Sources:", *[f"[{s['number']}] {s['url']} ({s['date']})" for s in narrative.sources], sep="\n  ")
     print("Analyst log:", *narrative.log, sep="\n  ")
 
     assert 1 <= len(found.plan) <= MAX and found.summaries
     assert all(s["url"].startswith("http") for s in found.summaries)
-    assert problems(narrative.output, facts) == []
+    assert problems(narrative.output, facts, len(vetted)) == []
