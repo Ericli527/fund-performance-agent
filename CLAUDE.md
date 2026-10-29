@@ -46,6 +46,11 @@ Instructions for Claude Code in this project. The build specification is
 - Calendar years: only full calendar years after launch, last 10 at most.
 - Since-launch: the factsheet figure wins; the difference and its reason go in the run log only.
 - Hit rate (index funds): a window counts if abs(TD) <= OCF + 0.10 (own config key).
+- Index fund Performance: TD and TE rated separately, Performance = the weaker; both sub-ratings and
+  the reason shown. TE: 5y calculated with an index series, else factsheet 3y labelled "3y (factsheet)";
+  note when periods differ.
+- Ratings compare values at the stored 2 d.p. (a value on a limit counts as within it).
+- `precedence.py` is part of the module list (spec Section 11).
 - Risk-free rate: 0 for v1, with a flag. Prefer the factsheet Sharpe ratios where supplied.
 - Charts are built in step 9 with the report.
 - Emailing the report is a plain code function (not an AI agent), off by default, set up in

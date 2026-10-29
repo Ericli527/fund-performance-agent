@@ -55,7 +55,7 @@ def apply_precedence(calculated: CalcResult, price_flags: list[DataFlag], profil
 
     _returns(out, calculated, calc_series, factsheet)
     _discrete_and_calendar(out, calculated, calc_series, factsheet)
-    _since_launch(out, calculated, profile, factsheet)
+    _since_launch(out, calculated, profile, factsheet, calc_series)
     _risk(out, calculated, factsheet, calc_series)
     if factsheet is not None and PRICE_SERIES in factsheet.series:
         out.flags += _cross_check(out, calculated, factsheet, t.cross_check_tolerance_pp)
@@ -112,25 +112,31 @@ def _discrete_and_calendar(out: ReportedFigures, calculated: CalcResult, calc_se
 
 
 def _since_launch(out: ReportedFigures, calculated: CalcResult, profile: FundProfile,
-                  factsheet: FactsheetPerformance | None) -> None:
-    reported = factsheet.series.get(PRICE_SERIES) if factsheet else None
-    annual = factsheet.series_annualised.get(PRICE_SERIES) if factsheet else None
-    calc_cum = calculated.figures.get("fund.since_launch.cum")
+                  factsheet: FactsheetPerformance | None, calc_series: dict[str, str]) -> None:
+    """ Since-launch figures for every series: factsheet first, calculated otherwise. A gap between the
+    calculated and factsheet fund figure is explained in the run log only (owner decision) """
     period = f"since {profile.launch_date:%Y-%m-%d}"
-    if reported is not None and reported.since_launch is not None:
-        out.figures[f"{PRICE_SERIES}.since_launch.cum"] = _factsheet(reported.since_launch, "%", period)
-        if calc_cum is not None:
-            start = calc_cum.period.removeprefix("since ")
-            reason = (f"the price file has no launch-day price, so the calculation starts at the first price "
-                      f"after launch ({start})" if start != f"{profile.launch_date:%Y-%m-%d}" else "see the price file")
-            out.log.append(f"Since-launch cumulative: calculated {calc_cum.exact:.1f}% vs factsheet "
-                           f"{reported.since_launch:.1f}%; {reason}. The factsheet figure is used")
-    elif calc_cum is not None:
-        out.figures[f"{PRICE_SERIES}.since_launch.cum"] = calc_cum
-    if annual is not None and annual.since_launch is not None:
-        out.figures[f"{PRICE_SERIES}.since_launch.ann"] = _factsheet(annual.since_launch, "%", period)
-    elif "fund.since_launch.ann" in calculated.figures:
-        out.figures[f"{PRICE_SERIES}.since_launch.ann"] = calculated.figures["fund.since_launch.ann"]
+    names = set(factsheet.series if factsheet else []) | set(calc_series.values())
+    for name in sorted(names):
+        reported = factsheet.series.get(name) if factsheet else None
+        annual = factsheet.series_annualised.get(name) if factsheet else None
+        calc_prefix = next((k for k, v in calc_series.items() if v == name), None)
+        calc_cum = calculated.figures.get(f"{calc_prefix}.since_launch.cum") if calc_prefix else None
+        calc_ann = calculated.figures.get(f"{calc_prefix}.since_launch.ann") if calc_prefix else None
+        if reported is not None and reported.since_launch is not None:
+            out.figures[f"{name}.since_launch.cum"] = _factsheet(reported.since_launch, "%", period)
+            if calc_cum is not None and name == PRICE_SERIES:
+                start = calc_cum.period.removeprefix("since ")
+                reason = (f"the price file has no launch-day price, so the calculation starts at the first price "
+                          f"after launch ({start})" if start != f"{profile.launch_date:%Y-%m-%d}" else "see the price file")
+                out.log.append(f"Since-launch cumulative: calculated {calc_cum.exact:.1f}% vs factsheet "
+                               f"{reported.since_launch:.1f}%; {reason}. The factsheet figure is used")
+        elif calc_cum is not None:
+            out.figures[f"{name}.since_launch.cum"] = calc_cum
+        if annual is not None and annual.since_launch is not None:
+            out.figures[f"{name}.since_launch.ann"] = _factsheet(annual.since_launch, "%", period)
+        elif calc_ann is not None:
+            out.figures[f"{name}.since_launch.ann"] = calc_ann
 
 
 def _risk(out: ReportedFigures, calculated: CalcResult, factsheet: FactsheetPerformance | None,

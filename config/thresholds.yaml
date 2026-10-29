@@ -41,11 +41,12 @@ mandate_index:
   amber_beta_range: [0.90, 1.10]
 
 # Section 6.2: Performance vs benchmark
+# Index funds: TD and TE are rated separately; Performance is the weaker of the two (owner decision)
 performance_index:
-  green_td_margin_over_ocf_pp: 0.10      # GREEN: abs(TD) <= OCF + 0.10
-  green_max_te_pct: 0.30                 #        and TE <= 0.30
-  amber_td_margin_over_ocf_pp: 0.30      # AMBER: abs(TD) <= OCF + 0.30
-  amber_max_te_pct: 1.00                 #        or TE <= 1.00
+  green_td_margin_over_ocf_pp: 0.10      # TD: GREEN if abs(TD) <= OCF + 0.10
+  green_max_te_pct: 0.30                 # TE: GREEN if TE <= 0.30
+  amber_td_margin_over_ocf_pp: 0.30      # TD: AMBER if abs(TD) <= OCF + 0.30, else RED
+  amber_max_te_pct: 1.00                 # TE: AMBER if TE <= 1.00, else RED
   hit_rate_td_margin_over_ocf_pp: 0.10   # hit rate (spec 4.4): a 12-month window counts if abs(TD) <= OCF + 0.10 (owner decision)
 performance_active_target:
   green_min_excess_pct: 0.0              # GREEN: annualised excess over horizon >= 0

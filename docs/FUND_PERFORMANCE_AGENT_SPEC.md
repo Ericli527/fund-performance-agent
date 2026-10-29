@@ -231,10 +231,16 @@ Four questions, each `GREEN`, `AMBER`, `RED` or `CHECK DATA`. Thresholds below a
 - RED: clear drift from mandate.
 
 ### 6.2 Performance vs benchmark (main period = horizon)
-Index funds (use cost-adjusted tracking difference and TE):
-- GREEN: `abs(TD) <= OCF + 0.10` and `TE <= 0.30`
-- AMBER: `abs(TD) <= OCF + 0.30` or `TE <= 1.00`
-- RED: otherwise (but `CHECK DATA` if based on price data only and gap > 1.0%)
+Index funds: tracking difference and tracking error are rated separately, and Performance is the weaker of
+the two (the same rule as for dual objectives). The report shows both sub-ratings and the reason.
+- Tracking difference (annualised, main period, fair basis, e.g. PNAV vs index): GREEN if `abs(TD) <= OCF + 0.10`,
+  AMBER if `abs(TD) <= OCF + 0.30`, else RED. Widened by the timing tolerance when PNAV is unavailable.
+- Tracking error: GREEN if `TE <= 0.30`, AMBER if `TE <= 1.00`, else RED. Use the 5-year calculated TE when an
+  index price series is available; otherwise the factsheet 3-year TE, labelled "3y (factsheet)". When the TD and
+  TE periods differ, the report notes it.
+- A fund 3% behind its index with a low TE is RED.
+- `CHECK DATA` instead of RED if based on price data only and the gap is > 1.0%.
+- Ratings compare values at the stored 2 d.p., so a value exactly on a limit counts as within it.
 
 Active funds with a target:
 - GREEN: annualised excess over horizon >= 0
@@ -260,7 +266,7 @@ Uses the peer return gap over the main period (annualised, net of fees):
 - Else -> **Retain**
 - Any `CHECK DATA` on Performance or Mandate -> verdict "Pending data check" (no verdict until resolved).
 
-Expected example (Test 1, no peer supplied): Mandate GREEN, Performance GREEN (tracking error 0.02), Value and Fees AMBER with reason "no comparison available" (shown as "Add peer" in the summary) -> draft verdict **Monitor until a peer is added**. Never invent peer figures.
+Expected example (Test 1, no peer supplied): Mandate GREEN (R2 1.00, beta 1.00, 3y factsheet), Performance GREEN (TD -0.10 pp a year over 5 years, PNAV vs index, within OCF + 0.10 = 0.16; TE 0.02, 3y (factsheet); note that the periods differ), Value and Fees AMBER with reason "no comparison available" (shown as "Add peer" in the summary) -> draft verdict **Monitor until a peer is added**. Never invent peer figures.
 
 ---
 
@@ -380,7 +386,7 @@ Keep the manager's published Value Assessment Report out of the agent's inputs. 
 
 ## 11. Build order for Claude Code
 
-1. **Project setup:** `src/` modules: `io.py` (file reader), `checks.py` (Section 3.4), `calc.py` (Section 4), `mandate.py` (decision tree), `scorecard.py` (Section 6), `agents/` (Section 8), `report.py` (Section 9); `config/thresholds.yaml`; `tests/`.
+1. **Project setup:** modules in the package `src/fund_performance/`: `io.py` (file reader), `checks.py` (Section 3.4), `calc.py` (Section 4), `precedence.py` (factsheet precedence and cross-check, step 4), `mandate.py` (decision tree), `scorecard.py` (Section 6), `agents/` (Section 8), `report.py` (Section 9), `controller.py` (Section 8.5); `config/thresholds.yaml`; `tests/`.
 2. **File reader + data checks** with unit tests for Tests 1 and 2 (dates, trailing comma, `-` values, repeated prices, currency mismatch).
 3. **Calculator** with unit tests reproducing the Test 1 figures exactly.
 4. **Factsheet precedence and cross-check** (0.3 pp tolerance).
