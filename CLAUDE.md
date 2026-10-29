@@ -83,6 +83,9 @@ Instructions for Claude Code in this project. The build specification is
   non-US funds), market news must name the market. v2: MCP Fetch with an approved source list.
 - Risk-free rate: 0 for v1, with a flag. Prefer the factsheet Sharpe ratios where supplied.
 - Charts are built in step 9 with the report.
+- Report (step 9): 3 main pages (Summary; Mandate and performance; Value, fees and AoV) plus an
+  appendix, 4 pages, 5 at most. Over 5: shorten the appendix first; a main page running over is an
+  error. Saved to `runs/<timestamp>/` with `facts.json` and `run_log.txt`; `--offline` skips AI steps.
 - Emailing the report is a plain code function (not an AI agent), off by default, set up in
   step 10. Recipients come from settings only.
 - The old app (root-level `*.py`) keeps running until the new front end replaces it in step 11.

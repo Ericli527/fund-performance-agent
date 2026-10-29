@@ -1,9 +1,9 @@
 # Fund Performance Agent: Build Specification
 
-Purpose: fund documents in, a 3-page performance review out.
+Purpose: fund documents in, a 3-page performance review (plus an appendix) out.
 **Code does the maths and the decisions. AI reads and writes. A person makes the final call.**
 
-This spec follows the design diagram `Fund_Performance_Agent_Overview.pdf` (workflow controller in code, 7 steps, 6 AI agents, 4 oversight questions, max 5 web searches in the demo, 3-page report, 1 person signs off). The 6 AI agents are: Extractor, Mandate, Planner, Search (several copies run in parallel), Oversight Analyst, Evaluator. Build in the order given in Section 11.
+This spec follows the design diagram `Fund_Performance_Agent_Overview.pdf` (workflow controller in code, 7 steps, 6 AI agents, 4 oversight questions, max 5 web searches in the demo, 3-page report plus an appendix, 1 person signs off). The 6 AI agents are: Extractor, Mandate, Planner, Search (several copies run in parallel), Oversight Analyst, Evaluator. Build in the order given in Section 11.
 
 ---
 
@@ -401,11 +401,41 @@ A plain Python function (not an AI agent) that runs: read files -> data checks -
 - Enforces limits from config: max searches, max one rewrite, timeouts.
 - Logs each step (start, end, inputs used) to `runs/<timestamp>/log.json`; the report's sources list is built from this log.
 
-## 9. Report (Step 7): 3-page PDF
+## 9. Report (Step 7): 3 main pages plus an appendix
 
-1. **Summary and scorecard:** fund, question, as-of date, draft verdict (Retain/Monitor/Review), 4 ratings with one-line reasons, data flags, approval box (reviewer name, date, Retain/Monitor/Review, signature).
-2. **Mandate and performance:** objective and promises, decision-tree path taken, 1/3/5y table (fund, benchmark, gap; cumulative and annualised), discrete 12-month table, risk table, charts.
-3. **Value, fees and sources:** peer comparison, fee comparison, AoV 7-factor table, thresholds used, list of every file and web source, AI-extracted figures marked "please verify", disclaimer. A short glossary at the end, one line each for the terms used (tracking difference, tracking error, PNAV, OCF, R², beta, pp), with the same definitions as the Analyst prompt (`glossary.py`).
+Length: 4 pages (3 main pages + 1 appendix page), 5 at most. Each main section starts on its own page.
+If the content runs over 5 pages, the appendix is shortened first (info flags cut to the first 6 with
+"... and N more (full list in run_log.txt)", thresholds cut to the main lines). A main page that runs
+over is an error (`ReportLayoutError`), never a silent overflow. Code checks this after every render.
+
+1. **Summary** (must stand on its own): fund, question, review date; draft verdict; the 4 ratings
+   with one-line plain-English reasons and Green/Amber/Red colours; key findings and actions;
+   approval box (reviewer name, date, Retain / Monitor / Review, signature) with a tick box for each
+   Manual check item.
+2. **Mandate and performance:** objective, promises and the decision-tree path; 1/3/5-year table
+   (fund, index, gap; cumulative and annualised); calendar years; risk table with sources; data
+   notes; charts: growth of 100 and yearly returns, fund vs index.
+3. **Value, fees and Assessment of Value:** peer and fee comparison ("Add peer" callout when there
+   is no peer); the AoV 7-factor table (Covered / Partly / Not assessed) with its disclaimer; market
+   context with [n] citations ("No market context" when there is none).
+4. **Appendix:** flags by level (blocking, warning, info); excluded web sources with reasons;
+   numbered sources with dates ("published" or "as at") and every input file; thresholds
+   ("illustrative, to be agreed with the oversight team"); glossary (`glossary.py`); known
+   limitations (Section 12); the "public data only" note and the disclaimer.
+
+Display rules:
+- Percentages to 1 d.p.; tracking error, tracking difference, alpha, beta, R² and information ratio
+  to 2 d.p. Displayed from the exact value, so rounded once.
+- Negative numbers use the minus sign "−". Missing figures show "–".
+- AI-extracted figures are marked "(please verify)".
+- Every figure shows its source (calculated, factsheet, KID, profile).
+- The template narrative (used offline or when the AI text fails its checks) is plain English.
+- Style: clean, navy headings, Green/Amber/Red rating chips, DejaVu Sans font (shipped with
+  matplotlib, so the same on any machine).
+
+Output: `runs/<YYYYMMDD-HHMMSS>/report.pdf`, with `facts.json` and `run_log.txt` beside it.
+Command: `PYTHONPATH=src python -m fund_performance.run_report --data data/test1` (add `--offline`
+to skip all AI steps; the report then carries an info flag saying so).
 
 Target runtime: about 1 to 2 minutes end to end.
 
@@ -455,7 +485,7 @@ Keep the manager's published Value Assessment Report out of the agent's inputs. 
 6. **Extractor and Mandate agents** with Pydantic schemas.
 7. **Oversight Analyst + number-guard validator.**
 8. **Planner + parallel Search agents** (max 5, no retries).
-9. **3-page PDF report** with charts and approval box.
+9. **PDF report** (3 main pages + appendix, 5 pages at most) with charts and approval box.
 10. **Evaluator agent + workflow controller** (Sections 8.4 and 8.5); unit test that a draft with a changed rating or an unsupported claim is rejected.
 11. **Gradio front end** (upload files, ask the question, download the PDF); deploy as with the existing project.
 12. **Run all 4 test cases**, compare Test 1 with the published Value Assessment Report, and record results in `tests/RESULTS.md`.
