@@ -10,6 +10,7 @@ The split between code and AI (v1):
   left out and the run is flagged.
 """
 from dataclasses import dataclass, field
+from datetime import date
 import json
 import re
 from typing import Awaitable, Callable, Literal
@@ -17,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from fund_performance.actions import candidate_actions, default_actions
 from fund_performance.agents.base import RunFn, build_agent, run_structured
 from fund_performance.agents.evaluator import Review
+from fund_performance.citation_dates import citation_date_problems
 from fund_performance.glossary import glossary_lines
 from fund_performance.models import DataFlag
 from fund_performance.number_guard import check_labels, check_ratings, numbers_in
@@ -45,6 +47,8 @@ Rules:
 - Direction only: no figures at all (no %, pp or numbers from the sources or the facts), e.g. "US shares
   rose, led by technology [1]".
 - Describe only what the cited sources cover: if they cover only part of the review period, say which part.
+  Each sentence's claims must be covered by its cited source's date and content: never describe a month later
+  than the cited source's date (checked by code).
 - At most 3 sentences, each under 20 words. Plain English: everyday market words (technology shares, interest
   rates, inflation, volatility) are fine; explain a glossary term in brackets if you use one.
 - Never mention, change or comment on a rating or the verdict.
@@ -337,6 +341,11 @@ def _template(facts: dict, message: str, log: list[str]) -> Narrative:
     return Narrative(template(facts), "template", [DataFlag(check="analyst", level="warning", message=message)], log)
 
 
+def _period_end(facts: dict) -> date:
+    as_of = facts.get("fund", {}).get("as_of_date")
+    return date.fromisoformat(as_of) if as_of else date.today()
+
+
 def evaluator_view(facts: dict, draft: AnalystDraft) -> dict:
     """ What the Evaluator sees: the AI's market context to judge, and code's text for context only """
     return {"findings_written_by_code_not_judged": code_findings(facts),
@@ -384,6 +393,16 @@ async def write_narrative(facts: dict, search_summaries: list[dict] | None = Non
                 continue
             return _template(facts, f"{CHECKS_FAILED}: {' / '.join(failed_checks(issues))}; {LEFT_OUT}", log)
         log.append(f"Analyst draft {draft_no} passed the figure, rating and wording checks")
+        # Citation dates (code), counted as a quality issue: it uses the Evaluator's rewrite
+        dated = citation_date_problems(draft.market_context, sources, _period_end(facts))
+        if dated:
+            log.append(f"Citation-date check rejected draft {draft_no}: " + "; ".join(dated))
+            if evaluator_rewrites < max_evaluator_rewrites:
+                evaluator_rewrites += 1
+                request = rewrite(draft, dated)
+                continue
+            return _template(facts, f"{QUALITY_FAILED}: the market context describes months after its cited "
+                                    f"sources (sources_cited); {LEFT_OUT}", log)
         if quality_check is not None:
             verdict = await quality_check(facts, sources, evaluator_view(facts, draft))
             if verdict.error:

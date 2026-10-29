@@ -102,7 +102,10 @@ Instructions for Claude Code in this project. The build specification is
   supported_claims, sources_cited, check_data_handled, plain_english); output {pass, issues} only; runs only
   on drafts that pass code's checks. Rejected -> "AI text failed quality check: the Evaluator rejected the
   draft (...); market context left out"; unreachable or no valid answer -> "AI text not quality-checked: ...".
-  Everyday market words are fine; it gets the glossary.
+  Everyday market words are fine; it gets the glossary. Citation dates (code, before it): a sentence may
+  not describe a month after its cited source's date; counts as a quality issue (uses its rewrite).
+- Search agent summarises only the page whose URL it returns. Duplicate URLs are dropped before any other
+  vetting check, so a kept approved page is never also listed as excluded.
 - Planner queries: plain words only; code removes search operators (site:, inurl: ...).
 - Controller (step 10, `controller.py`): stops (RunStopped) only when the run cannot be scored (missing or
   invalid inputs, unreadable prices, report not fitting); blocking data checks give CHECK DATA, not a stop.

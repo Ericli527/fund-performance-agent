@@ -391,7 +391,9 @@ rating / wording; market context left out"). The findings and actions are code's
     (Test 1: the Fidelity fund page's 0.06% fee and 15% withholding tax).
   - Market news may be dated up to `vetting.market_grace_days` (31, `config/sources.yaml`) after the period end,
     as period reviews come out just after the period (Test 1: the Nasdaq September 2026 review).
-  - Identical URLs are kept once; the first kept wins, so an approved source beats a web result (log only).
+  - Identical URLs are kept once; the first kept wins, so an approved source beats a web result (log only). This
+    check runs first, so a page already kept is never also listed as excluded.
+- The Search agent summarises only the page whose URL it returns, never content from other results.
 - Citations: the market context cites sources as [1], [2]; the Analyst never sees or writes URLs, and the report
   lists each number with its URL under Sources.
 - Dates: a page with no publish date but an "as at" or "updated" date is kept with `date_basis: "as_at"`; only
@@ -440,7 +442,8 @@ Rubric (each must pass):
 1. **no_rating_change:** the text never states or suggests a rating or verdict, or a different one.
 2. **supported_claims:** every statement is supported by a cited source; direction only, no figures; it covers
    only the part of the review period the cited sources cover, and says which part.
-3. **sources_cited:** every market or news statement cites a numbered source [n].
+3. **sources_cited:** every market or news statement cites a numbered source [n]; each sentence's claims must be
+   covered by the cited source's date and content.
 4. **check_data_handled:** the text draws no conclusion about any `CHECK DATA` item.
 5. **plain_english:** short sentences; a glossary term or abbreviation (pp, PNAV, NAV, OCF, R², AoV, AFM ...) has
    its definition in brackets at first use. Only glossary terms need one; everyday market words (AI, large-cap,
@@ -453,6 +456,12 @@ Flow:
 - Input: the facts JSON, the numbered sources without URLs, and
   `{findings_written_by_code_not_judged, market_context_to_judge, actions_written_by_code_not_judged}`. Public
   data only.
+- Citation dates (code, `citation_dates.py`, before the Evaluator): a sentence may not describe a month later than
+  its newest cited source's date (a month, quarter or half year named, or "later in / over the period" = the
+  period's last quarter). Such a sentence is a quality issue (`sources_cited`) and uses the Evaluator's rewrite;
+  then "AI text failed quality check: the market context describes months after its cited sources
+  (sources_cited); market context left out". From the full run: three sentences cited a source dated 2025-11-03
+  but described "the later part of the period" and "September 2026".
 - An issue with `pass: true` still counts as a fail. `pass: false` with no issues is invalid output (retried once).
 - If it rejects a draft, its issues (with every earlier issue) go to the Analyst for its one rewrite
   (`limits.max_evaluator_rewrites`); the rewrite goes through code's checks again, then the Evaluator.

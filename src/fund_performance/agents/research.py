@@ -66,7 +66,8 @@ You run one web search for an investment oversight review and summarise what you
   another date.
 - Summary: 2 to 4 short sentences in plain English on what the sources say that matters for the reason
   given. Only report what the sources say. No opinions, no investment advice.
-- url: the web address of the main source you used.
+- url: the web address of the main source you used. Summarise only that page: never add content from other
+  results, so the summary, the URL and the date all belong to the same page.
 - date: the source's publication date as YYYY-MM-DD, with date_basis "published". If there is no
   publication date but the page states an "as at" or "updated" date, give that date with date_basis
   "as_at". If the page shows no date at all, give null for both.
@@ -432,7 +433,8 @@ def vet_summaries(summaries: list[dict], profile: FundProfile, facts: dict, tole
     from web searches must fall inside the period, or up to market_grace_days after its end (period reviews
     come out just after the period).
 
-    A summary with the same URL as one already kept is left out (log only) """
+    A summary with the same URL as one already kept is left out first, before any other check (log only), so it
+    is never also listed as excluded """
     start, end = review_period(profile)
     kept, flags, log = [], [], []
 
@@ -441,6 +443,10 @@ def vet_summaries(summaries: list[dict], profile: FundProfile, facts: dict, tole
         log.append(f"Summary excluded, {why}: {s['query']}")
 
     for s in summaries:
+        # First, so a page already kept (e.g. as an approved source) is not also listed as excluded
+        if any(same_url(k["url"]) == same_url(s["url"]) for k in kept):
+            log.append(f"Summary left out, same URL as a source already kept: {s['query']} ({s['url']})")
+            continue
         if not s.get("date"):
             exclude(s, "web source has no date (published or as at): excluded")
             continue
@@ -464,9 +470,6 @@ def vet_summaries(summaries: list[dict], profile: FundProfile, facts: dict, tole
         bad = conflicting_figures(s["summary"], profile, facts, tolerance_pp)
         if bad:
             exclude(s, f"{FIGURES_DIFFER}: {', '.join(bad)}")
-            continue
-        if any(same_url(k["url"]) == same_url(s["url"]) for k in kept):
-            log.append(f"Summary left out, same URL as a source already kept: {s['query']} ({s['url']})")
             continue
         kept.append(s)
     return kept, flags, log

@@ -191,8 +191,8 @@ def test_approved_page_summaries_get_the_same_checks_as_web_results():
     prof = profile()
     good = {"query": "Approved source: Fund page", "topic": "fund_news", "url": FUND_SRC.url, "date": "2026-09-30",
             "date_basis": "as_at", "summary": "Sample World Index Fund A Acc charges 0.10% a year."}
-    old = good | {"date": "2024-03-31"}
-    other = good | {"summary": "Another Manager Global Fund changed its index."}
+    old = good | {"date": "2024-03-31", "url": "https://example.com/old"}
+    other = good | {"summary": "Another Manager Global Fund changed its index.", "url": "https://example.com/other"}
     market = good | {"topic": "market_drivers", "url": INDEX_SRC.url, "summary": "Bond yields rose."}
     kept, flags, _ = vet_summaries([good, old, other, market], prof, {"figures": []})
     assert kept == [good] and len(flags) == 3
@@ -301,9 +301,10 @@ def test_approved_sources_and_fund_facts_may_be_dated_after_the_period_end():
                    url="https://example.com/fund") | {"query": "Approved source: Fund page", "approved": True}
     index_page = _s("Sample World shares rose.", date="2026-10-29", basis="as_at", topic="market_drivers",
                     url="https://example.com/index") | {"approved": True}
-    manager = _s("Sample World Index Fund A Acc has a new manager.", date="2026-10-15", topic="manager_changes")
-    market_news = _s("Sample World shares rose.", date="2026-10-15", topic="market_drivers")
-    too_old = fund_page | {"date": "2025-09-29"}
+    manager = _s("Sample World Index Fund A Acc has a new manager.", date="2026-10-15", topic="manager_changes",
+                 url="https://news.example/manager")
+    market_news = _s("Sample World shares rose.", date="2026-10-15", topic="market_drivers", url="https://news.example/mkt")
+    too_old = fund_page | {"date": "2025-09-29", "url": "https://example.com/fund-2024"}
     kept, flags, _ = vet_summaries([fund_page, index_page, manager, market_news, too_old], profile(), VET_FACTS)
     assert kept == [fund_page, index_page, manager]
     assert [f.message.split(", outside")[0] for f in flags] == ["web source dated 2026-10-15",
@@ -475,3 +476,18 @@ def test_search_operators_are_removed_from_planned_queries():
     assert [k.query for k in kept] == ["Sample World Index Fund fee change", "Sample World review"]
     assert sum("Search operator removed" in line for line in log) == 3
     assert "no search operators such as site:" in planner_agent(MAX).instructions
+
+
+def test_a_web_result_with_an_approved_page_url_is_not_also_listed_as_excluded():
+    """ From the full run through the page: the kept Fidelity page was also listed as 'about a different fund' """
+    approved = _s("Sample World Index Fund A Acc charges 0.10% a year.", url="https://example.com/fund") | {
+        "query": "Approved source: Fund page", "approved": True}
+    web_copy = _s("Another Manager Global Fund changed its index.", url="https://example.com/fund/")
+    kept, flags, log = vet_summaries([approved, web_copy], profile(), VET_FACTS)
+    assert kept == [approved] and flags == []
+    assert any("same URL as a source already kept" in line for line in log)
+
+
+def test_the_search_agent_summarises_only_the_page_it_returns():
+    text = " ".join(search_agent().instructions.split())
+    assert "Summarise only that page: never add content from other results" in text

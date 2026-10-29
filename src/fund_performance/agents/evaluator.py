@@ -33,7 +33,9 @@ Rubric (each must pass):
 1. no_rating_change: the text never states or suggests a rating or verdict, or a different one.
 2. supported_claims: every statement is supported by a cited source; it describes direction only (no figures)
    and only the part of the review period the cited sources cover, saying which part.
-3. sources_cited: every statement about markets or news cites a numbered source such as [1].
+3. sources_cited: every statement about markets or news cites a numbered source such as [1]. Each sentence's
+   claims must be covered by the cited source's date and content (a source dated November 2025 cannot support
+   a statement about September 2026).
 4. check_data_handled: the text does not draw a conclusion about any CHECK DATA item.
 5. plain_english: short sentences. A term in the glossary below, or an abbreviation in it (pp, PNAV, NAV,
    OCF, R², AoV, AFM), has its short definition in brackets at its first use.
