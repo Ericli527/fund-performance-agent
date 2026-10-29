@@ -51,3 +51,20 @@ class FakeRun:
         if isinstance(response, Exception):
             raise response
         return SimpleNamespace(final_output=response)
+
+
+class FakeRunBy:
+    """ Like FakeRun, but answers by prompt (for agents run in parallel, whose order is not fixed) """
+    def __init__(self, answer):
+        self.answer = answer
+        self.prompts = []
+
+    async def __call__(self, agent, prompt):
+        from types import SimpleNamespace
+        self.prompts.append(prompt)
+        response = self.answer(prompt)
+        if hasattr(response, "__await__"):
+            response = await response
+        if isinstance(response, Exception):
+            raise response
+        return SimpleNamespace(final_output=response)

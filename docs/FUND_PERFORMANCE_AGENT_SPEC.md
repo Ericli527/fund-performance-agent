@@ -342,6 +342,12 @@ All agents return structured JSON validated with Pydantic. Use the OpenAI Agents
 - Queries must be about the fund, its manager, or market drivers in the review period.
 - Never send client data or uploaded documents to search.
 - Each summary must cite its URL; the report lists all sources.
+- v1 (`agents/research.py`): the Planner sees only public fund details (name, ISIN, share class, benchmark,
+  objective type, review period) and the ratings; never figures, uploaded documents or client data. Each Search
+  agent sees only its query and reason. Code caps the plan at `limits.max_web_searches` (5) and drops empty,
+  overlong or repeated queries. Searches run in parallel, one web search each, no retries; a failed search or a
+  summary without a URL is left out (info flag). If the Planner fails twice, the review goes on without market
+  context (warning flag). The report lists the planned query, URL and date of every summary used.
 
 ### 8.3 Number-guard validator (code)
 After the Analyst responds: extract all numbers from its text (regex for decimals and %). Every number must match a value in the facts JSON (allowing rounding to 1 d.p.). If not, reject and re-prompt once; if it fails again, use a template-only narrative and flag it.

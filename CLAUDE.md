@@ -72,6 +72,9 @@ Instructions for Claude Code in this project. The build specification is
   shared glossary (`glossary.py`, also printed at the end of the report in step 9); sentences under
   20 words; "Draft verdict"; one "below the surface" finding from the data notes (written by code);
   actions say what and when; market context uses no figures from search summaries.
+- Research (`agents/research.py`): Planner gets public fund details and ratings only; max 5 searches
+  (config), run in parallel, one each, no retries; failures are left out with a flag. Cited URLs are
+  removed before the Analyst's number check.
 - Risk-free rate: 0 for v1, with a flag. Prefer the factsheet Sharpe ratios where supplied.
 - Charts are built in step 9 with the report.
 - Emailing the report is a plain code function (not an AI agent), off by default, set up in

@@ -32,18 +32,19 @@ def load_env(path: Path = ENV_FILE) -> bool:
     return load_dotenv(path, override=False)
 
 
-def model_settings(spec: ModelSpec) -> ModelSettings:
+def model_settings(spec: ModelSpec, tool_choice: str | None = None) -> ModelSettings:
     """ Temperature only for models that accept it; reasoning models get a low reasoning effort instead """
     if spec.supports_temperature:
-        return ModelSettings(temperature=spec.temperature)
-    return ModelSettings(reasoning=Reasoning(effort=spec.reasoning_effort))
+        return ModelSettings(temperature=spec.temperature, tool_choice=tool_choice)
+    return ModelSettings(reasoning=Reasoning(effort=spec.reasoning_effort), tool_choice=tool_choice)
 
 
-def build_agent(name: str, instructions: str, output_type: type[BaseModel], agent: AgentName) -> Agent:
+def build_agent(name: str, instructions: str, output_type: type[BaseModel], agent: AgentName,
+                tools: list | None = None, tool_choice: str | None = None) -> Agent:
     load_env()
     model, spec = load_models().for_agent(agent)
     return Agent(name=name, instructions=instructions, model=model, output_type=output_type,
-                 model_settings=model_settings(spec))
+                 model_settings=model_settings(spec, tool_choice), tools=tools or [])
 
 
 async def run_with_fresh_client(agent: Agent, prompt: str) -> Any:
@@ -76,14 +77,15 @@ class StructuredResult(Generic[T]):
 
 
 async def run_structured(agent: Agent, prompt: str, output_model: type[BaseModel],
-                         convert: Callable[[Any], T] | None = None, run: RunFn | None = None) -> StructuredResult[T]:
-    """ Run an agent and validate its output; invalid output is retried once.
+                         convert: Callable[[Any], T] | None = None, run: RunFn | None = None,
+                         attempts: int = MAX_ATTEMPTS) -> StructuredResult[T]:
+    """ Run an agent and validate its output; invalid output is retried once (attempts=1: no retry).
 
     `convert` turns the agent's output into the internal shape (it may raise ValueError, which counts as
     invalid output). `run` replaces the real model call in unit tests """
     run = run or run_with_fresh_client
     errors: list[str] = []
-    for attempt in range(1, MAX_ATTEMPTS + 1):
+    for attempt in range(1, attempts + 1):
         try:
             result = await run(agent, prompt)
             output = output_model.model_validate(result.final_output) if not isinstance(
@@ -95,4 +97,4 @@ async def run_structured(agent: Agent, prompt: str, output_model: type[BaseModel
             # A failed call (network, key, quota) is not invalid output: no retry
             errors.append(f"attempt {attempt}: call failed ({type(e).__name__}: {str(e)[:200]})")
             return StructuredResult(None, attempt, errors)
-    return StructuredResult(None, MAX_ATTEMPTS, errors)
+    return StructuredResult(None, attempts, errors)

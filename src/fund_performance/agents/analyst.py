@@ -6,6 +6,7 @@ problems; if it fails again, a template narrative written by code is used and th
 """
 from dataclasses import dataclass, field
 import json
+import re
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from fund_performance.agents.base import RunFn, build_agent, run_structured
@@ -101,11 +102,16 @@ def _check_shape(out: AnalystOutput) -> AnalystOutput:
     return out
 
 
+_URL = re.compile(r"https?://[^\s)\]]+")
+
+
 def problems(out: AnalystOutput, facts: dict) -> list[str]:
-    """ Everything wrong with a draft: numbers not in the facts, and changed ratings or verdict """
-    bad = check_numbers(out.text(), facts)
+    """ Everything wrong with a draft: numbers not in the facts, and changed ratings or verdict.
+    Cited URLs are taken out first: they are sources, not figures (e.g. ".../page=3.5") """
+    text = _URL.sub("[source]", out.text())
+    bad = check_numbers(text, facts)
     return ([f"number not in the facts: {n}" for n in bad]
-            + check_ratings(out.text(), facts["scorecard"]))
+            + check_ratings(text, facts["scorecard"]))
 
 
 def prompt(facts: dict, search_summaries: list[dict] | None = None) -> str:
