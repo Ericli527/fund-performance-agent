@@ -321,35 +321,47 @@ All agents return structured JSON validated with Pydantic. Use the OpenAI Agents
 | Evaluator | Analyst draft + facts JSON + scorecard + search summaries | `{pass: bool, issues: [..]}` (Section 8.4) | One rewrite only, then template fallback |
 
 ### 8.1 Oversight Analyst system prompt (core rules)
-- You explain ratings that have already been decided by code. Never change, soften or override a rating.
-- Only use numbers that appear in the provided facts. Do not calculate new numbers.
-- If a figure is labelled `ai_extracted`, write "(please verify)" next to it.
-- If any item is `CHECK DATA`, explain what needs checking instead of drawing a conclusion.
-- Plain English, short sentences, no jargon without a one-line explanation.
-- Structure: 3 key findings, 2 to 3 recommended actions, short market context with sources.
-- Never a minus sign after "behind" or "below" ("behind by 0.10%"); code checks this. Every action is a real
-  task with a when, never a restatement of the verdict or an internal technical note.
-- Actions come from code (`actions.py`): candidate actions built from the ratings and data flags, in priority
-  order (Check data, Red, Manual check, Add peer, Amber, data warnings, then "record the decision" and "read the
-  sources"), each with an id, a default wording with its timing, words a rewording must keep, and a `required`
-  mark. They are in the facts JSON as `candidate_actions`. The Analyst returns each action as
-  `{candidate, text}`: it may only choose candidates and reword them, and must choose every required one while
-  there is room. Each candidate has its own fixed "when" text (add_peer and Red: "before the next quarterly
-  review"; Check data, Manual check, warnings, read sources: "before signing off this review"; Amber: "at the next
-  quarterly review"; record decision: "at this review"), which the rewording keeps word for word; code's hint
-  quotes that candidate's own timing. Code rejects an unknown candidate, a repeat, a left-out required candidate,
-  missing keep-words, a changed "when", and method or period words (PNAV, NAV, noon, pricing, method, basis, period, calculation) that the
-  candidate does not use. The template uses the default wording.
-- Readable for experts and newcomers: plain meaning first, technical term second in brackets; explain each
-  term once in under 10 words using the shared glossary (`glossary.py`); no unexplained abbreviations
-  ("ongoing charge (OCF)"); sentences under 20 words, at most 2 per finding; say "Draft verdict"; at least one
-  finding explains a "below the surface" point from the data notes when there is one; no point repeated in
-  findings and actions; each action says what to do and when.
-- Data notes (facts JSON, written by code): short notes with their figures for info flags that change how the
-  results read, e.g. noon NAV vs market-close index (Test 1: 88.3% vs 91.6%, -3.3 pp; PNAV 90.9%, -0.7 pp) and
-  how much of the tracking difference the fee explains (-0.10 pp a year, OCF 0.06%, cost-adjusted -0.04 pp).
-- Market context uses no figures from search summaries (only numbers from the facts may be quoted); it describes
-  direction and cites the URLs.
+Who writes what (owner decision after the full Test 1 runs: too many rules for free text):
+- **Code** writes finding 1: the Mandate and Performance ratings with their reasons, in plain English (Test 1:
+  "Mandate is Green: the fund moves in line with its index (R² 1.00 and beta 1.00 over 3 years, factsheet).
+  Performance is Green: the fund is 0.10% a year behind its index over 5 years (tracking difference -0.10 pp a
+  year); tracking error is 0.02% (over 3 years, factsheet).").
+- **Code** writes the actions (`actions.py`), used exactly as written: candidate actions built from the ratings
+  and data flags, in priority order (Check data, Red, Manual check, Add peer, Amber, data warnings, then "record
+  the decision" and "read the sources"), required ones first, 2 to 3 in all. Each has its own fixed "when" text
+  (add peer and Red: "before the next quarterly review"; Check data, Manual check, warnings, read sources: "before
+  signing off this review"; Amber: "at the next quarterly review"; record decision: "at this review"). They are
+  in the facts JSON as `candidate_actions`. No AI writes or rewords an action, so there are no action checks.
+- **The AI** writes only findings 2 and 3 (the "below the surface" insights, one per data note) and the market
+  context. It sees finding 1 and the actions and must not repeat them. Output: `{findings: [2], market_context}`.
+
+Rules for the AI's text (all checked by code, Section 8.3, except where noted):
+- Never change, soften or override a rating or the verdict.
+- Only numbers that appear in the facts, with the same unit; no new calculations. "(please verify)" next to an
+  `ai_extracted` figure.
+- Labels and periods: a figure next to "tracking difference", "tracking error" or "ongoing charge" is that
+  figure, for that period; a tracking difference has "a year", its sign and its period ("over 5 years").
+- Each data note states what it "explains", and the explanation stays tied to that figure: the fee explains the
+  yearly tracking difference, not the noon-price gap; the noon-price gap is timing, not cost (prompt rule; the
+  Evaluator checks it).
+- Plain English: plain meaning first, term in brackets; at the first use in findings 2 and 3 of a glossary term,
+  its definition in brackets after the term and its figure ("R² 1.00 (how closely fund and index move together)");
+  no unexplained abbreviations; sentences under 20 words, at most 2 per finding; periods in words ("5 years").
+- Never a minus sign after "behind" or "below" ("behind by 0.10%").
+- Every data note is covered, using its key figure (insights check).
+- If an item is CHECK DATA, say what needs checking instead of drawing a conclusion.
+- Market context uses no figures from search summaries; it describes direction and cites [1], [2].
+
+Data notes (facts JSON, written by code): short notes with their figures for info flags that change how the
+results read, each with `explains`, e.g. noon NAV vs market-close index (Test 1: 88.3% vs 91.6%, -3.3 pp; PNAV
+90.9%, -0.7 pp; explains the 5-year cumulative noon gap, not the yearly tracking difference) and the fee (-0.10 pp
+a year, OCF 0.06%, cost-adjusted -0.04 pp; explains the yearly tracking difference, not the noon-price gap).
+
+Rewrites: code's checks get `limits.max_analyst_rewrites` (2); the Evaluator gets its own
+`limits.max_evaluator_rewrites` (1) (thresholds.yaml). Every rewrite receives every issue found so far (code and
+Evaluator), marked as this draft's or earlier drafts', with the instruction to keep every rule the previous draft
+already passed and not to bring back any earlier problem. When a draft fails and no rewrite of that kind is left,
+the template is used: finding 1 and the actions as above, and findings 2 and 3 written by code from the data notes.
 
 ### 8.2 Planner/Search rules
 - Approved sources (step 9b, `config/sources.yaml`): per fund (by ISIN) and per market (by market name), e.g.
@@ -417,41 +429,41 @@ After the Analyst responds: extract all numbers from its text (regex for decimal
   must be nearby, and a negative one needs its minus sign or a word such as "behind". The hint names the main test
   period. Punctuation on its own is not counted as a word. Test 1: "tracking difference −3.3 pp" (the 5-year noon gap)
   and "cost-adjusted gap 0.04 pp" (no sign, no "a year") are rejected. Counts as a number problem.
-- Ratings named (code): the findings must name the Mandate and Performance ratings in words, pillar and rating in
-  the same sentence, e.g. "Mandate is Green", "Performance needs a data check". Counts as a rating problem.
 - Rating guard (code): the text must not give a pillar a different rating, or use a verdict word other than the decided verdict. A failing draft is re-prompted once with the list of problems (bad numbers and changed ratings); then the template narrative is used with the flag "AI text failed number check".
 - The Analyst's inputs are the facts JSON (scorecard, decision-tree path, figures with units and sources, warning and blocking flags) and, from step 8, search summaries. Without search summaries, market context is null.
 
 ---
 
 ### 8.4 Evaluator Agent (quality check)
-Runs after the number-guard validator passes. Checks the Analyst draft against a fixed rubric and returns JSON only:
+Runs after code's checks pass (`agents/evaluator.py`, model `gpt-6.1-sol` in config/models.yaml, its own strict
+prompt, so the Analyst's work is not graded by itself). It judges only the AI's text: findings 2 and 3 and the
+market context. Finding 1 and the actions are written by code and shown for context only; it never raises an
+issue about them. It returns JSON only, with no field to write or change text:
 ```json
-{"pass": false, "issues": [{"check": "rating_explained", "detail": "Value rating not explained"}]}
+{"pass": false, "issues": [{"check": "supported_claims", "detail": "'the fee explains the 3.3 pp gap': ..."}]}
 ```
 Rubric (each must pass):
-1. **rating_explained:** every one of the 4 ratings is mentioned and its reason matches the scorecard reason.
-2. **no_rating_change:** the text never suggests a different rating or verdict.
-3. **supported_claims:** every claim is supported by the facts JSON or a cited search summary.
-4. **sources_cited:** every market or news statement cites a search URL.
-5. **check_data_handled:** any `CHECK DATA` item is explained as needing a check, not as a conclusion.
-6. **plain_english:** short sentences; any technical term has a one-line explanation.
+1. **no_rating_change:** the text never states or suggests a different rating or verdict, or softens one.
+2. **supported_claims:** every claim is supported by the facts JSON or a cited search summary; each figure is
+   described as what it is (labels, cumulative vs yearly, periods); each explanation is tied to the figure its
+   data note says it explains (the fee explains the yearly tracking difference, not the noon-price gap).
+3. **sources_cited:** every market or news statement cites a numbered source [n].
+4. **check_data_handled:** any `CHECK DATA` item is explained as needing a check, not as a conclusion.
+5. **plain_english:** applies to findings 2 and 3: short sentences; at first use there, each glossary term and
+   abbreviation (pp, PNAV, NAV, OCF, R², AoV, AFM, tracking difference ...) has its definition in brackets. Only
+   glossary terms need one; everyday market words (AI, large-cap, Treasury yields, volatility ...) are fine,
+   including in market context. The Evaluator gets the glossary.
 
-Flow: if `pass = false`, send the issues back to the Analyst for **one** rewrite, then re-run the number guard and the Evaluator. If it fails again, use the template-only narrative and add a flag "AI text failed quality check" to the report. The Evaluator never edits the text itself and never changes ratings. Use a different system prompt from the Analyst (and ideally a different model) so the work does not grade itself.
+The earlier rubric items for ratings being explained and for actions are dropped: code writes finding 1 (the
+ratings with their reasons) and the actions.
 
-As built (step 10, `agents/evaluator.py`):
-- Model `gpt-6.1-sol` (config/models.yaml), its own strict prompt; output exactly `{"pass", "issues": [{check, detail}]}`
-  (checks limited to the six rubric names), so it has no field to write or change text.
-- Input: the facts JSON (including candidate actions), the numbered sources without URLs, and the draft. Public data only.
-- supported_claims also covers labels (a figure called a tracking difference must be one) and that each action
-  keeps the task and timing of its candidate.
+Flow:
+- Input: the facts JSON, the numbered sources without URLs, and the draft as
+  `{finding_1_written_by_code_not_judged, findings_2_and_3_to_judge, market_context_to_judge,
+  actions_written_by_code_not_judged}`. Public data only.
 - An issue with `pass: true` still counts as a fail. `pass: false` with no issues is invalid output (retried once).
-- Separate rewrites (config, thresholds.yaml `limits`): code's checks get `max_analyst_rewrites` (1); the
-  Evaluator sees only drafts that pass code's checks and gets its own `max_evaluator_rewrites` (1), with its issues
-  sent to the Analyst. So at most 2 rewrites; a rewrite after the Evaluator goes through code's checks again.
-- plain_english is calibrated: it applies to glossary terms and their abbreviations (pp, PNAV, NAV, OCF, R², AoV,
-  AFM, tracking difference ...) at first use in the findings. Everyday market words (AI, large-cap, Treasury
-  yields, volatility ...) need no definition, in market context or anywhere. The Evaluator gets the glossary.
+- If it rejects a draft, its issues (with every earlier issue) go to the Analyst for its one rewrite
+  (`limits.max_evaluator_rewrites`); the rewrite goes through code's checks again, then the Evaluator.
 - Flags say which happened, and the template is used in both cases (the draft is never used unchecked):
   rejected: "AI text failed quality check: the Evaluator rejected the draft (<checks>); template narrative used";
   not judged: "AI text not quality-checked: the Evaluator could not be reached; template narrative used" (call

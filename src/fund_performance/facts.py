@@ -48,7 +48,9 @@ def _note_figure(label_text: str, value: float, unit: str, decimals: int = 1, ke
 
 def data_notes(profile: FundProfile, reported: ReportedFigures, flags: list[DataFlag]) -> list[dict]:
     """ Short notes, with their figures, for findings that change how the results should be read. Written by
-    code from the flags and figures, so every number in them is one the number guard accepts """
+    code from the flags and figures, so every number in them is one the number guard accepts. "explains" says
+    which figure each note explains (and which it does not), e.g. the fee explains the yearly tracking
+    difference, not the noon-price gap """
     notes = []
     n = profile.time_horizon_years
     value = reported.value
@@ -57,8 +59,12 @@ def data_notes(profile: FundProfile, reported: ReportedFigures, flags: list[Data
     # The fund is priced at noon and the index at market close: the noon comparison looks worse than it is
     nav, pnav, index = value(f"fund_nav.cum.{n}y"), value(f"fund_pnav.cum.{n}y"), value(f"index.cum.{n}y")
     if pricing is not None and pricing.level == "info" and None not in (nav, pnav, index):
+        noon = _note_figure("x", nav - index, "pp")["display"]
+        fair = _note_figure("x", pnav - index, "pp")["display"]
         notes.append({
             "kind": "pricing",
+            "explains": (f"the {n}-year cumulative gap at noon prices ({noon}), against {fair} at market close. "
+                         "Timing, not cost: it does not explain the yearly tracking difference"),
             "note": (f"The fund is priced at noon and the index at market close. Compared at noon prices, the fund "
                      f"looks further behind its index over {n} years than it really is. The fair comparison uses "
                      f"the fund's market-close price (PNAV)."),
@@ -69,6 +75,7 @@ def data_notes(profile: FundProfile, reported: ReportedFigures, flags: list[Data
                         _note_figure(f"Fair gap (PNAV vs index), {n}y", pnav - index, "pp")]})
     elif pricing is not None and pricing.level == "warning":
         notes.append({"kind": "timing",
+                      "explains": "part of the gap to the index, which may be timing, not cost",
                       "note": "The fund and the index are priced at different times and no market-close price (PNAV) "
                               "is available, so part of the gap to the index may be timing, not performance.",
                       "figures": []})
@@ -80,6 +87,8 @@ def data_notes(profile: FundProfile, reported: ReportedFigures, flags: list[Data
             else "The fee explains only part of the yearly gap to the index."
         notes.append({
             "kind": "fee",
+            "explains": (f"the yearly tracking difference ({_note_figure('x', td, 'pp', 2)['display']} a year over "
+                         f"{n} years). It does not explain the noon-price gap"),
             "note": f"{share} Adding the ongoing charge back leaves the cost-adjusted gap.",
             "figures": [_note_figure(f"Tracking difference, a year, {n}y", td, "pp", 2),
                         _note_figure(f"Fund behind its index, in plain terms (% a year), {n}y", td, "%", 2),

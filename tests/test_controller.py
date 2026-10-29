@@ -5,7 +5,6 @@ import json
 import re
 import shutil
 import pytest
-from fund_performance.agents.analyst import AnalystOutput
 from fund_performance.config import load_settings
 from fund_performance.controller import OFFLINE_NOTE, RunStopped, Runners, run_review
 from fund_performance.report import page_texts
@@ -93,10 +92,9 @@ def _facts_in(prompt):
 
 
 def analyst_answer(prompt):
-    """ A valid draft: the template text for the facts it was given, with actions as chosen candidates """
-    from fund_performance.agents.analyst import template
-    out: AnalystOutput = template(_facts_in(prompt))
-    return out.model_dump()
+    """ A valid draft: the template's findings 2 and 3 for the facts it was given """
+    from fund_performance.agents.analyst import template_draft
+    return template_draft(_facts_in(prompt)).model_dump()
 
 
 def mocked(evaluator_answer=None, mandate_delay=0.0, planner_queries=5):

@@ -149,7 +149,8 @@ def _page1(inp: ReportInputs) -> str:
         for name, pillar in card.pillars.items())
     findings = "".join(f"<li>{escape(t)}</li>" for t in inp.narrative.output.key_findings)
     actions = "".join(f"<li>{escape(t)}</li>" for t in inp.narrative.output.action_texts)
-    origin = ("Written by AI and checked by code against the figures, ratings and wording rules."
+    origin = ("Finding 1 and the actions are written by code from the scorecard. Findings 2 and 3 and the market "
+              "context are written by AI and checked by code and a separate reviewer agent."
               if inp.narrative.source == "ai" else
               "Written by code from the figures (template text)." + (f" {inp.run_note}." if inp.run_note else
                                                                     " The AI text did not pass its checks."))
