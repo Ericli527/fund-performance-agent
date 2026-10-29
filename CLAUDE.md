@@ -102,10 +102,11 @@ Instructions for Claude Code in this project. The build specification is
   error. Saved to `runs/<timestamp>/` with `facts.json` and `run_log.txt`; `--offline` skips AI steps.
   Plain wording (decision path, fee note) is for the report only; facts.json and the Analyst keep the codes.
 - Emailing the report is a plain code function (`emailer.py`, not an AI agent), off by default
-  (`config/settings.yaml`). Recipients come from settings only; SMTP login from .env.
+  (`config/settings.yaml`). Resend over HTTPS, as in the old app (RESEND_API_KEY, EMAIL_FROM in .env).
+  Recipients come from settings only.
 - Evaluator (step 10, gpt-6.1-sol): rubric of 6 checks, output {pass, issues} only; one rewrite in total,
-  shared with code's checks; then template + "AI text failed quality check (...)". No valid result ->
-  template too.
+  shared with code's checks; then template + "AI text failed quality check: the Evaluator rejected the
+  draft (...)". Unreachable or no valid answer -> template + "AI text not quality-checked: ...".
 - Controller (step 10, `controller.py`): stops (RunStopped) only when the run cannot be scored (missing or
   invalid inputs, unreadable prices, report not fitting); blocking data checks give CHECK DATA, not a stop.
   Extractor runs before data checks. Timeouts per AI step in `config/settings.yaml`. log.json per run;

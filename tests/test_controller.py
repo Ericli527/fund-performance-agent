@@ -149,7 +149,8 @@ def test_test1_evaluator_failing_twice_gives_the_template_and_a_flag(tmp_path):
     fail = {"pass": False, "issues": [{"check": "plain_english", "detail": "sentence too long"}]}
     result = asyncio.run(run_review(TEST1, out_root=tmp_path, runners=mocked(evaluator_answer=fail)))
     assert result.narrative.source == "template"
-    assert "AI text failed quality check (plain_english)" in (result.run_dir / "run_log.txt").read_text()
+    assert ("AI text failed quality check: the Evaluator rejected the draft (plain_english)"
+            in (result.run_dir / "run_log.txt").read_text())
 
 
 @requires_test1
@@ -191,3 +192,17 @@ def test_without_factsheet_figures_offline_uses_calculated_figures_and_says_so(t
     result = asyncio.run(run_review(folder, out_root=tmp_path / "runs", offline=True))
     assert "No factsheet figures: no factsheet_performance.json, and the Extractor Agent was not run (offline run)" \
         in (result.run_dir / "run_log.txt").read_text()
+
+
+@requires_test1
+def test_email_when_switched_on_goes_through_resend_and_is_logged(tmp_path, monkeypatch):
+    from test_emailer import FakePost
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+    s = settings()
+    s.email = s.email.model_copy(update={"enabled": True, "recipients": ["oversight@example.com"]})
+    post = FakePost()
+    result = asyncio.run(run_review(TEST1, out_root=tmp_path, offline=True, settings=s,
+                                    runners=Runners(email_post=post)))
+    email = result.log.step("email")
+    assert email.status == "ok" and email.notes == ["Email: sent to 1 recipient(s) from config/settings.yaml"]
+    assert post.calls[0]["json"]["attachments"][0]["filename"] == "report.pdf"

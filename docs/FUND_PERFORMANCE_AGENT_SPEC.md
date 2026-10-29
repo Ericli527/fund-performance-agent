@@ -442,36 +442,36 @@ As built (step 10, `agents/evaluator.py`):
 - An issue with `pass: true` still counts as a fail. `pass: false` with no issues is invalid output (retried once).
 - There is one rewrite in total (`limits.max_analyst_rewrites`), shared by code's checks and the Evaluator: a
   draft that used it on a code problem and then fails the Evaluator goes to the template.
-- Flags: "AI text failed quality check (<checks>); template narrative used", or "... : the Evaluator gave no valid
-  result; template narrative used" when it gives no valid answer after one retry (the draft is not used unchecked).
+- Flags say which happened, and the template is used in both cases (the draft is never used unchecked):
+  rejected: "AI text failed quality check: the Evaluator rejected the draft (<checks>); template narrative used";
+  not judged: "AI text not quality-checked: the Evaluator could not be reached; template narrative used" (call
+  failed, not retried) or "... : the Evaluator gave no valid answer after one retry; ...".
 
 ### 8.5 Workflow controller (code)
-A plain Python function (not an AI agent) that runs: read files -> data checks -> extractor (if needed) -> mandate -> calculator -> scorecard -> planner -> search (parallel) -> analyst -> number guard -> evaluator -> report.
-- Stops the run with a clear message if a blocking data check fails before scoring.
-- Enforces limits from config: max searches, max one rewrite, timeouts.
-- Logs each step (start, end, inputs used) to `runs/<timestamp>/log.json`; the report's sources list is built from this log.
-
-As built (step 10, `controller.py`; `run_report.py` is its command line):
-- Order: read files -> extractor (only without `factsheet_performance.json`) -> data checks -> mandate -> calculator
-  (with factsheet precedence) -> scorecard -> approved sources, planner and searches -> vetting -> analyst, code
-  checks and evaluator -> report -> email. The extractor runs before the data checks because the repeated-price
-  check compares with the factsheet.
-- Stops (`RunStopped`, message printed, exit code 1, log.json still written) when the run cannot be scored: no
-  folder, no or an invalid fund profile or input file, no or an unreadable price file, fewer than 2 prices, or a
-  report that does not fit its pages. A blocking data check (e.g. a currency mismatch) does not stop the run: the
-  affected rating is CHECK DATA and the verdict is "Pending data check" (Sections 5.1 and 6.5), so the report says
-  what to fix.
-- Limits: `limits.max_web_searches` and `limits.max_analyst_rewrites` (thresholds.yaml); a timeout for each AI step
-  in `config/settings.yaml` (extractor 180 s, mandate 90 s, research 240 s, narrative 300 s). A step that runs
-  over is handled like a failed step: Mandate -> CHECK DATA (blocking flag); research -> no market context
-  (warning); narrative -> template (warning); extractor -> calculated figures only (warning).
-- log.json: the run (folder, question, offline, start, end, status, message), each step (start, end, seconds,
-  status ok / skipped / failed / timeout / stopped, inputs used, outputs, notes) and the sources (input files
-  and numbered web sources), from which the report's sources list is built. run_log.txt keeps the readable lines.
-- Email (`emailer.py`): plain code, off by default (`email.enabled: false` in settings.yaml); recipients from
-  settings only; SMTP login from .env (`FUND_SMTP_USER`, `FUND_SMTP_PASSWORD`); a failed email never loses the
-  report.
-- Tests replace every model call, HTTP and SMTP with stand-ins (`Runners`), so the full flow runs with no network.
+A plain Python function (not an AI agent, `controller.py`; `run_report.py` is its command line) that runs:
+read files -> extractor (only without `factsheet_performance.json`) -> data checks -> mandate -> calculator (with
+factsheet precedence) -> scorecard -> approved sources, planner and search (parallel) -> vetting -> analyst ->
+number, label, rating and wording checks -> evaluator -> report -> email (off by default).
+- The extractor runs before the data checks because the repeated-price check compares with the factsheet.
+- Stops the run with a clear message (`RunStopped`, printed, exit code 1, log.json still written) only when the
+  fund cannot be scored: no folder, no or an invalid fund profile or input file, no or an unreadable price file,
+  fewer than 2 prices, or a report that does not fit its pages. A blocking data check (e.g. a currency mismatch)
+  does not stop the run: the affected rating is CHECK DATA and the verdict is "Pending data check" (Sections 5.1
+  and 6.5), so the report says what to fix.
+- Enforces limits from config: `limits.max_web_searches` and `limits.max_analyst_rewrites` (thresholds.yaml), and a
+  timeout for each AI step (`config/settings.yaml`: extractor 180 s, mandate 90 s, research 240 s, narrative 300 s).
+  A step that runs over is handled like a failed step: mandate -> CHECK DATA (blocking flag); research -> no market
+  context (warning); narrative -> template (warning); extractor -> calculated figures only (warning).
+- Logs each step to `runs/<timestamp>/log.json`: the run (folder, question, offline, start, end, status, message),
+  each step (start, end, seconds, status ok / skipped / failed / timeout / stopped, inputs used, outputs, notes)
+  and the sources (input files and numbered web sources). The report's sources list is built from this log;
+  run_log.txt keeps the readable lines.
+- Email (`emailer.py`): plain code, off by default (`email.enabled: false` in settings.yaml). Sent through Resend
+  over HTTPS, the same setup as the old app (Render's free plan blocks SMTP ports): `RESEND_API_KEY` in .env;
+  sender from settings, else `EMAIL_FROM` in .env, else Resend's test sender. Recipients from settings only. A
+  failed email is logged and never loses the report.
+- Tests replace every model call, page fetch and email with stand-ins (`Runners`), so the full flow runs with no
+  network.
 
 ## 9. Report (Step 7): 3 main pages plus an appendix
 

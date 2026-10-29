@@ -1,34 +1,27 @@
-""" Emailing the report (step 10): plain code, off by default, recipients from settings only """
-from email.message import EmailMessage
+""" Emailing the report (step 10): plain code, off by default, Resend over HTTPS, recipients from settings only """
+import base64
 import pytest
+import requests
 from fund_performance.config import EmailSettings, load_settings
-from fund_performance.emailer import send_report
+from fund_performance.emailer import RESEND_URL, TEST_SENDER, send_report
 
-ON = EmailSettings(enabled=True, recipients=["oversight@example.com", "director@example.com"],
-                   sender="reviews@example.com", smtp_host="smtp.example.com", smtp_port=587,
+ON = EmailSettings(enabled=True, recipients=["oversight@example.com", "director@example.com"], sender="",
                    subject="Fund performance review (draft): {fund_name}, figures to {as_of_date}")
 
 
-class FakeSMTP:
-    sent: list[EmailMessage] = []
+class FakePost:
+    """ Stands in for requests.post """
+    def __init__(self, status=200, body=None, error=None):
+        self.status, self.body, self.error, self.calls = status, body or {"id": "x"}, error, []
 
-    def __init__(self, host, port):
-        self.host, self.port, self.calls = host, port, []
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def starttls(self):
-        self.calls.append("starttls")
-
-    def login(self, user, password):
-        self.calls.append(("login", user))
-
-    def send_message(self, msg):
-        FakeSMTP.sent.append(msg)
+    def __call__(self, url, json=None, headers=None, timeout=None):
+        self.calls.append({"url": url, "json": json, "headers": headers, "timeout": timeout})
+        if self.error:
+            raise self.error
+        response = requests.Response()
+        response.status_code = self.status
+        response._content = __import__("json").dumps(self.body).encode()
+        return response
 
 
 @pytest.fixture
@@ -38,44 +31,58 @@ def pdf(tmp_path):
     return path
 
 
+@pytest.fixture
+def resend_key(monkeypatch):
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+    monkeypatch.delenv("EMAIL_FROM", raising=False)
+
+
 def test_email_is_off_by_default():
     s = load_settings().email
     assert s.enabled is False and s.recipients == []
 
 
-def test_off_means_nothing_is_sent(pdf):
-    FakeSMTP.sent = []
-    line = send_report(pdf, load_settings().email, "Fund", "30 Sep 2026", smtp=FakeSMTP)
-    assert line == "Email: off (config/settings.yaml)" and FakeSMTP.sent == []
+def test_off_means_nothing_is_sent(pdf, resend_key):
+    post = FakePost()
+    assert send_report(pdf, load_settings().email, "Fund", "30 Sep 2026", post=post) == "Email: off (config/settings.yaml)"
+    assert post.calls == []
 
 
-def test_sends_to_the_configured_recipients_only(pdf, monkeypatch):
-    monkeypatch.setenv("FUND_SMTP_USER", "user")
-    monkeypatch.setenv("FUND_SMTP_PASSWORD", "secret")
-    FakeSMTP.sent = []
-    line = send_report(pdf, ON, "Fidelity Index US Fund P Accumulation", "30 Sep 2026", smtp=FakeSMTP)
-    msg = FakeSMTP.sent[0]
+def test_sends_through_resend_to_the_configured_recipients_only(pdf, resend_key):
+    post = FakePost()
+    line = send_report(pdf, ON, "Fidelity Index US Fund P Accumulation", "30 Sep 2026", post=post)
+    call = post.calls[0]
     assert line == "Email: sent to 2 recipient(s) from config/settings.yaml"
-    assert msg["To"] == "oversight@example.com, director@example.com"
-    assert msg["Subject"] == "Fund performance review (draft): Fidelity Index US Fund P Accumulation, figures to 30 Sep 2026"
-    assert [p.get_filename() for p in msg.iter_attachments()] == ["report.pdf"]
-    assert "secret" not in msg.as_string()
+    assert call["url"] == RESEND_URL and call["headers"] == {"Authorization": "Bearer re_test"}
+    assert call["json"]["to"] == ["oversight@example.com", "director@example.com"]
+    assert call["json"]["from"] == TEST_SENDER                                   # no sender set anywhere
+    assert call["json"]["subject"] == ("Fund performance review (draft): Fidelity Index US Fund P Accumulation, "
+                                       "figures to 30 Sep 2026")
+    attachment = call["json"]["attachments"][0]
+    assert attachment["filename"] == "report.pdf" and base64.b64decode(attachment["content"]) == b"%PDF-1.4 test"
+    assert "re_test" not in str(call["json"])                                   # the key is only in the header
 
 
-def test_missing_login_or_smtp_error_never_raises(pdf, monkeypatch):
-    monkeypatch.delenv("FUND_SMTP_USER", raising=False)
-    assert "FUND_SMTP_USER or FUND_SMTP_PASSWORD is missing" in send_report(pdf, ON, "F", "d", smtp=FakeSMTP)
-    monkeypatch.setenv("FUND_SMTP_USER", "user")
-    monkeypatch.setenv("FUND_SMTP_PASSWORD", "secret")
+def test_sender_from_settings_then_email_from(pdf, resend_key, monkeypatch):
+    monkeypatch.setenv("EMAIL_FROM", "Fund Report <reports@old-app.example>")
+    post = FakePost()
+    send_report(pdf, ON, "F", "d", post=post)
+    send_report(pdf, ON.model_copy(update={"sender": "Reviews <reviews@example.com>"}), "F", "d", post=post)
+    assert [c["json"]["from"] for c in post.calls] == ["Fund Report <reports@old-app.example>",
+                                                       "Reviews <reviews@example.com>"]
 
-    class Down(FakeSMTP):
-        def __init__(self, host, port):
-            raise OSError("connection refused")
-    assert send_report(pdf, ON, "F", "d", smtp=Down).startswith("Email: not sent (OSError")
+
+def test_failures_never_raise(pdf, resend_key, monkeypatch):
+    assert send_report(pdf, ON, "F", "d", post=FakePost(422, {"message": "domain not verified"})) == \
+        "Email: not sent, Resend returned 422: domain not verified"
+    assert send_report(pdf, ON, "F", "d", post=FakePost(error=requests.ConnectionError())) == \
+        "Email: not sent, could not reach Resend (ConnectionError)"
+    monkeypatch.delenv("RESEND_API_KEY")
+    assert send_report(pdf, ON, "F", "d", post=FakePost()) == "Email: not sent, RESEND_API_KEY is missing from .env"
 
 
 def test_email_settings_are_checked():
-    with pytest.raises(ValueError, match="recipients, sender or smtp_host is missing"):
+    with pytest.raises(ValueError, match="no recipients are set"):
         EmailSettings(**(ON.model_dump() | {"recipients": []}))
     with pytest.raises(ValueError, match="not an email address"):
         EmailSettings(**(ON.model_dump() | {"recipients": ["oversight team"]}))

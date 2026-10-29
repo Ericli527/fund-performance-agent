@@ -31,7 +31,7 @@ from fund_performance.agents.research import market_name, research, vet_summarie
 from fund_performance.calc import calculate
 from fund_performance.checks import check_prices
 from fund_performance.config import RunSettings, Thresholds, load_settings, load_sources, load_thresholds
-from fund_performance.emailer import SmtpFactory, send_report
+from fund_performance.emailer import PostFn, send_report
 from fund_performance.facts import build_facts
 from fund_performance.fetch import GetFn, fetch_pages, http_get
 from fund_performance.io import detect_file_type, read_document, read_json, read_prices
@@ -52,7 +52,7 @@ class RunStopped(RuntimeError):
 
 @dataclass
 class Runners:
-    """ Stand-ins for the model calls, HTTP and SMTP, for tests. None = the real thing """
+    """ Stand-ins for the model calls, page fetching and email, for tests. None = the real thing """
     extractor: RunFn | None = None
     mandate: RunFn | None = None
     planner: RunFn | None = None
@@ -61,7 +61,7 @@ class Runners:
     analyst: RunFn | None = None
     evaluator: RunFn | None = None
     http_get: GetFn = http_get
-    smtp: SmtpFactory | None = None
+    email_post: PostFn | None = None
 
 
 @dataclass
@@ -343,7 +343,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     # 10. Email (plain code, off by default; recipients from settings only)
     step = log.start("email")
     line = send_report(pdf, s.email, profile.fund_name, f"{profile.as_of_date:%d %b %Y}",
-                       **({"smtp": r.smtp} if r.smtp else {}))
+                       **({"post": r.email_post} if r.email_post else {}))
     text_log.append(line)
     log.end(step, "ok" if line.startswith("Email: sent") else "failed" if s.email.enabled else "skipped", notes=[line])
     return RunResult(pdf, run_dir, log, narrative, facts)

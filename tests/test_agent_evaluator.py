@@ -3,7 +3,8 @@ import asyncio
 from functools import partial
 import pytest
 from fund_performance.agents.analyst import INSTRUCTIONS as ANALYST_INSTRUCTIONS
-from fund_performance.agents.analyst import QUALITY_FAILED, template, write_narrative
+from agents.exceptions import AgentsException
+from fund_performance.agents.analyst import QUALITY_FAILED, QUALITY_NOT_DONE, template, write_narrative
 from fund_performance.agents.evaluator import EvaluatorOutput, evaluator_agent, evaluator_input, review
 from conftest import FakeRun, requires_test1
 from test_agent_analyst import FACTS, GOOD, draft
@@ -77,7 +78,8 @@ def test_failing_the_evaluator_twice_uses_the_template():
     _, check = evaluate(FAIL, FAIL)
     result = asyncio.run(write_narrative(FACTS, run=FakeRun(draft(), draft()), quality_check=check))
     assert result.source == "template" and result.output == template(FACTS)
-    assert result.flags[0].message == f"{QUALITY_FAILED} (rating_explained); template narrative used"
+    assert result.flags[0].message == (f"{QUALITY_FAILED}: the Evaluator rejected the draft (rating_explained); "
+                                       "template narrative used")
 
 
 def test_only_one_rewrite_in_total():
@@ -90,11 +92,22 @@ def test_only_one_rewrite_in_total():
     assert QUALITY_FAILED in result.flags[0].message
 
 
-def test_no_valid_evaluator_result_uses_the_template():
+def test_no_valid_evaluator_result_uses_the_template_and_says_so():
     _, check = evaluate({"bad": 1}, {"bad": 1})
     result = asyncio.run(write_narrative(FACTS, run=FakeRun(draft()), quality_check=check))
     assert result.source == "template"
-    assert result.flags[0].message == f"{QUALITY_FAILED}: the Evaluator gave no valid result; template narrative used"
+    assert result.flags[0].message == (f"{QUALITY_NOT_DONE}: the Evaluator gave no valid answer after one retry; "
+                                       "template narrative used")
+
+
+def test_an_unreachable_evaluator_uses_the_template_and_says_so():
+    """ Not the same as a rejection: the draft was never judged """
+    evaluator, check = evaluate(AgentsException("connection error"))
+    result = asyncio.run(write_narrative(FACTS, run=FakeRun(draft()), quality_check=check))
+    assert result.source == "template" and len(evaluator.prompts) == 1          # a failed call is not retried
+    assert result.flags[0].message == (f"{QUALITY_NOT_DONE}: the Evaluator could not be reached; "
+                                       "template narrative used")
+    assert "rejected" not in result.flags[0].message
 
 
 def test_the_evaluator_is_not_called_when_code_checks_fail_twice():
@@ -133,4 +146,5 @@ def test_a_draft_with_an_unsupported_claim_is_rejected():
     result = asyncio.run(write_narrative(FACTS, run=analyst, quality_check=check))
     assert "quality (supported_claims)" in analyst.prompts[1]
     assert result.source == "template"
-    assert result.flags[0].message == f"{QUALITY_FAILED} (supported_claims); template narrative used"
+    assert result.flags[0].message == (f"{QUALITY_FAILED}: the Evaluator rejected the draft (supported_claims); "
+                                       "template narrative used")

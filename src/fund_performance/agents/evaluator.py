@@ -63,6 +63,7 @@ class Review:
     passed: bool
     issues: list[Issue] = field(default_factory=list)
     error: str | None = None                  # the Evaluator gave no valid result
+    unreachable: bool = False                 # ... because the call failed (network, key, quota), not bad output
 
     @property
     def failed_checks(self) -> list[str]:
@@ -98,6 +99,6 @@ async def review(facts: dict, sources: list[dict], draft: dict, run: RunFn | Non
     result = await run_structured(evaluator_agent(), evaluator_input(facts, sources, draft), EvaluatorOutput,
                                   convert=_consistent, run=run)
     if not result.ok:
-        return Review(False, error="; ".join(result.errors))
+        return Review(False, error="; ".join(result.errors), unreachable=any("call failed" in e for e in result.errors))
     out = result.output
     return Review(out.passed and not out.issues, out.issues)

@@ -22,6 +22,7 @@ MIN_ACTIONS, MAX_ACTIONS = 2, 3
 MAX_SENTENCES = 2                       # per finding
 CHECKS_FAILED = "AI text failed checks"
 QUALITY_FAILED = "AI text failed quality check"
+QUALITY_NOT_DONE = "AI text not quality-checked"
 AI_TEXT_UNAVAILABLE = "AI text unavailable"
 
 STYLE_EXAMPLE = (
@@ -330,13 +331,15 @@ async def write_narrative(facts: dict, search_summaries: list[dict] | None = Non
             verdict = await quality_check(facts, sources, draft.model_dump())
             if verdict.error:
                 log.append(f"Evaluator gave no valid result: {verdict.error}")
-                return _template(facts, f"{QUALITY_FAILED}: the Evaluator gave no valid result; template narrative used", log)
+                why = "could not be reached" if verdict.unreachable else "gave no valid answer after one retry"
+                return _template(facts, f"{QUALITY_NOT_DONE}: the Evaluator {why}; template narrative used", log)
             if not verdict.passed:
                 log.append(f"Evaluator rejected draft {rewrites + 1}: " + "; ".join(verdict.problems()))
                 if rewrites < max_rewrites:
                     rewrites += 1
                     request = rewrite_prompt(first, draft, verdict.problems())
                     continue
-                return _template(facts, f"{QUALITY_FAILED} ({', '.join(verdict.failed_checks)}); template narrative used", log)
+                return _template(facts, f"{QUALITY_FAILED}: the Evaluator rejected the draft "
+                                        f"({', '.join(verdict.failed_checks)}); template narrative used", log)
             log.append(f"Evaluator passed the draft{after}")
         return Narrative(draft, "ai", [], log, sources if draft.market_context else [])
