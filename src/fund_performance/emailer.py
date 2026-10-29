@@ -1,6 +1,6 @@
 """ Emails the finished report (step 10). Plain code, not an AI agent, and off by default.
 
-Sends through Resend over HTTPS, the same setup as the old app (messenger.py): Render's free plan blocks email
+Sends through Resend over HTTPS, the same setup as the old app had: Render's free plan blocks email
 (SMTP) ports. The key is RESEND_API_KEY in .env; the sender is `email.sender` in config/settings.yaml, else
 EMAIL_FROM in .env, else Resend's test sender (which only delivers to the Resend account's own address).
 Recipients come from config/settings.yaml only, never from the documents, the web or an AI agent. Only the PDF
