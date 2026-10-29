@@ -108,4 +108,6 @@ Instructions for Claude Code in this project. The build specification is
   invalid inputs, unreadable prices, report not fitting); blocking data checks give CHECK DATA, not a stop.
   Extractor runs before data checks. Timeouts per AI step in `config/settings.yaml`. log.json per run;
   the report's sources list comes from it.
-- The old app (root-level `*.py`) keeps running until the new front end replaces it in step 11.
+- Front end (step 11): `src/fund_performance/web.py` + `app.py` (Gradio; Render runs `python app.py`,
+  blueprint in `render.yaml`). Public-data warning first; demo = made-up fund in `demo/sample_index_fund`
+  (offline). Optional login via APP_USERNAME/APP_PASSWORD. The old root-level app was removed in step 11.

@@ -582,6 +582,13 @@ Keep the manager's published Value Assessment Report out of the agent's inputs. 
 9. **PDF report** (3 main pages + appendix, 5 pages at most) with charts and approval box.
 10. **Evaluator agent + workflow controller** (Sections 8.4 and 8.5); unit test that a draft with a changed rating or an unsupported claim is rejected.
 11. **Gradio front end** (upload files, ask the question, download the PDF); deploy as with the existing project.
+    As built: `src/fund_performance/web.py` (the page) and `app.py` (starts it; Render runs `python app.py`). The
+    page shows the public-data warning first; uploads go to a fresh folder for the controller; it shows the draft
+    verdict, ratings, findings and actions, with the PDF and log.json to download; a run that cannot be scored
+    shows the controller's message. "Use the demo files" loads a made-up fund (`demo/sample_index_fund`) and ticks
+    "Offline" (no AI calls). Optional login (APP_USERNAME, APP_PASSWORD); MAX_CONCURRENT_RUNS reviews at once;
+    uploads up to 20 MB. `render.yaml` keeps the old service name, so the existing Render service is updated. The
+    old root-level app is removed.
 12. **Run all 4 test cases**, compare Test 1 with the published Value Assessment Report, and record results in `tests/RESULTS.md`.
 
 Definition of done: all unit tests pass; Test 1 and Test 2 expected values reproduced; no rating can be changed by the AI; every figure in the PDF has a source; the Evaluator rejects a bad draft in tests.
