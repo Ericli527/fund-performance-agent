@@ -53,9 +53,8 @@ def test_each_candidate_has_its_own_fixed_timing():
 def test_the_ai_never_writes_actions():
     """ The AI's output has no actions field; the report's actions are code's, word for word """
     assert "actions" not in AnalystDraft.model_fields
-    draft = {"findings": ["Value and fees need a peer fund.", "The figures are on pages 2 and 3."],
-             "market_context": None}
-    result = asyncio.run(write_narrative(NO_PEER, run=FakeRun(draft)))
+    sources = [{"query": "q", "summary": "Shares rose.", "url": "https://example.com", "date": "2026-09-30"}]
+    result = asyncio.run(write_narrative(NO_PEER, sources, run=FakeRun({"market_context": "Shares rose [1]."})))
     assert result.source == "ai"
     assert result.output.action_texts == [c["action"] for c in candidate_actions(NO_PEER)[:2]]
     assert [a.candidate for a in result.output.actions] == [a.candidate for a in code_actions(NO_PEER)]

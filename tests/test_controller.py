@@ -92,9 +92,8 @@ def _facts_in(prompt):
 
 
 def analyst_answer(prompt):
-    """ A valid draft: the template's findings 2 and 3 for the facts it was given """
-    from fund_performance.agents.analyst import template_draft
-    return template_draft(_facts_in(prompt)).model_dump()
+    """ A valid market context, citing the first source """
+    return {"market_context": "The S&P 500 rose, led by technology shares [1]."}
 
 
 def mocked(evaluator_answer=None, mandate_delay=0.0, planner_queries=5):

@@ -27,6 +27,7 @@ from fund_performance.scorecard import Scorecard
 Topic = Literal["fund_news", "manager_changes", "market_drivers"]
 MAX_QUERY_CHARS = 200
 MAX_SUMMARY_CHARS = 1200
+_OPERATORS = re.compile(r"(?:^|\s)-?(?:site|inurl|intitle|filetype):\S+", re.IGNORECASE)
 MARKET_NOISE = {"index", "nuk", "net", "tr", "total", "return", "gross", "price", "hedged", "gbp", "usd", "eur"}
 FIGURES_DIFFER = "web source figures differ from factsheet, likely different currency or date: excluded"
 NOT_THE_FUND = "web source about a different fund or jurisdiction: excluded"
@@ -51,6 +52,7 @@ Rules:
   never the fund, e.g. "S&P 500 performance drivers Oct 2025 to Sep 2026".
 - Only fund-specific searches (fund_news, manager_changes: changes, manager, fees) use the fund's name.
 - Write queries that find news and index-provider sources rather than fund data pages.
+- Plain words only: no search operators such as site:, inurl: or quotes around phrases.
 - Use only the fund details given. Never include personal or client information.
 - Do not repeat a query.
 """
@@ -189,11 +191,16 @@ def planner_input(profile: FundProfile, card: Scorecard, covered: list[str] | No
 
 
 def tidy_plan(plan: SearchPlan, max_searches: int, profile: FundProfile | None = None) -> tuple[list[PlannedSearch], list[str]]:
-    """ Code keeps the limits: at most max_searches, no empty, overlong or repeated queries, and no
-    market-driver query that names the fund """
+    """ Code keeps the limits: at most max_searches, no search operators (site:, inurl: ...), no empty, overlong
+    or repeated queries, and no market-driver query that names the fund """
     kept, seen, log = [], set(), []
     for item in plan.searches:
         query = " ".join(item.query.split())
+        if _OPERATORS.search(query):
+            # A site: search returned no usable result in the full run; plain words only
+            stripped = " ".join(_OPERATORS.sub(" ", query).split())
+            log.append(f"Search operator removed from planned query: {query!r} -> {stripped!r}")
+            query = stripped
         if not query or len(query) > MAX_QUERY_CHARS or query.lower() in seen:
             log.append(f"Planned query left out (empty, too long or repeated): {item.query[:80]!r}")
             continue

@@ -64,21 +64,16 @@ Instructions for Claude Code in this project. The build specification is
   by python-dotenv.
 - Mandate Agent: the profile wins on any disagreement (flag); it classifies a free-text secondary
   objective into the six types, or CHECK DATA if it cannot.
-- Who writes what: code writes finding 1 (Mandate and Performance ratings with their reasons) and the
-  actions (`actions.py`, used word for word, each with its fixed "when"). The Oversight Analyst (gpt-5.4,
-  low reasoning) writes only findings 2 and 3 (one per data note) and the market context (only from
-  search summaries, else null). Each data note states what it "explains" (the fee explains the yearly
-  tracking difference, not the noon-price gap).
-- Code checks on the AI's text: number guard (same unit, 1 or 2 d.p.; years, periods, counts and dates
-  not checked), label guard (a number within 8 words of "tracking difference", "tracking error",
-  "ongoing charge/OCF" or "cost-adjusted gap" is that fact; tracking differences need "a year", sign and
-  period), rating guard, at most 2 sentences per finding, periods in words, no minus after "behind",
-  citations, every data note's key figure covered. Rewrites: code checks 2, Evaluator 1 (thresholds.yaml);
-  each rewrite gets every issue so far and must keep earlier-passed rules. Then template + "AI text
-  failed checks: number / rating / wording / insights".
-- Analyst style: plain meaning first, term in brackets; glossary definitions in brackets after the term
-  and its figure at first use in findings 2-3 ("R² 1.00 (how closely fund and index move together)");
-  sentences under 20 words; market context uses no figures from search summaries.
+- Who writes what (v1): code writes all findings (finding 1: Mandate and Performance ratings with their
+  reasons; then one per data note, fixed wording; "pp (percentage points)" defined at first use) and the
+  actions (`actions.py`, word for word, each with its fixed "when"). The Oversight Analyst (gpt-5.4, low
+  reasoning) writes only the market context: plain English, at most 3 sentences, direction only, no figures,
+  [n] citations; not called without sources. v2: AI-written insights once canonical phrasing per data note
+  is defined. Data notes state what they "explain".
+- Code checks on the market context: no figures, label and rating guards, no minus after "behind", no URLs,
+  citations to existing sources, periods in words, at most 3 sentences. Rewrites: code checks 2, Evaluator 1
+  (thresholds.yaml); each rewrite gets every issue so far and must keep earlier-passed rules. Then the
+  market context is left out + flag "AI text failed checks: number / rating / wording; market context left out".
 - Research (`agents/research.py`): approved sources in `config/sources.yaml` are fetched by code
   (`fetch.py`; no AI chooses URLs) and summarised by a Search agent with no web tool, with the same
   checks as web results. A failed or nearly empty page: info flag + a code-written web search, taking
@@ -103,12 +98,12 @@ Instructions for Claude Code in this project. The build specification is
 - Emailing the report is a plain code function (`emailer.py`, not an AI agent), off by default
   (`config/settings.yaml`). Resend over HTTPS, as in the old app (RESEND_API_KEY, EMAIL_FROM in .env).
   Recipients come from settings only.
-- Evaluator (step 10, gpt-6.1-sol): judges only the AI's text (findings 2-3, market context) on 5 checks
-  (no_rating_change, supported_claims, sources_cited, check_data_handled, plain_english); output
-  {pass, issues} only; runs only on drafts that pass code's checks. Rejected -> template + "AI text failed
-  quality check: the Evaluator rejected the draft (...)"; unreachable or no valid answer -> template + "AI
-  text not quality-checked: ...". Plain English covers glossary terms/abbreviations at first use in
-  findings 2-3 only (it gets the glossary); everyday market words are fine.
+- Evaluator (step 10, gpt-6.1-sol): judges only the market context on 5 checks (no_rating_change,
+  supported_claims, sources_cited, check_data_handled, plain_english); output {pass, issues} only; runs only
+  on drafts that pass code's checks. Rejected -> "AI text failed quality check: the Evaluator rejected the
+  draft (...); market context left out"; unreachable or no valid answer -> "AI text not quality-checked: ...".
+  Everyday market words are fine; it gets the glossary.
+- Planner queries: plain words only; code removes search operators (site:, inurl: ...).
 - Controller (step 10, `controller.py`): stops (RunStopped) only when the run cannot be scored (missing or
   invalid inputs, unreadable prices, report not fitting); blocking data checks give CHECK DATA, not a stop.
   Extractor runs before data checks. Timeouts per AI step in `config/settings.yaml`. log.json per run;

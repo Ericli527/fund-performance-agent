@@ -209,7 +209,7 @@ SUMMARIES = [{"query": "US shares 2026", "summary": "US shares rose 25.3% in the
 
 
 def _context(text):
-    return AnalystDraft(findings=["a", "b"], market_context=text)
+    return AnalystDraft(market_context=text)
 
 
 def test_market_context_cites_numbered_sources():
@@ -227,11 +227,12 @@ def test_a_citation_without_a_source_is_rejected():
 
 
 def test_figures_from_sources_are_not_allowed():
-    assert problems(_context("US shares rose 25.3% [1]."), FACTS, sources=1) == ["number not in the facts: 25.3%"]
+    assert problems(_context("US shares rose 25.3% [1]."), FACTS, sources=1) == [
+        "number in the market context: 25.3%; describe direction only, with no figures"]
 
 
 def test_the_analyst_sees_numbered_sources_without_urls_and_the_report_gets_them():
-    good = {"findings": ["a", "b"], "market_context": "US shares rose, led by technology [1]."}
+    good = {"market_context": "US shares rose, led by technology [1]."}
     fake = FakeRun(good)
     result = asyncio.run(write_narrative(FACTS, SUMMARIES, run=fake))
     assert result.source == "ai" and result.output.market_context.endswith("[1].")
@@ -462,3 +463,15 @@ def test_identical_urls_are_kept_once():
     kept, flags, log = vet_summaries([first, again, other], profile(), VET_FACTS)
     assert kept == [first, other] and flags == []
     assert any("same URL as a source already kept" in line for line in log)
+
+
+def test_search_operators_are_removed_from_planned_queries():
+    """ From the full run: a site: search returned no usable result """
+    raw = SearchPlan.model_validate({"searches": [
+        {"topic": "fund_news", "query": "Sample World Index Fund fee change site:example.com", "reason": "r"},
+        {"topic": "market_drivers", "query": "site:spglobal.com Sample World review", "reason": "r"},
+        {"topic": "fund_news", "query": "site:example.com", "reason": "r"}]})
+    kept, log = tidy_plan(raw, MAX, profile())
+    assert [k.query for k in kept] == ["Sample World Index Fund fee change", "Sample World review"]
+    assert sum("Search operator removed" in line for line in log) == 3
+    assert "no search operators such as site:" in planner_agent(MAX).instructions

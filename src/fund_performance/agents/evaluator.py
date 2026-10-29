@@ -4,8 +4,8 @@ It checks the draft against a fixed rubric and returns JSON only: {"pass": ..., 
 It never writes or edits the text and never changes a rating; its output has no text field to do so. It has its
 own system prompt and its own model (config/models.yaml), so the Analyst's work is not graded by itself.
 
-It judges only the AI's text (findings 2 and 3, market context); finding 1 and the actions are written by code
-and shown for context. Only public data reaches it: the facts JSON (from public documents and calculations), the
+It judges only the AI's text, the market context; the findings and the actions are written by code and shown
+for context. Only public data reaches it: the facts JSON (from public documents and calculations), the
 numbered search summaries (without URLs) and the draft.
 """
 from dataclasses import dataclass, field
@@ -24,27 +24,21 @@ return JSON only: "pass" (true only if every check passes) and "issues" (one ent
 empty when pass is true). Each issue names its check and gives a short, specific detail that the writer
 can fix, quoting the words at fault.
 
-What you judge: only the parts marked "to_judge" (findings 2 and 3, and the market context), written by an
-AI. Finding 1 and the actions are written by code from the scorecard; they are shown for context only. Never
-raise an issue about them. Ratings and verdict were decided by code and are correct by definition. Judge the
+What you judge: only the part marked "to_judge", the market context, written by an AI. The findings and the
+actions are written by code from the scorecard and data notes; they are shown for context only. Never raise an
+issue about them. Ratings and verdict were decided by code and are correct by definition. Judge the
 draft only against the facts and sources given.
 
 Rubric (each must pass):
-1. no_rating_change: the text never states or suggests a different rating or verdict, or softens one
-   (e.g. "broadly Green", "close to Review").
-2. supported_claims: every claim is supported by the facts or by a cited source. Each figure is described as
-   what it is in the facts: a number called a tracking difference must be the tracking difference, a
-   cumulative gap must not be called a yearly one, periods must match. Each explanation is tied to the
-   figure its data note says it "explains": e.g. the fee explains the yearly tracking difference, not the
-   noon-price gap.
+1. no_rating_change: the text never states or suggests a rating or verdict, or a different one.
+2. supported_claims: every statement is supported by a cited source; it describes direction only (no figures)
+   and only the part of the review period the cited sources cover, saying which part.
 3. sources_cited: every statement about markets or news cites a numbered source such as [1].
-4. check_data_handled: any CHECK DATA item is explained as needing a check, not used for a conclusion.
-5. plain_english: applies to findings 2 and 3. Sentences are short. At its first use in these findings, each
-   term in the glossary below, and each abbreviation in it (pp, PNAV, NAV, OCF, R², AoV, AFM), has its short
-   definition in brackets, e.g. "R² 1.00 (how closely fund and index move together)"; later uses need none.
-   Only glossary terms need a definition. Everyday market words need none, anywhere, and are fine in the
-   market context: e.g. AI, large-cap, technology shares, Treasury yields, interest rates, inflation,
-   volatility, earnings.
+4. check_data_handled: the text does not draw a conclusion about any CHECK DATA item.
+5. plain_english: short sentences. A term in the glossary below, or an abbreviation in it (pp, PNAV, NAV,
+   OCF, R², AoV, AFM), has its short definition in brackets at its first use.
+   Only glossary terms need a definition. Everyday market words need none: e.g. AI, large-cap, technology
+   shares, Treasury yields, interest rates, inflation, volatility, earnings.
 
 Glossary (the only terms that need a definition):
 {chr(10).join("- " + line for line in glossary_lines())}

@@ -149,11 +149,12 @@ def _page1(inp: ReportInputs) -> str:
         for name, pillar in card.pillars.items())
     findings = "".join(f"<li>{escape(t)}</li>" for t in inp.narrative.output.key_findings)
     actions = "".join(f"<li>{escape(t)}</li>" for t in inp.narrative.output.action_texts)
-    origin = ("Finding 1 and the actions are written by code from the scorecard. Findings 2 and 3 and the market "
-              "context are written by AI and checked by code and a separate reviewer agent."
-              if inp.narrative.source == "ai" else
-              "Written by code from the figures (template text)." + (f" {inp.run_note}." if inp.run_note else
-                                                                    " The AI text did not pass its checks."))
+    origin = "Findings and actions are written by code from the scorecard and data notes." + (
+        f" {inp.run_note}." if inp.run_note else
+        " The market context (page 3) is written by AI from the cited sources and checked by code and a separate "
+        "reviewer agent." if inp.narrative.source == "ai" and inp.narrative.output.market_context else
+        " The AI market context did not pass its checks, so it is left out." if inp.narrative.source == "template"
+        else "")
     manual = "".join(f'<tr><td class="box">&nbsp;</td><td>Manual check done: {escape(m.name)}: {escape(m.reason)}</td></tr>'
                      for m in card.manual_checks)
     return f"""
@@ -456,10 +457,12 @@ def _page3(inp: ReportInputs) -> str:
     aov = "".join(f"<tr><td class='l'><b>{a}</b></td><td class='l'>{escape(b)}</td>"
                   f"<td class='chip' style='background-color:{STATUS_COLOURS[c]}'>{c}</td></tr>" for a, b, c in _aov_rows(inp))
     context = inp.narrative.output.market_context
-    market = (f"<p>{escape(context)}</p><p class='small'>Sources [n] are listed in the appendix.</p>" if context else
-              "<p class='small'>No market context: " + ("the AI steps were not run." if inp.run_note else
-                                                       "no web source passed the date, relevance and figure checks.")
-              + "</p>")
+    market = (f"<p>{escape(context)}</p><p class='small'>Written by AI from the cited sources; sources [n] are listed "
+              "in the appendix.</p>" if context else
+              "<p class='small'>No market context: " + (
+                  "the AI steps were not run." if inp.run_note else
+                  "the AI text did not pass its checks (see the appendix)." if inp.narrative.source == "template" else
+                  "no web source passed the date, relevance and figure checks.") + "</p>")
     return f"""
 <h1>Value, fees and Assessment of Value</h1>
 <h3>Comparison with a peer fund</h3>{peer}

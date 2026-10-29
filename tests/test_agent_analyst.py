@@ -1,10 +1,10 @@
-""" Oversight Analyst: code writes finding 1 and the actions; the AI writes findings 2 and 3 and the market context,
+""" Oversight Analyst (v1): code writes all the findings and the actions; the AI writes only the market context,
 which code checks. Mocked pass / rewrites / fallback; one live test on Test 1 that prints the text """
 import asyncio
 import pytest
-from fund_performance.agents.analyst import (AI_TEXT_UNAVAILABLE, CHECKS_FAILED, AnalystDraft, analyst_agent,
-                                             code_actions, failed_checks, problems, ratings_finding, template,
-                                             template_draft, write_narrative)
+from fund_performance.agents.analyst import (AI_TEXT_UNAVAILABLE, CHECKS_FAILED, LEFT_OUT, AnalystDraft, analyst_agent,
+                                             code_actions, code_findings, failed_checks, problems, ratings_finding,
+                                             template, write_narrative)
 from fund_performance.calc import calculate
 from fund_performance.checks import check_prices
 from fund_performance.config import load_thresholds
@@ -37,18 +37,19 @@ FACTS = {
                 {"name": "risk.pnav.r2.3y", "value": 1.0, "unit": "ratio", "source": "factsheet"},
                 {"name": "risk.pnav.beta.3y", "value": 1.0, "unit": "ratio", "source": "factsheet"},
                 {"name": "risk.pnav.tracking_error.3y", "value": 0.02, "unit": "%", "source": "factsheet"}]}
-
-GOOD = {"findings": ["The fund returned 13.8% a year against 13.9% for its index over 5 years.",
-                     "The tracking difference, the gap between fund and index returns, was -0.10 pp a year over 5 years."],
-        "market_context": None}
-
-
-def draft(**changes):
-    return GOOD | changes
+SOURCES = [{"query": "S&P 500 review", "summary": "US shares rose, led by technology.", "url": "https://example.com/a",
+            "date": "2026-09-30", "date_basis": "published"},
+           {"query": "S&P 500 drivers", "summary": "Rate worries weighed in spring.", "url": "https://example.com/b",
+            "date": "2026-07-01", "date_basis": "published"}]
+GOOD = {"market_context": "US shares rose, led by technology [1]. Worries about interest rates weighed in spring [2]."}
 
 
-def _out(**changes):
-    return AnalystDraft.model_validate(GOOD | changes)
+def draft(text=GOOD["market_context"]):
+    return {"market_context": text}
+
+
+def _out(text):
+    return AnalystDraft(market_context=text)
 
 
 def test_agent_settings(monkeypatch):
@@ -58,26 +59,24 @@ def test_agent_settings(monkeypatch):
     assert agent.model_settings.temperature is None
 
 
-def test_the_ai_writes_only_findings_2_and_3_and_the_market_context():
-    assert list(AnalystDraft.model_fields) == ["findings", "market_context"]
+def test_the_ai_writes_only_the_market_context():
+    assert list(AnalystDraft.model_fields) == ["market_context"]
 
 
-def test_prompt_carries_the_style_rules_and_glossary():
+def test_prompt_carries_the_market_context_rules():
     from fund_performance.agents.analyst import INSTRUCTIONS, STYLE_EXAMPLE
     text = " ".join(INSTRUCTIONS.split())
-    for rule in ("Plain meaning first", "under 20 words", "ongoing charge (OCF)", "below the surface",
-                 "Never put a minus sign after", "Cite them as [1], [2]", " ".join(STYLE_EXAMPLE.split()),
-                 "the fee explains the yearly tracking difference, not the noon-price gap",
-                 '"R² 1.00 (how closely fund and index move together)"', "Do not repeat them"):
+    for rule in ("Cite them as [1], [2]", "Direction only: no figures at all", "At most 3 sentences",
+                 "say which part", "Do not repeat them", STYLE_EXAMPLE):
         assert rule in text, rule
 
 
-# Finding 1 and the actions: written by code
+# The findings and the actions: written by code
 def test_finding_1_names_the_mandate_and_performance_ratings_with_their_reasons():
     assert ratings_finding(FACTS) == (
         "Mandate is Green: the fund moves in line with its index (R² 1.00 and beta 1.00 over 3 years, factsheet). "
-        "Performance is Green: the fund is 0.10% a year behind its index over 5 years (tracking difference -0.10 pp "
-        "a year); tracking error is 0.02% (over 3 years, factsheet).")
+        "Performance is Green: the fund is 0.10% a year behind its index over 5 years, a tracking difference of "
+        "-0.10 pp a year; tracking error is 0.02% (over 3 years, factsheet).")
 
 
 def test_finding_1_for_check_data_and_other_funds_uses_the_reason_in_plain_words():
@@ -90,101 +89,6 @@ def test_finding_1_for_check_data_and_other_funds_uses_the_reason_in_plain_words
     assert "Performance needs a data check: currency mismatch in 5 years index." in text
 
 
-def test_the_narrative_puts_code_and_ai_text_together():
-    fake = FakeRun(draft())
-    result = asyncio.run(write_narrative(FACTS, run=fake))
-    assert result.source == "ai" and result.flags == [] and len(fake.prompts) == 1
-    assert result.output.key_findings == [ratings_finding(FACTS)] + GOOD["findings"]
-    assert result.output.actions == code_actions(FACTS)
-    assert "Written by code (do not repeat):\nFinding 1: Mandate is Green" in fake.prompts[0]
-    assert "Sources:\nnone" in fake.prompts[0]
-
-
-# Code's checks on the AI's text, and the rewrites
-def test_one_rewrite_with_the_list_of_bad_numbers():
-    bad = draft(findings=["The fund returned 14.2% a year over 5 years.", GOOD["findings"][1]])
-    fake = FakeRun(bad, draft())
-    result = asyncio.run(write_narrative(FACTS, run=fake))
-    assert result.source == "ai" and result.flags == [] and len(fake.prompts) == 2
-    assert "number not in the facts: 14.2%" in fake.prompts[1]
-    assert result.log[-1] == "Analyst draft 2 passed the number, rating and wording checks"
-
-
-def test_code_checks_get_two_rewrites_then_the_template():
-    bad = draft(findings=["The fund returned 14.2% a year over 5 years.", GOOD["findings"][1]])
-    fake = FakeRun(bad, bad, bad)
-    result = asyncio.run(write_narrative(FACTS, run=fake))
-    assert result.source == "template" and len(fake.prompts) == 3
-    [flag] = result.flags
-    assert flag.level == "warning" and flag.message == f"{CHECKS_FAILED}: number; template narrative used"
-    assert result.output == template(FACTS)
-
-
-def test_every_rewrite_gets_all_the_issues_so_far():
-    """ Draft 1 breaks the number rule, draft 2 the minus rule: the third request lists both """
-    numbers = draft(findings=["The fund returned 14.2% a year over 5 years.", GOOD["findings"][1]])
-    minus = draft(findings=["The fund was behind its index by -0.10% a year over 5 years.", GOOD["findings"][1]])
-    fake = FakeRun(numbers, minus, draft())
-    result = asyncio.run(write_narrative(FACTS, run=fake))
-    assert result.source == "ai"
-    third = fake.prompts[2]
-    current, earlier = third.split("It was rejected for these reasons:")[1].split("Earlier drafts were rejected")
-    assert "minus sign after 'behind'" in current and "number not in the facts: 14.2%" in earlier
-    assert "Keep every rule your previous draft already passed" in third and "Do not bring back" in third
-
-
-def test_rewrite_budget_comes_from_the_config():
-    limits = load_thresholds().limits
-    assert (limits.max_analyst_rewrites, limits.max_evaluator_rewrites) == (2, 1)
-
-
-def test_a_draft_that_changes_a_rating_is_rejected():
-    changed = draft(findings=[GOOD["findings"][0], "Fees are Green because the charge is low."])
-    assert any(p.startswith("rating") for p in problems(AnalystDraft.model_validate(changed), FACTS))
-    fake = FakeRun(changed, draft())
-    result = asyncio.run(write_narrative(FACTS, run=fake))
-    assert result.source == "ai" and "calls Fees GREEN" in fake.prompts[1]
-
-
-def test_a_draft_that_changes_the_verdict_is_rejected():
-    changed = draft(findings=[GOOD["findings"][0], "Retain the fund."])
-    result = asyncio.run(write_narrative(FACTS, run=FakeRun(changed, changed, changed)))
-    assert result.source == "template" and any("uses 'Retain'" in line for line in result.log)
-
-
-def test_wrong_number_of_findings_is_invalid_output_and_retried():
-    fake = FakeRun(draft(findings=GOOD["findings"] + ["A third."]), draft())
-    result = asyncio.run(write_narrative(FACTS, run=fake))
-    assert result.source == "ai" and len(fake.prompts) == 2
-
-
-def test_invalid_output_twice_uses_the_template():
-    result = asyncio.run(write_narrative(FACTS, run=FakeRun({"findings": "x"}, {"actions": []})))
-    assert result.source == "template" and result.flags[0].message.startswith(AI_TEXT_UNAVAILABLE)
-
-
-def test_market_context_without_search_summaries_is_dropped():
-    result = asyncio.run(write_narrative(FACTS, run=FakeRun(draft(market_context="Tech stocks led, up 25.0%."))))
-    assert result.source == "ai" and result.output.market_context is None
-
-
-def test_no_minus_sign_after_behind_or_below():
-    bad = _out(findings=["The fund was behind by -0.10% a year over 5 years.", "It sat below the index by −0.7 pp."])
-    assert len([p for p in problems(bad, FACTS) if p.startswith("style")]) == 2
-
-
-def test_periods_are_written_in_words():
-    issues = problems(_out(findings=["The fund returned 13.8% a year over 5y.", GOOD["findings"][1]]), FACTS)
-    assert issues == ["style: write periods in words, not '5y'"]
-
-
-def test_at_most_two_sentences_per_finding():
-    four = "The fund tracks its index. It returned 13.8% a year over 5 years. Its index did too. That is all."
-    issues = problems(_out(findings=[four, GOOD["findings"][1]]), FACTS)
-    assert issues == ["style: finding 2 has 4 sentences; use at most 2"]
-
-
-# Data notes: insights, what each note explains, the template
 NOTES = [{"kind": "pricing", "note": "Noon pricing.", "explains": "the 5-year cumulative gap at noon prices",
           "figures": [
               {"label": "Gap at noon prices (NAV vs index), 5y", "value": -3.3, "unit": "pp", "display": "-3.3 pp", "key": True},
@@ -192,51 +96,109 @@ NOTES = [{"kind": "pricing", "note": "Noon pricing.", "explains": "the 5-year cu
          {"kind": "fee", "note": "Most of the yearly gap to the index is the fee.",
           "explains": "the yearly tracking difference", "figures": [
               {"label": "Tracking difference, a year, 5y", "value": -0.1, "unit": "pp", "display": "-0.10 pp"},
-              {"label": "Fund behind its index, in plain terms (% a year), 5y", "value": -0.1, "unit": "%", "display": "-0.10%"},
               {"label": "Ongoing charge (OCF), a year", "value": 0.06, "unit": "%", "display": "0.06%", "key": True},
-              {"label": "Cost-adjusted tracking difference, a year, 5y", "value": -0.04, "unit": "pp", "display": "-0.04 pp"},
               {"label": "Cost-adjusted gap, in plain terms (% a year), 5y", "value": -0.04, "unit": "%", "display": "-0.04%"}]}]
 FACTS_NOTES = FACTS | {"data_notes": NOTES}
-COVERED = ["Its noon price makes it look 3.3 pp behind over 5 years. At market close (PNAV) the gap is 0.7 pp.",
-           "Most of the yearly gap is the 0.06% yearly fee."]
 
 
-def test_findings_that_cover_every_data_note_pass():
-    assert problems(_out(findings=COVERED), FACTS_NOTES) == []
+def test_code_writes_one_finding_per_data_note_and_defines_pp_once():
+    findings = code_findings(FACTS_NOTES)
+    assert len(findings) == 3
+    assert "a tracking difference of -0.10 pp (percentage points) a year" in findings[0]
+    assert findings[1] == ("Its noon price makes it look 3.3 pp behind its index over 5 years. "
+                           "At market close (PNAV) the gap is only 0.7 pp.")
+    assert findings[2] == ("Most of the yearly gap is the fee, the 0.06% yearly ongoing charge (OCF). With the fee "
+                           "added back, the fund is 0.04% a year behind its index over 5 years.")
+    assert " ".join(findings).count("percentage points") == 1
 
 
-def test_a_missing_data_note_triggers_the_rewrite():
-    without_fee = [COVERED[0], "Value and fees need a peer fund."]
-    issues = problems(_out(findings=without_fee), FACTS_NOTES)
-    assert len(issues) == 1 and issues[0].startswith("insight: findings 2 and 3 do not cover this data note (use 0.06%)")
-    fake = FakeRun(draft(findings=without_fee), draft(findings=COVERED))
-    result = asyncio.run(write_narrative(FACTS_NOTES, run=fake))
-    assert result.source == "ai" and "insight:" in fake.prompts[1]
+def test_without_data_notes_the_other_ratings_fill_in():
+    findings = code_findings(FACTS)
+    assert findings[1] == "Value for investors needs a peer fund to be judged; Fees needs a peer fund to be judged."
+
+
+def test_the_narrative_puts_code_and_ai_text_together():
+    fake = FakeRun(draft())
+    result = asyncio.run(write_narrative(FACTS_NOTES, SOURCES, run=fake))
+    assert result.source == "ai" and result.flags == [] and len(fake.prompts) == 1
+    assert result.output.key_findings == code_findings(FACTS_NOTES)
+    assert result.output.actions == code_actions(FACTS_NOTES)
+    assert result.output.market_context == GOOD["market_context"]
+    assert "Written by code (do not repeat):\nFindings:\n- Mandate is Green" in fake.prompts[0]
+    assert len(result.sources) == 2
+
+
+def test_without_sources_the_ai_is_not_called():
+    fake = FakeRun()
+    result = asyncio.run(write_narrative(FACTS_NOTES, [], run=fake))
+    assert fake.prompts == [] and result.source == "code" and result.output == template(FACTS_NOTES)
+    assert result.output.market_context is None and result.flags == []
+
+
+# Code's checks on the market context, and the rewrites
+@pytest.mark.parametrize("text, problem", [
+    ("US shares rose 25.3% [1].", "number in the market context: 25.3%"),
+    ("US shares rose by 3.3 pp [1].", "number in the market context: 3.3 pp"),
+    ("US shares rose (https://example.com/a).", "citation: web address in the text"),
+    ("US shares rose [3].", "citation: [3] does not match a source"),
+    ("Shares rose [1]. They fell [2]. They rose [1]. They fell [2].", "style: the market context has 4 sentences"),
+    ("Over 12m shares rose [1].", "style: write periods in words"),
+    ("Mandate is Red as shares rose [1].", "rating:"),
+])
+def test_market_context_checks(text, problem):
+    found = problems(_out(text), FACTS, sources=2)
+    assert any(p.startswith(problem) for p in found), found
+
+
+def test_a_good_market_context_passes():
+    assert problems(_out(GOOD["market_context"]), FACTS, sources=2) == []
+    assert problems(_out("US shares rose in 2026, led by technology [1]."), FACTS, sources=2) == []   # a year is fine
+
+
+def test_one_rewrite_with_the_problems():
+    fake = FakeRun(draft("US shares rose 25.3% [1]."), draft())
+    result = asyncio.run(write_narrative(FACTS, SOURCES, run=fake))
+    assert result.source == "ai" and len(fake.prompts) == 2 and "number in the market context: 25.3%" in fake.prompts[1]
+    assert result.log[-1] == "Analyst draft 2 passed the figure, rating and wording checks"
+
+
+def test_code_checks_get_two_rewrites_then_the_market_context_is_left_out():
+    bad = draft("US shares rose 25.3% [1].")
+    fake = FakeRun(bad, bad, bad)
+    result = asyncio.run(write_narrative(FACTS, SOURCES, run=fake))
+    assert result.source == "template" and len(fake.prompts) == 3 and result.output == template(FACTS)
+    assert result.flags[0].message == f"{CHECKS_FAILED}: number; {LEFT_OUT}"
+
+
+def test_every_rewrite_gets_all_the_issues_so_far():
+    fake = FakeRun(draft("US shares rose 25.3% [1]."), draft("US shares rose [3]."), draft())
+    result = asyncio.run(write_narrative(FACTS, SOURCES, run=fake))
+    assert result.source == "ai"
+    current, earlier = fake.prompts[2].split("It was rejected for these reasons:")[1].split("Earlier drafts were rejected")
+    assert "[3] does not match a source" in current and "25.3%" in earlier
+    assert "Keep every rule your previous draft already passed" in fake.prompts[2]
+
+
+def test_rewrite_budget_comes_from_the_config():
+    limits = load_thresholds().limits
+    assert (limits.max_analyst_rewrites, limits.max_evaluator_rewrites) == (2, 1)
 
 
 def test_the_flag_lists_which_checks_failed():
-    bad = draft(findings=["Fees are Green; the fund returned 14.2% over 5y.", "b"])
-    result = asyncio.run(write_narrative(FACTS_NOTES, run=FakeRun(bad, bad, bad)))
-    assert result.flags[0].message == "AI text failed checks: number / rating / wording / insights; template narrative used"
+    bad = draft("Fees are Green; shares rose 14.2% over 5y [9].")
+    result = asyncio.run(write_narrative(FACTS, SOURCES, run=FakeRun(bad, bad, bad)))
+    assert failed_checks(problems(_out(bad["market_context"]), FACTS, 2)) == ["number", "rating", "wording"]
+    assert result.flags[0].message == f"{CHECKS_FAILED}: number / rating / wording; {LEFT_OUT}"
 
 
-def test_the_template_covers_every_data_note_and_passes():
-    t = template_draft(FACTS_NOTES)
-    assert problems(t, FACTS_NOTES) == [] and problems(template_draft(FACTS), FACTS) == []
-    assert t.findings[0] == ("Its noon price makes it look 3.3 pp behind its index over 5 years. "
-                             "At market close (PNAV) the gap is only 0.7 pp.")
-    assert t.findings[1] == ("Most of the yearly gap is the fee, the 0.06% yearly ongoing charge (OCF). With the fee "
-                             "added back, the fund is 0.04% a year behind its index over 5 years.")
-    assert template(FACTS_NOTES).key_findings[0] == ratings_finding(FACTS_NOTES)
+def test_invalid_output_twice_leaves_the_market_context_out():
+    result = asyncio.run(write_narrative(FACTS, SOURCES, run=FakeRun({"x": 1}, {"y": 2})))
+    assert result.source == "template" and result.flags[0].message == f"{AI_TEXT_UNAVAILABLE}: {LEFT_OUT}"
 
 
-def test_a_mislabelled_figure_counts_as_a_number_problem():
-    from test_number_guard import LABEL_FACTS
-    facts = FACTS_NOTES | {"figures": FACTS["figures"] + LABEL_FACTS["figures"]}
-    bad = ["Over 5 years its tracking difference was -3.3 pp at noon prices.", COVERED[1]]
-    issues = problems(_out(findings=bad), facts)
-    assert any(i.startswith("label: '-3.3 pp' next to 'tracking difference'") for i in issues)
-    assert "number" in failed_checks([i for i in issues if i.startswith("label:")])
+def test_a_null_market_context_is_accepted():
+    result = asyncio.run(write_narrative(FACTS, SOURCES, run=FakeRun(draft(None))))
+    assert result.source == "ai" and result.output.market_context is None and result.sources == []
 
 
 def _test1_facts():
@@ -251,11 +213,11 @@ def _test1_facts():
 
 
 @requires_test1
-def test_test1_template_and_finding_1():
-    facts = _test1_facts()
-    assert problems(template_draft(facts), facts) == []
-    assert ratings_finding(facts).startswith("Mandate is Green: the fund moves in line with its index (R² 1.00 and "
-                                             "beta 1.00 over 3 years, factsheet). Performance is Green")
+def test_test1_findings():
+    findings = code_findings(_test1_facts())
+    assert findings[0].startswith("Mandate is Green: the fund moves in line with its index (R² 1.00 and beta 1.00 "
+                                  "over 3 years, factsheet). Performance is Green")
+    assert "3.3 pp behind its index over 5 years" in findings[1] and "0.06% yearly ongoing charge" in findings[2]
 
 
 @requires_test1
@@ -265,18 +227,14 @@ def test_test1_data_notes_say_what_they_explain():
     assert notes["fee"]["explains"].startswith("the yearly tracking difference (-0.10 pp a year over 5 years)")
     assert "does not explain the noon-price gap" in notes["fee"]["explains"]
     assert notes["pricing"]["explains"].startswith("the 5-year cumulative gap at noon prices (-3.3 pp)")
-    assert "does not explain the yearly tracking difference" in notes["pricing"]["explains"]
 
 
 @pytest.mark.live
 @requires_test1
 def test_live_test1_analyst():
     facts = _test1_facts()
-    result = asyncio.run(write_narrative(facts))
+    result = asyncio.run(write_narrative(facts, SOURCES))
     print(f"\n--- Oversight Analyst ({result.source}) ---")
-    for i, f in enumerate(result.output.key_findings, start=1):
-        print(f" {i}. {f}")
-    print("Actions (code):", *result.output.action_texts, sep="\n - ")
     print("Market context:", result.output.market_context)
     print("Log:", *result.log, sep="\n  ")
     print("Flags:", [f.message for f in result.flags])

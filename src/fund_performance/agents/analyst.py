@@ -1,13 +1,13 @@
-""" Oversight Analyst (spec Sections 8 and 8.1): explains, in plain English, what code has decided
+""" Oversight Analyst (spec Sections 8 and 8.1): the narrative, in plain English
 
-The split between code and AI:
-- Code writes finding 1 (the Mandate and Performance ratings with their reasons) and the actions (the
-  candidate actions, word for word).
-- The AI writes only findings 2 and 3 (the "below the surface" insights from the data notes) and the market
-  context. Code checks that text (numbers, labels and periods, ratings, sentences, wording, insights), then the
-  Evaluator Agent checks its quality (spec 8.4). Each has its own rewrites (config); every rewrite gets all the
-  issues found so far. If a draft still fails, a template narrative written by code is used and the run is
-  flagged.
+The split between code and AI (v1):
+- Code writes all the findings: finding 1 (the Mandate and Performance ratings with their reasons) and one
+  finding per data note (the "below the surface" insights, fixed facts with fixed wording), and the actions
+  (the candidate actions, word for word).
+- The AI writes only the market context, from the numbered sources. Code checks it (no figures, sentences,
+  wording, citations, ratings), then the Evaluator Agent checks its quality (spec 8.4). Each has its own
+  rewrites (config); every rewrite gets all the issues found so far. If it still fails, the market context is
+  left out and the run is flagged.
 """
 from dataclasses import dataclass, field
 import json
@@ -19,83 +19,53 @@ from fund_performance.agents.base import RunFn, build_agent, run_structured
 from fund_performance.agents.evaluator import Review
 from fund_performance.glossary import glossary_lines
 from fund_performance.models import DataFlag
-from fund_performance.number_guard import check_labels, check_numbers, check_ratings, mentions
+from fund_performance.number_guard import check_labels, check_ratings, numbers_in
 
-AI_FINDINGS = 2                         # findings 2 and 3; finding 1 is written by code
 MIN_ACTIONS, MAX_ACTIONS = 2, 3
-MAX_SENTENCES = 2                       # per finding
+MAX_CONTEXT_SENTENCES = 3
 CHECKS_FAILED = "AI text failed checks"
 QUALITY_FAILED = "AI text failed quality check"
 QUALITY_NOT_DONE = "AI text not quality-checked"
 AI_TEXT_UNAVAILABLE = "AI text unavailable"
+LEFT_OUT = "market context left out"
 
-STYLE_EXAMPLE = (
-    "Its noon price makes it look 3.3 pp behind its index over 5 years. At its market-close price, PNAV (the "
-    "fund's price worked out at market close), the gap is only 0.7 pp.")
+STYLE_EXAMPLE = ("US shares rose over the period, led by large technology companies [1]. Worries about interest "
+                 "rates held markets back in the spring [2].")
 
 INSTRUCTIONS = f"""
-You are an investment oversight analyst writing for an oversight director. Write so that both experts and
-people new to the industry can follow.
+You write the market context for an investment oversight review: a short paragraph on what drove the fund's
+market in the review period, for an oversight director. Write so that both experts and people new to the
+industry can follow.
 
-What you write: findings 2 and 3, and the market context. Code has already written finding 1 (the Mandate and
-Performance ratings with their reasons) and the actions; they are shown to you. Do not repeat them.
+Code has already written the findings and the actions; they are shown to you. Do not repeat them.
 
-Findings 2 and 3 are the "below the surface" points:
-- One finding for each data note in the facts, using its key figure (marked "key": true). If there are fewer
-  than 2 data notes, use the other finding for another point from the facts that finding 1 does not make.
-- Each data note says what it "explains". Keep that link: the fee explains the yearly tracking difference,
-  not the noon-price gap. The noon-price gap is a timing effect, not a cost.
+Rules:
+- Base it only on the numbered sources given. Cite them as [1], [2]; never write a web address.
+- Direction only: no figures at all (no %, pp or numbers from the sources or the facts), e.g. "US shares
+  rose, led by technology [1]".
+- Describe only what the cited sources cover: if they cover only part of the review period, say which part.
+- At most 3 sentences, each under 20 words. Plain English: everyday market words (technology shares, interest
+  rates, inflation, volatility) are fine; explain a glossary term in brackets if you use one.
+- Never mention, change or comment on a rating or the verdict.
+- If no sources are given, return null.
 
-Ratings and verdict:
-- Never change, soften or override a rating or the verdict.
-- Do not use the words Retain, Monitor, Review or "Pending data check" except to state the given verdict word
-  for word.
-
-Numbers:
-- Only use numbers that appear in the facts. Do not calculate new numbers (no differences, sums, averages or
-  conversions). Write each number with the same unit as in the facts: "%" or "pp". You may round to 1 or 2
-  decimal places.
-- Call a figure by what it is in the facts. A number next to "tracking difference", "tracking error" or
-  "ongoing charge" must be that figure, for that period. A tracking difference is yearly: write "a year", its
-  sign and its period, e.g. "tracking difference -0.10 pp a year over 5 years".
-- If a figure has the note "please verify", write "(please verify)" next to it.
-
-Style:
-- Plain meaning first, technical term second, in brackets.
-- Never put a minus sign after "behind" or "below": say "behind by 0.10%", not "behind by -0.10%".
-- At the first use in your findings of a term from the glossary below, put its definition in brackets right
-  after the term and its figure, e.g. "R² 1.00 (how closely fund and index move together)". Never explain a
-  term in a separate sentence. After that, use the term alone.
-- No unexplained abbreviations: write "ongoing charge (OCF)", not "OCF".
-- Short sentences: under 20 words each. At most 2 sentences per finding.
-- Write periods in words: "5 years", "12 months", never "5y" or "12m".
-- If an item is CHECK DATA, say what needs checking instead of drawing a conclusion.
-
-Glossary (use these definitions):
+Glossary (use these definitions if you use a term):
 {chr(10).join("- " + line for line in glossary_lines())}
 
-Example of the target style (from another review; never copy its numbers):
+Example of the target style (from another review):
 "{STYLE_EXAMPLE}"
 
-Output:
-- findings: exactly 2 findings (findings 2 and 3).
-- market_context: a short paragraph on what drove the market in the review period, based only on the
-  numbered sources given. Cite them as [1], [2]; never write a web address. Use no figures from the sources;
-  describe direction only (e.g. "US shares rose, led by technology [1]"). Describe only what the cited sources
-  cover: if they cover only part of the review period, say which part. If no sources are given, return null.
-
-Code checks numbers, labels and periods, ratings, sentences and wording; a separate reviewer checks quality.
+Code checks figures, sentences, wording and citations; a separate reviewer checks quality.
 """
 
 
 class AnalystDraft(BaseModel):
-    """ What the AI writes """
+    """ What the AI writes: the market context only """
     model_config = ConfigDict(extra="forbid")
-    findings: list[str] = Field(description="Exactly 2 findings: findings 2 and 3, the insights from the data notes")
-    market_context: str | None = Field(description="Short market context from the search summaries, or null")
+    market_context: str | None = Field(description="Short market context from the numbered sources, or null")
 
     def text(self) -> str:
-        return "\n".join(self.findings + ([self.market_context] if self.market_context else []))
+        return self.market_context or ""
 
 
 class ChosenAction(BaseModel):
@@ -105,8 +75,7 @@ class ChosenAction(BaseModel):
 
 
 class AnalystOutput(BaseModel):
-    """ The narrative in the report: finding 1 and the actions from code, findings 2 and 3 and the market
-    context from the AI (or the template) """
+    """ The narrative in the report: the findings and the actions from code, the market context from the AI """
     model_config = ConfigDict(extra="forbid")
     key_findings: list[str]
     actions: list[ChosenAction]
@@ -120,7 +89,7 @@ class AnalystOutput(BaseModel):
 @dataclass
 class Narrative:
     output: AnalystOutput
-    source: Literal["ai", "template"]
+    source: Literal["ai", "template", "code"]       # market context by AI; AI text failed or skipped; none needed
     flags: list[DataFlag] = field(default_factory=list)
     log: list[str] = field(default_factory=list)
     sources: list[dict] = field(default_factory=list)     # [n] -> query, url, date, for the report's sources list
@@ -128,13 +97,6 @@ class Narrative:
 
 def analyst_agent():
     return build_agent("Oversight Analyst", INSTRUCTIONS, AnalystDraft, "analyst")
-
-
-def _check_shape(out: AnalystDraft) -> AnalystDraft:
-    """ Counts are checked in code (strict JSON schemas cannot hold them); a wrong count is invalid output """
-    if len(out.findings) != AI_FINDINGS:
-        raise ValueError(f"expected {AI_FINDINGS} findings (findings 2 and 3), got {len(out.findings)}")
-    return out
 
 
 # --- What code writes: finding 1 and the actions ------------------------------------------------------------
@@ -191,8 +153,8 @@ def ratings_finding(facts: dict) -> str:
             side = "behind" if td["value"] < 0 else "ahead of"
             te_text = f"; tracking error is {te['value']:.2f}% ({_where(te)})" if te else ""
             parts.append(f"{_rating_phrase('Performance', perf['rating'])}: the fund is {abs(td['value']):.2f}% a "
-                         f"year {side} its index over {n} years (tracking difference {td['value']:+.2f} pp a year)"
-                         f"{te_text}.")
+                         f"year {side} its index over {n} years, a tracking difference of {td['value']:+.2f} pp a "
+                         f"year{te_text}.")
         else:
             parts.append(f"{_rating_phrase('Performance', perf['rating'])}: {_plain(perf['reason'])}.")
     return " ".join(parts)
@@ -208,9 +170,32 @@ def code_actions(facts: dict) -> list[ChosenAction]:
     return [ChosenAction(candidate=i, text=t) for i, t in default_actions(candidates_for(facts), MIN_ACTIONS, MAX_ACTIONS)]
 
 
-def assemble(facts: dict, draft: AnalystDraft) -> AnalystOutput:
-    return AnalystOutput(key_findings=[ratings_finding(facts)] + draft.findings, actions=code_actions(facts),
-                         market_context=draft.market_context)
+_PP = re.compile(r"\bpp\b")
+
+
+def define_first(findings: list[str], term: re.Pattern, definition: str) -> list[str]:
+    """ Add "(definition)" after the first use of a term across the findings, e.g. "pp (percentage points)" """
+    out, done = [], False
+    for f in findings:
+        if not done and (m := term.search(f)):
+            f, done = f[:m.end()] + f" ({definition})" + f[m.end():], True
+        out.append(f)
+    return out
+
+
+def code_findings(facts: dict) -> list[str]:
+    """ All the findings, written by code: finding 1 (ratings with reasons), then one per data note (fixed
+    wording); if there are fewer than 2 data-note findings, the other ratings. "pp" is defined at first use """
+    years = facts.get("fund", {}).get("time_horizon_years", 5)
+    pillars = {p["name"]: p for p in facts["scorecard"]["pillars"]}
+    notes = [s for n in facts.get("data_notes", []) if (s := _note_sentence(n, years))]
+    if len(notes) < 2:
+        notes.append(_other_ratings_sentence(pillars))
+    return define_first([ratings_finding(facts)] + notes, _PP, "percentage points")
+
+
+def assemble(facts: dict, market_context: str | None) -> AnalystOutput:
+    return AnalystOutput(key_findings=code_findings(facts), actions=code_actions(facts), market_context=market_context)
 
 
 # --- Code's checks on the AI's text ----------------------------------------------------------------------------
@@ -227,49 +212,37 @@ def sentences(text: str) -> int:
 
 
 def style_problems(out: AnalystDraft, sources: int) -> list[str]:
-    """ Wording rules checked by code: no minus after "behind"/"below", no web addresses in the text, citations
-    only to sources that exist, periods in words, and at most 2 sentences per finding """
+    """ Wording rules checked by code on the market context: no figures, no minus after "behind"/"below", no web
+    addresses, citations only to sources that exist, periods in words, at most 3 sentences """
     text = out.text()
     found = [f"style: minus sign after '{m.group(1)}' in '{m.group(0)}'; write 'behind by 0.10%'"
              for m in _MINUS_AFTER.finditer(text)]
     found += [f"citation: web address in the text ({u}); cite the source as [n] instead" for u in _URL.findall(text)]
     found += [f"citation: [{n}] does not match a source" for n in _CITATION.findall(text) if not 1 <= int(n) <= sources]
     found += [f"style: write periods in words, not '{m.group(0)}'" for m in _SHORT_PERIOD.finditer(text)]
-    found += [f"style: finding {i} has {n} sentences; use at most {MAX_SENTENCES}"
-              for i, f in enumerate(out.findings, start=2) if (n := sentences(f)) > MAX_SENTENCES]
+    if text and (n := sentences(text)) > MAX_CONTEXT_SENTENCES:
+        found.append(f"style: the market context has {n} sentences; use at most {MAX_CONTEXT_SENTENCES}")
     return found
 
 
-def missing_insights(out: AnalystDraft, facts: dict) -> list[str]:
-    """ Each data note must be covered in findings 2 and 3: at least one of its key figures appears there """
-    findings = " ".join(out.findings)
-    missing = []
-    for note in facts.get("data_notes", []):
-        keys = [f for f in note["figures"] if f.get("key")]
-        if keys and not any(mentions(findings, f["value"], f["unit"]) for f in keys):
-            missing.append(f"insight: findings 2 and 3 do not cover this data note (use {keys[0]['display']}): "
-                           f"{note['note']}")
-    return missing
-
-
-CHECK_KINDS = (("number", "number not in the facts"), ("number", "label:"), ("rating", "rating:"),
-               ("rating", "verdict:"), ("wording", "style:"), ("wording", "citation:"), ("insights", "insight:"))
+CHECK_KINDS = (("number", "number"), ("number", "label:"), ("rating", "rating:"), ("rating", "verdict:"),
+               ("wording", "style:"), ("wording", "citation:"))
 
 
 def failed_checks(issues: list[str]) -> list[str]:
-    """ Which checks a draft failed, in a fixed order: number, rating, wording, insights """
+    """ Which checks a draft failed, in a fixed order: number, rating, wording """
     kinds = {kind for kind, prefix in CHECK_KINDS for i in issues if i.startswith(prefix)}
-    return [k for k in ("number", "rating", "wording", "insights") if k in kinds]
+    return [k for k in ("number", "rating", "wording") if k in kinds]
 
 
 def problems(out: AnalystDraft, facts: dict, sources: int = 0) -> list[str]:
-    """ Everything wrong with the AI's text (findings 2 and 3, market context): numbers not in the facts or under
-    the wrong label or period, changed ratings or verdict, the wording rules and missing insights. Web addresses
-    are taken out before the number check (they are reported as citation problems) """
+    """ Everything wrong with the market context: any figure (direction only), figures not in the facts or under
+    the wrong label, a rating or verdict, and the wording rules. Web addresses are taken out first (they are
+    reported as citation problems) """
     text = _URL.sub("[source]", out.text())
-    bad = check_numbers(text, facts)
-    return ([f"number not in the facts: {n}" for n in bad] + check_labels(text, facts)
-            + check_ratings(text, facts["scorecard"]) + style_problems(out, sources) + missing_insights(out, facts))
+    figures = [n.text.strip() for n in numbers_in(_CITATION.sub(" ", text))]
+    return ([f"number in the market context: {f}; describe direction only, with no figures" for f in figures]
+            + check_labels(text, facts) + check_ratings(text, facts["scorecard"]) + style_problems(out, sources))
 
 
 # --- Prompts ----------------------------------------------------------------------------------------------------
@@ -286,14 +259,13 @@ def prompt(facts: dict, search_summaries: list[dict] | None = None) -> str:
                for s in numbered_sources(search_summaries)]
     return ("Facts (decided by code; quote only these numbers):\n" + json.dumps(facts, indent=1, ensure_ascii=False)
             + "\n\nSources:\n" + (json.dumps(sources, indent=1, ensure_ascii=False) if sources else "none")
-            + "\n\nWritten by code (do not repeat):\nFinding 1: " + ratings_finding(facts)
+            + "\n\nWritten by code (do not repeat):\nFindings:\n" + "\n".join(f"- {f}" for f in code_findings(facts))
             + "\nActions:\n" + "\n".join(f"- {a.text}" for a in code_actions(facts)))
 
 
-KEEP_RULES = ("Fix every problem listed. Keep every rule your previous draft already passed: numbers only from the "
-              "facts, with the same units; labels, 'a year' and periods next to each figure; at most 2 sentences per "
-              "finding; glossary definitions in brackets at first use; the ratings and verdict exactly as given. "
-              "Do not bring back any earlier problem.")
+KEEP_RULES = ("Fix every problem listed. Keep every rule your previous draft already passed: no figures (direction "
+              "only); only the numbered sources, cited as [n]; at most 3 short sentences; plain English; no ratings "
+              "or verdict. Do not bring back any earlier problem.")
 
 
 def rewrite_prompt(original: str, draft: AnalystDraft, current: list[str], earlier: list[str]) -> str:
@@ -346,21 +318,9 @@ def _other_ratings_sentence(pillars: dict) -> str:
     return (text[:1].upper() + text[1:] + ".") if text else "The figures and their sources are on pages 2 and 3."
 
 
-def template_draft(facts: dict) -> AnalystDraft:
-    """ Findings 2 and 3 written by code, in plain English, from the data notes (so they pass the number guard and
-    cover every required insight) """
-    years = facts.get("fund", {}).get("time_horizon_years", 5)
-    pillars = {p["name"]: p for p in facts["scorecard"]["pillars"]}
-    findings = [s for n in facts.get("data_notes", []) if (s := _note_sentence(n, years))][:AI_FINDINGS]
-    for extra in (_other_ratings_sentence(pillars), "The figures and their sources are on pages 2 and 3."):
-        if len(findings) < AI_FINDINGS and extra not in findings:
-            findings.append(extra)
-    return AnalystDraft(findings=findings, market_context=None)
-
-
 def template(facts: dict) -> AnalystOutput:
-    """ The whole narrative written by code, used offline or when the AI text fails its checks """
-    return assemble(facts, template_draft(facts))
+    """ The narrative with no market context: used offline, with no sources, or when the AI text fails """
+    return assemble(facts, None)
 
 
 # --- The flow --------------------------------------------------------------------------------------------------
@@ -373,9 +333,8 @@ def _template(facts: dict, message: str, log: list[str]) -> Narrative:
 
 
 def evaluator_view(facts: dict, draft: AnalystDraft) -> dict:
-    """ What the Evaluator sees: the AI's text to judge, and code's text for context only """
-    return {"finding_1_written_by_code_not_judged": ratings_finding(facts),
-            "findings_2_and_3_to_judge": draft.findings,
+    """ What the Evaluator sees: the AI's market context to judge, and code's text for context only """
+    return {"findings_written_by_code_not_judged": code_findings(facts),
             "market_context_to_judge": draft.market_context,
             "actions_written_by_code_not_judged": [a.text for a in code_actions(facts)]}
 
@@ -383,15 +342,17 @@ def evaluator_view(facts: dict, draft: AnalystDraft) -> dict:
 async def write_narrative(facts: dict, search_summaries: list[dict] | None = None, max_rewrites: int = 2,
                           run: RunFn | None = None, quality_check: QualityFn | None = None,
                           max_evaluator_rewrites: int = 1) -> Narrative:
-    """ The AI drafts findings 2 and 3 and the market context. Code's checks (spec 8.3) run first, with
-    max_rewrites rewrites; the Evaluator (8.4) sees only drafts that pass them, with its own
-    max_evaluator_rewrites. Every rewrite gets all the issues found so far. When a draft fails and no rewrite of
-    that kind is left, the template narrative is used with a flag naming what failed """
+    """ Code writes the findings and actions. The AI writes the market context from the sources: code's checks
+    (spec 8.3) run first, with max_rewrites rewrites; the Evaluator (8.4) sees only drafts that pass them, with its
+    own max_evaluator_rewrites. Every rewrite gets all the issues found so far. When a draft fails and no rewrite
+    of that kind is left, the market context is left out and the run is flagged """
+    sources = numbered_sources(search_summaries)
+    if not sources:
+        return Narrative(template(facts), "code", [], ["No market context: no usable web sources, so no AI text"])
     agent = analyst_agent()
     first = prompt(facts, search_summaries)
     request, log, so_far = first, [], []
     check_rewrites = evaluator_rewrites = draft_no = 0
-    sources = numbered_sources(search_summaries)
 
     def rewrite(draft: AnalystDraft, current: list[str]) -> str:
         earlier = [i for i in so_far if i not in current]
@@ -399,16 +360,15 @@ async def write_narrative(facts: dict, search_summaries: list[dict] | None = Non
         return rewrite_prompt(first, draft, current, earlier)
 
     while True:
-        result = await run_structured(agent, request, AnalystDraft, convert=_check_shape, run=run)
+        result = await run_structured(agent, request, AnalystDraft, run=run)
         if not result.ok:
             log.append(f"Analyst gave no valid output: {'; '.join(result.errors)}")
-            return _template(facts, f"{AI_TEXT_UNAVAILABLE}: template narrative used", log)
+            return _template(facts, f"{AI_TEXT_UNAVAILABLE}: {LEFT_OUT}", log)
         draft_no += 1
         draft = result.output
-        if not search_summaries and draft.market_context:
-            # Market context must come from cited search summaries (spec 8.2); without them it is dropped
-            draft.market_context = None
-            log.append("Market context dropped: no search summaries were given")
+        if not draft.market_context:
+            log.append(f"Analyst draft {draft_no}: no market context from the sources")
+            return Narrative(template(facts), "ai", [], log, [])
         issues = problems(draft, facts, len(sources))
         if issues:
             log.append(f"Analyst draft {draft_no} rejected by code's checks ({' / '.join(failed_checks(issues))}): "
@@ -417,14 +377,14 @@ async def write_narrative(facts: dict, search_summaries: list[dict] | None = Non
                 check_rewrites += 1
                 request = rewrite(draft, issues)
                 continue
-            return _template(facts, f"{CHECKS_FAILED}: {' / '.join(failed_checks(issues))}; template narrative used", log)
-        log.append(f"Analyst draft {draft_no} passed the number, rating and wording checks")
+            return _template(facts, f"{CHECKS_FAILED}: {' / '.join(failed_checks(issues))}; {LEFT_OUT}", log)
+        log.append(f"Analyst draft {draft_no} passed the figure, rating and wording checks")
         if quality_check is not None:
             verdict = await quality_check(facts, sources, evaluator_view(facts, draft))
             if verdict.error:
                 log.append(f"Evaluator gave no valid result: {verdict.error}")
                 why = "could not be reached" if verdict.unreachable else "gave no valid answer after one retry"
-                return _template(facts, f"{QUALITY_NOT_DONE}: the Evaluator {why}; template narrative used", log)
+                return _template(facts, f"{QUALITY_NOT_DONE}: the Evaluator {why}; {LEFT_OUT}", log)
             if not verdict.passed:
                 log.append(f"Evaluator rejected draft {draft_no}: " + "; ".join(verdict.problems()))
                 if evaluator_rewrites < max_evaluator_rewrites:
@@ -432,6 +392,6 @@ async def write_narrative(facts: dict, search_summaries: list[dict] | None = Non
                     request = rewrite(draft, verdict.problems())
                     continue
                 return _template(facts, f"{QUALITY_FAILED}: the Evaluator rejected the draft "
-                                        f"({', '.join(verdict.failed_checks)}); template narrative used", log)
+                                        f"({', '.join(verdict.failed_checks)}); {LEFT_OUT}", log)
             log.append(f"Evaluator passed draft {draft_no}")
-        return Narrative(assemble(facts, draft), "ai", [], log, sources if draft.market_context else [])
+        return Narrative(assemble(facts, draft.market_context), "ai", [], log, sources)
