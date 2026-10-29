@@ -199,3 +199,13 @@ def test_test1_calendar_years_from_the_factsheet_last_10(test1):
     years = sorted(k.rsplit(".", 1)[1] for k in test1.figures if k.startswith("fund_nav.calendar.") and k[-1].isdigit())
     assert years == [str(y) for y in range(2016, 2026)]
     assert all(test1.figures[f"fund_nav.calendar.{y}"].source == "factsheet" for y in years)
+
+
+def test_figures_read_by_the_extractor_stay_ai_extracted():
+    """ Found by the step 10 controller test: extracted figures were shown as plain "Factsheet" """
+    df, prof = prices(), profile()
+    fs = factsheet_from(calculate(df, prof, T), source="ai_extracted", entered_by="extractor")
+    _, rep = run(df, prof, fs)
+    assert rep.figures["fund_nav.cum.5y"].source == "ai_extracted"
+    assert rep.figures["fund_nav.vol.5y"].source == "calculated"
+    assert not any(f.source == "factsheet" for f in rep.figures.values())

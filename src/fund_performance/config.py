@@ -199,3 +199,43 @@ class SourcesConfig(_Section):
 def load_sources(path: str | Path = SOURCES_PATH) -> SourcesConfig:
     with open(path, encoding="utf-8") as f:
         return SourcesConfig.model_validate(yaml.safe_load(f))
+
+
+# --- config/settings.yaml: timeouts and email (step 10) -------------------------------------------------
+
+SETTINGS_PATH = Path(__file__).resolve().parents[2] / "config" / "settings.yaml"
+
+
+class Timeouts(_Section):
+    extractor: float
+    mandate: float
+    research: float
+    narrative: float
+
+
+class EmailSettings(_Section):
+    enabled: bool
+    recipients: list[str]
+    sender: str
+    smtp_host: str
+    smtp_port: int
+    subject: str
+
+    @model_validator(mode="after")
+    def _complete_when_on(self) -> "EmailSettings":
+        if self.enabled and not (self.recipients and self.sender and self.smtp_host):
+            raise ValueError("email is enabled but recipients, sender or smtp_host is missing")
+        bad = [r for r in self.recipients if "@" not in r]
+        if bad:
+            raise ValueError(f"not an email address: {bad}")
+        return self
+
+
+class RunSettings(_Section):
+    timeouts_seconds: Timeouts
+    email: EmailSettings
+
+
+def load_settings(path: str | Path = SETTINGS_PATH) -> RunSettings:
+    with open(path, encoding="utf-8") as f:
+        return RunSettings.model_validate(yaml.safe_load(f))

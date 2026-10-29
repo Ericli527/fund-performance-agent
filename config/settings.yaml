@@ -1,0 +1,21 @@
+# Fund Performance Agent: run settings (step 10)
+#
+# timeouts_seconds: the longest each AI step may take. A step that runs over is stopped and handled like a
+#   failed step (flagged in the report), so one slow call cannot hold up the review.
+# email: sending the report is plain code (not an AI agent) and is OFF by default. Recipients come from this
+#   file only. The SMTP login comes from .env (FUND_SMTP_USER, FUND_SMTP_PASSWORD), never from this file.
+#   Only the PDF of public data is sent.
+
+timeouts_seconds:
+  extractor: 180
+  mandate: 90
+  research: 240        # approved pages, planner and web searches together
+  narrative: 300       # Analyst, code checks, Evaluator and the one rewrite together
+
+email:
+  enabled: false
+  recipients: []       # e.g. ["oversight-team@example.com"]
+  sender: ""
+  smtp_host: ""
+  smtp_port: 587
+  subject: "Fund performance review (draft): {fund_name}, figures to {as_of_date}"

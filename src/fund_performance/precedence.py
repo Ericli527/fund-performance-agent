@@ -63,6 +63,10 @@ def apply_precedence(calculated: CalcResult, price_flags: list[DataFlag], profil
                   for f in price_flags]
     out.flags += calculated.flags
     _comparison(out, calculated, profile, thresholds, factsheet, comparison)
+    if factsheet is not None and factsheet.source == "ai_extracted":
+        # Figures the Extractor Agent read keep that label, so the report shows them "(please verify)"
+        out.figures = {k: f.model_copy(update={"source": "ai_extracted"}) if f.source == "factsheet" else f
+                       for k, f in out.figures.items()}
     return out
 
 

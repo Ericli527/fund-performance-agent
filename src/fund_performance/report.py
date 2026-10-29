@@ -31,7 +31,8 @@ NAVY = "#1f3a5f"
 RATING_COLOURS = {GREEN: "#2e7d32", AMBER: "#d18f00", RED: "#c62828", CHECK_DATA: "#6d4c9f", MANUAL_CHECK: "#546e7a"}
 VERDICT_COLOURS = {"Retain": GREEN, "Monitor": AMBER, "Review": RED, "Pending": CHECK_DATA}
 RATING_WORDS = {GREEN: "Green", AMBER: "Amber", RED: "Red", CHECK_DATA: "Check data", MANUAL_CHECK: "Manual check"}
-SOURCE_WORDS = {"factsheet": "Factsheet", "calculated": "Calculated", "ai_extracted": "AI-extracted", "web": "Web"}
+SOURCE_WORDS = {"factsheet": "Factsheet", "calculated": "Calculated", "ai_extracted": "AI-extracted (please verify)",
+                "web": "Web"}
 AOV_DISCLAIMER = ("This is an indicative assessment from public data. It does not replace the AFM's formal "
                   "Assessment of Value.")
 KNOWN_LIMITATIONS = [
@@ -64,6 +65,7 @@ class ReportInputs:
     thresholds: Thresholds
     flags: list[DataFlag] = field(default_factory=list)
     input_files: list[str] = field(default_factory=list)
+    web_sources: list[dict] | None = None   # numbered sources from the run log (step 10); else the narrative's
     promises: list[str] = field(default_factory=list)
     peer: Peer | None = None
     prices: pd.DataFrame | None = None
@@ -73,13 +75,14 @@ class ReportInputs:
 
 # --- Figures ----------------------------------------------------------------------------------------------------
 
-def fmt(name: str, fig: Figure | None) -> str:
-    """ 1 d.p., or 2 d.p. for tracking error, tracking difference, alpha, beta, R² and the information ratio """
+def fmt(name: str, fig: Figure | None, verify: bool = True) -> str:
+    """ 1 d.p., or 2 d.p. for tracking error, tracking difference, alpha, beta, R² and the information ratio.
+    An AI-extracted figure says "(please verify)"; in a table (verify=False) its row or group source says it """
     if fig is None:
         return "–"
     two_dp = any(part in TWO_DP for part in name.split("."))
     text = fig.display(percent_decimals=2 if two_dp else 1, ratio_decimals=2).replace("-", "−")
-    return text + (" (please verify)" if fig.source == "ai_extracted" else "")
+    return text + (" (please verify)" if verify and fig.source == "ai_extracted" else "")
 
 
 def source_of(*figs: Figure | None) -> str:
@@ -192,7 +195,7 @@ def _returns_table(inp: ReportInputs) -> str:
                           ("Index", "index")):
         figs = [_f(inp, f"{series}.{c}") for _, c in cols]
         if any(figs):
-            rows += (f"<tr><td class='l'>{label}</td>" + "".join(f"<td>{fmt(series, f)}</td>" for f in figs)
+            rows += (f"<tr><td class='l'>{label}</td>" + "".join(f"<td>{fmt(series, f, False)}</td>" for f in figs)
                      + f"<td class='src'>{source_of(*figs)}</td></tr>")
     basis = next((f.basis for k, f in inp.reported.figures.items() if k.startswith("comparison.td")), None)
     gap = [_f(inp, f"comparison.excess_cum.{c[-2:]}") if c.startswith("cum") else _f(inp, f"comparison.td.{c[-2:]}")
@@ -200,7 +203,7 @@ def _returns_table(inp: ReportInputs) -> str:
     if any(gap):
         who = "PNAV" if basis == "fund_pnav" else "NAV"
         rows += (f"<tr class='total'><td class='l'>Gap to index ({who} vs index, pp)</td>"
-                 + "".join(f"<td>{fmt('comparison.td' if i >= 3 else 'comparison.excess_cum', g)}</td>"
+                 + "".join(f"<td>{fmt('comparison.td' if i >= 3 else 'comparison.excess_cum', g, False)}</td>"
                            for i, g in enumerate(gap)) + "<td class='src'>Calculated from the factsheet</td></tr>")
     head = "".join(f"<th>{c}</th>" for c, _ in cols)
     return (f"<table class='grid num'><tr><th class='l' width='31%'>Return</th>{head}<th width='14%'>Source</th></tr>"
@@ -215,7 +218,7 @@ def _calendar_table(inp: ReportInputs) -> str:
     for label, series in (("Fund (NAV)", "fund_nav"), ("Fund (PNAV)", "fund_pnav"), ("Index", "index")):
         figs = [_f(inp, f"{series}.calendar.{y}") for y in years]
         if any(figs):
-            rows += (f"<tr><td class='l'>{label}</td>" + "".join(f"<td>{fmt(series, f)}</td>" for f in figs)
+            rows += (f"<tr><td class='l'>{label}</td>" + "".join(f"<td>{fmt(series, f, False)}</td>" for f in figs)
                      + f"<td class='src'>{source_of(*figs)}</td></tr>")
     return ("<table class='grid num tiny'><tr><th class='l' width='13%'>Calendar year</th>"
             + "".join(f"<th>{y}</th>" for y in years) + f"<th>Source</th></tr>{rows}</table>")
@@ -254,8 +257,8 @@ def _risk_table(inp: ReportInputs) -> str:
             body += f"<tr><td class='sub' colspan='3'>{source_of(*figs)} · {title}</td></tr>"
             for label, fund_name, index_name in rows:
                 index = _f(inp, index_name) if index_name else None
-                body += (f"<tr><td class='l'>{label}</td><td>{fmt(fund_name, _f(inp, fund_name))}</td>"
-                         f"<td>{fmt(index_name, index) if index else '–'}</td></tr>")
+                body += (f"<tr><td class='l'>{label}</td><td>{fmt(fund_name, _f(inp, fund_name), False)}</td>"
+                         f"<td>{fmt(index_name, index, False) if index else '–'}</td></tr>")
         return ("<table class='grid num tiny'><tr><th class='l' width='54%'>Risk measure</th><th>Fund</th>"
                 f"<th>Index</th></tr>{body}</table>")
     groups = [g for g in _risk_groups(inp) if g[1]]
@@ -439,7 +442,7 @@ def _page3(inp: ReportInputs) -> str:
         peer_ret = getattr(inp.peer.returns, f"y{n}")
         peer = (f"<table class='grid num'><tr><th class='l'>Fund</th><th>Ongoing charge</th><th>{n} years, a year</th>"
                 f"<th>Source</th></tr><tr><td class='l'>{escape(p.fund_name)}</td><td>{p.ocf_pct:.2f}%</td>"
-                f"<td>{fmt('x', fund_ann)}</td><td class='src'>Profile, {source_of(fund_ann)}</td></tr>"
+                f"<td>{fmt('x', fund_ann, False)}</td><td class='src'>Profile, {source_of(fund_ann)}</td></tr>"
                 f"<tr><td class='l'>{escape(inp.peer.name)}</td><td>{inp.peer.ocf_pct:.2f}%</td>"
                 f"<td>{'–' if peer_ret is None else f'{peer_ret:.1f}%'}</td><td class='src'>Peer file</td></tr></table>")
     fees = (f"<table class='grid'><tr><th class='l'>Charge</th><th class='l'>This fund</th><th class='l'>Source</th></tr>"
@@ -519,7 +522,8 @@ def _appendix(inp: ReportInputs, compact: bool, main_text: str = "") -> str:
     sources = "".join(f"<li>Input file: {escape(x)}</li>" for x in inp.input_files)
     sources += "".join(
         f"<li>[{s['number']}] {escape(s['query'])} · {'as at' if s.get('date_basis') == 'as_at' else 'published'} "
-        f"{s['date']} · {escape(s['url'])}</li>" for s in inp.narrative.sources)
+        f"{s['date']} · {escape(s['url'])}</li>"
+        for s in (inp.web_sources if inp.web_sources is not None else inp.narrative.sources))
     excl = ("".join(f"<li>{escape(f.message)}</li>" for f in excluded) or "<li>None.</li>")
     thresholds = "".join(f"<li>{escape(line)}</li>" for line in _threshold_lines(inp.thresholds)[: 4 if compact else None])
     limits = "".join(f"<li>{escape(x)}</li>" for x in KNOWN_LIMITATIONS)

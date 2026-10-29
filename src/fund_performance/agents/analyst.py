@@ -1,24 +1,27 @@
 """ Oversight Analyst (spec Sections 8 and 8.1): explains the ratings that code has decided, in plain English
 
-Its draft is checked by code before use: the number guard (every figure must be in the facts JSON) and
-the rating guard (no other rating or verdict). A failing draft is sent back once with the list of
-problems; if it fails again, a template narrative written by code is used and the run is flagged.
+Its draft is checked by code before use: the number guard (every figure must be in the facts JSON), the label
+and rating guards, the wording rules and the candidate actions. Then the Evaluator Agent checks its quality
+(spec 8.4). A failing draft is sent back once with the list of problems; if it fails again, a template
+narrative written by code is used and the run is flagged.
 """
 from dataclasses import dataclass, field
 import json
 import re
-from typing import Literal
+from typing import Awaitable, Callable, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from fund_performance.actions import action_problems, candidate_actions, default_actions
 from fund_performance.agents.base import RunFn, build_agent, run_structured
 from fund_performance.glossary import glossary_lines
 from fund_performance.models import DataFlag
+from fund_performance.agents.evaluator import Review
 from fund_performance.number_guard import check_labels, check_numbers, check_ratings, mentions
 
 FINDINGS = 3
 MIN_ACTIONS, MAX_ACTIONS = 2, 3
 MAX_SENTENCES = 2                       # per finding
 CHECKS_FAILED = "AI text failed checks"
+QUALITY_FAILED = "AI text failed quality check"
 AI_TEXT_UNAVAILABLE = "AI text unavailable"
 
 STYLE_EXAMPLE = (
@@ -287,29 +290,53 @@ def template(facts: dict) -> AnalystOutput:
     return AnalystOutput(key_findings=findings, actions=actions, market_context=None)
 
 
+QualityFn = Callable[[dict, list[dict], dict], Awaitable[Review]]
+
+
+def _template(facts: dict, message: str, log: list[str]) -> Narrative:
+    return Narrative(template(facts), "template", [DataFlag(check="analyst", level="warning", message=message)], log)
+
+
 async def write_narrative(facts: dict, search_summaries: list[dict] | None = None, max_rewrites: int = 1,
-                          run: RunFn | None = None) -> Narrative:
-    """ Draft, check, send back once with the problems, then fall back to the template (spec 8.3) """
+                          run: RunFn | None = None, quality_check: QualityFn | None = None) -> Narrative:
+    """ Draft, run code's checks (spec 8.3), then the Evaluator's quality check (8.4) when one is given.
+    A draft that fails either is sent back with the problems; there is at most max_rewrites in total. If the
+    last draft still fails, the template narrative is used with a flag naming what failed """
     agent = analyst_agent()
     first = prompt(facts, search_summaries)
-    request, log = first, []
-    for attempt in range(max_rewrites + 1):
+    request, log, rewrites = first, [], 0
+    while True:
         result = await run_structured(agent, request, AnalystOutput, convert=_check_shape, run=run)
         if not result.ok:
             log.append(f"Analyst gave no valid output: {'; '.join(result.errors)}")
-            return Narrative(template(facts), "template", [DataFlag(
-                check="analyst", level="warning", message=f"{AI_TEXT_UNAVAILABLE}: template narrative used")], log)
-        if not search_summaries and result.output.market_context:
+            return _template(facts, f"{AI_TEXT_UNAVAILABLE}: template narrative used", log)
+        draft = result.output
+        if not search_summaries and draft.market_context:
             # Market context must come from cited search summaries (spec 8.2); without them it is dropped
-            result.output.market_context = None
+            draft.market_context = None
             log.append("Market context dropped: no search summaries were given")
-        issues = problems(result.output, facts, len(search_summaries or []))
-        if not issues:
-            log.append("Analyst draft passed the number, rating and wording checks" + (" after one rewrite" if attempt else ""))
-            sources = numbered_sources(search_summaries) if result.output.market_context else []
-            return Narrative(result.output, "ai", [], log, sources)
-        log.append(f"Analyst draft {attempt + 1} rejected ({' / '.join(failed_checks(issues))}): " + "; ".join(issues))
-        request = rewrite_prompt(first, result.output, issues)
-    failed = " / ".join(failed_checks(issues))
-    return Narrative(template(facts), "template", [DataFlag(
-        check="analyst", level="warning", message=f"{CHECKS_FAILED}: {failed}; template narrative used")], log)
+        after = " after one rewrite" if rewrites else ""
+        sources = numbered_sources(search_summaries)
+        issues = problems(draft, facts, len(search_summaries or []))
+        if issues:
+            log.append(f"Analyst draft {rewrites + 1} rejected ({' / '.join(failed_checks(issues))}): " + "; ".join(issues))
+            if rewrites < max_rewrites:
+                rewrites += 1
+                request = rewrite_prompt(first, draft, issues)
+                continue
+            return _template(facts, f"{CHECKS_FAILED}: {' / '.join(failed_checks(issues))}; template narrative used", log)
+        log.append(f"Analyst draft passed the number, rating and wording checks{after}")
+        if quality_check is not None:
+            verdict = await quality_check(facts, sources, draft.model_dump())
+            if verdict.error:
+                log.append(f"Evaluator gave no valid result: {verdict.error}")
+                return _template(facts, f"{QUALITY_FAILED}: the Evaluator gave no valid result; template narrative used", log)
+            if not verdict.passed:
+                log.append(f"Evaluator rejected draft {rewrites + 1}: " + "; ".join(verdict.problems()))
+                if rewrites < max_rewrites:
+                    rewrites += 1
+                    request = rewrite_prompt(first, draft, verdict.problems())
+                    continue
+                return _template(facts, f"{QUALITY_FAILED} ({', '.join(verdict.failed_checks)}); template narrative used", log)
+            log.append(f"Evaluator passed the draft{after}")
+        return Narrative(draft, "ai", [], log, sources if draft.market_context else [])

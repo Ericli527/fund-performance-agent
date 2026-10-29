@@ -433,11 +433,45 @@ Rubric (each must pass):
 
 Flow: if `pass = false`, send the issues back to the Analyst for **one** rewrite, then re-run the number guard and the Evaluator. If it fails again, use the template-only narrative and add a flag "AI text failed quality check" to the report. The Evaluator never edits the text itself and never changes ratings. Use a different system prompt from the Analyst (and ideally a different model) so the work does not grade itself.
 
+As built (step 10, `agents/evaluator.py`):
+- Model `gpt-6.1-sol` (config/models.yaml), its own strict prompt; output exactly `{"pass", "issues": [{check, detail}]}`
+  (checks limited to the six rubric names), so it has no field to write or change text.
+- Input: the facts JSON (including candidate actions), the numbered sources without URLs, and the draft. Public data only.
+- supported_claims also covers labels (a figure called a tracking difference must be one) and that each action
+  keeps the task and timing of its candidate.
+- An issue with `pass: true` still counts as a fail. `pass: false` with no issues is invalid output (retried once).
+- There is one rewrite in total (`limits.max_analyst_rewrites`), shared by code's checks and the Evaluator: a
+  draft that used it on a code problem and then fails the Evaluator goes to the template.
+- Flags: "AI text failed quality check (<checks>); template narrative used", or "... : the Evaluator gave no valid
+  result; template narrative used" when it gives no valid answer after one retry (the draft is not used unchecked).
+
 ### 8.5 Workflow controller (code)
 A plain Python function (not an AI agent) that runs: read files -> data checks -> extractor (if needed) -> mandate -> calculator -> scorecard -> planner -> search (parallel) -> analyst -> number guard -> evaluator -> report.
 - Stops the run with a clear message if a blocking data check fails before scoring.
 - Enforces limits from config: max searches, max one rewrite, timeouts.
 - Logs each step (start, end, inputs used) to `runs/<timestamp>/log.json`; the report's sources list is built from this log.
+
+As built (step 10, `controller.py`; `run_report.py` is its command line):
+- Order: read files -> extractor (only without `factsheet_performance.json`) -> data checks -> mandate -> calculator
+  (with factsheet precedence) -> scorecard -> approved sources, planner and searches -> vetting -> analyst, code
+  checks and evaluator -> report -> email. The extractor runs before the data checks because the repeated-price
+  check compares with the factsheet.
+- Stops (`RunStopped`, message printed, exit code 1, log.json still written) when the run cannot be scored: no
+  folder, no or an invalid fund profile or input file, no or an unreadable price file, fewer than 2 prices, or a
+  report that does not fit its pages. A blocking data check (e.g. a currency mismatch) does not stop the run: the
+  affected rating is CHECK DATA and the verdict is "Pending data check" (Sections 5.1 and 6.5), so the report says
+  what to fix.
+- Limits: `limits.max_web_searches` and `limits.max_analyst_rewrites` (thresholds.yaml); a timeout for each AI step
+  in `config/settings.yaml` (extractor 180 s, mandate 90 s, research 240 s, narrative 300 s). A step that runs
+  over is handled like a failed step: Mandate -> CHECK DATA (blocking flag); research -> no market context
+  (warning); narrative -> template (warning); extractor -> calculated figures only (warning).
+- log.json: the run (folder, question, offline, start, end, status, message), each step (start, end, seconds,
+  status ok / skipped / failed / timeout / stopped, inputs used, outputs, notes) and the sources (input files
+  and numbered web sources), from which the report's sources list is built. run_log.txt keeps the readable lines.
+- Email (`emailer.py`): plain code, off by default (`email.enabled: false` in settings.yaml); recipients from
+  settings only; SMTP login from .env (`FUND_SMTP_USER`, `FUND_SMTP_PASSWORD`); a failed email never loses the
+  report.
+- Tests replace every model call, HTTP and SMTP with stand-ins (`Runners`), so the full flow runs with no network.
 
 ## 9. Report (Step 7): 3 main pages plus an appendix
 
@@ -471,7 +505,8 @@ Display rules:
 - Percentages to 1 d.p.; tracking error, tracking difference, alpha, beta, R² and information ratio
   to 2 d.p. Displayed from the exact value, so rounded once.
 - Negative numbers use the minus sign "−". Missing figures show "–".
-- AI-extracted figures are marked "(please verify)".
+- AI-extracted figures are marked "(please verify)": next to the figure in sentences; in tables, in the row's or
+  group's source ("AI-extracted (please verify)"), so the tables still fit.
 - Every figure shows its source (calculated, factsheet, KID, profile).
 - The template narrative (used offline or when the AI text fails its checks) is plain English.
 - Style: clean, navy headings, Green/Amber/Red rating chips, DejaVu Sans font (shipped with
