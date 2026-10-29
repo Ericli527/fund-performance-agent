@@ -28,6 +28,8 @@ def test_values_match_the_spec():
     # Owner decisions
     assert t.data_checks.currency_mismatch_calendar_year_pp == 0.5
     assert t.data_checks.timing_difference_extra_tolerance_pp == 0.20
+    assert t.data_checks.repeated_price_factsheet_match_pp == 0.1
+    assert t.performance_index.hit_rate_td_margin_over_ocf_pp == 0.10
     # Section 4
     assert (t.calculator.periods_per_year_monthly, t.calculator.periods_per_year_daily) == (12, 252)
     assert (t.calculator.decimals_internal, t.calculator.decimals_display) == (2, 1)

@@ -18,6 +18,7 @@ data_checks:
   repeated_price_window_periods: 3       # same NAV within this many periods (equity fund) -> flag
   currency_mismatch_calendar_year_pp: 0.5  # price-file index vs factsheet index, any calendar year (owner decision)
   timing_difference_extra_tolerance_pp: 0.20  # widen tolerance when PNAV is unavailable (owner decision)
+  repeated_price_factsheet_match_pp: 0.1  # repeated price lowered to info if the 12-month windows around it match the factsheet within this (owner decision)
 
 # Section 4: calculator
 calculator:
@@ -45,6 +46,7 @@ performance_index:
   green_max_te_pct: 0.30                 #        and TE <= 0.30
   amber_td_margin_over_ocf_pp: 0.30      # AMBER: abs(TD) <= OCF + 0.30
   amber_max_te_pct: 1.00                 #        or TE <= 1.00
+  hit_rate_td_margin_over_ocf_pp: 0.10   # hit rate (spec 4.4): a 12-month window counts if abs(TD) <= OCF + 0.10 (owner decision)
 performance_active_target:
   green_min_excess_pct: 0.0              # GREEN: annualised excess over horizon >= 0
   red_below_excess_pct: -1.0             # RED: < -1.0; AMBER in between

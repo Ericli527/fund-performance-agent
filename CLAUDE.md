@@ -40,6 +40,12 @@ Instructions for Claude Code in this project. The build specification is
   `source: "factsheet"`, never approximated.
 - Figures are stored to 2 d.p. but displayed from the exact value, so they are rounded once
   (10.5499 shows as 10.5%, not 10.55 -> 10.6%).
+- Repeated price: lowered to info with "checked against factsheet: consistent" when every factsheet
+  12-month window around it matches the calculated return within 0.1 pp (config); otherwise a warning.
+- Display: tracking error, tracking difference, alpha, beta, R² and information ratio to 2 d.p. (step 9).
+- Calendar years: only full calendar years after launch, last 10 at most.
+- Since-launch: the factsheet figure wins; the difference and its reason go in the run log only.
+- Hit rate (index funds): a window counts if abs(TD) <= OCF + 0.10 (own config key).
 - Risk-free rate: 0 for v1, with a flag. Prefer the factsheet Sharpe ratios where supplied.
 - Charts are built in step 9 with the report.
 - Emailing the report is a plain code function (not an AI agent), off by default, set up in

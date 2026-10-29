@@ -13,6 +13,8 @@ from fund_performance.io import detect_frequency
 from fund_performance.models import DataFlag, FactsheetPerformance, Figure, FundProfile
 
 PERIODS = (1, 3, 5)
+CALENDAR_YEARS_SHOWN = 10        # last 10 full calendar years, as on the factsheet (owner decision)
+CROSS_CHECK_RISK_YEARS = 3       # factsheet risk figures are 3-year, so 3-year risk is calculated as a cross-check
 NO_INDEX = "not available: no index price series"
 RELATIVE_RISK = ("tracking_error", "beta", "r2", "info_ratio", "alpha")
 
@@ -65,15 +67,24 @@ def discrete_12m(levels: pd.Series, as_of: pd.Timestamp, windows: int = 5) -> di
     return dict(sorted(out.items()))
 
 
-def calendar_year_returns(prices: pd.DataFrame, column: str) -> dict[str, float]:
+def calendar_year_returns(prices: pd.DataFrame, column: str, launch_date: date | None = None,
+                          max_years: int | None = None) -> dict[str, float]:
     """ Spec 4.1: P_Dec31(y) / P_Dec31(y-1) - 1 in percent, where P_Dec31 is the last price on or before
-    31 December. The current, incomplete year is labelled "YTD" """
+    31 December. The current, incomplete year is labelled "YTD".
+    With launch_date, only full years after launch count (the year-start price is on or after launch);
+    max_years keeps the most recent years only """
     series = prices.set_index("date")[column].dropna()
     year_end = series.groupby(series.index.year).last()
     last_date = series.groupby(series.index.year).apply(lambda s: s.index.max())
     # A year is complete if the data reaches the last week of December (the last business day may be before the 31st)
     full = [y for y in year_end.index if last_date[y].month == 12 and last_date[y].day >= 24]
-    out = {str(y): (year_end[y] / year_end[y - 1] - 1) * 100 for y in full if y - 1 in full}
+    if launch_date is not None:
+        full_after = [y for y in full if y - 1 in full and last_date[y - 1] >= pd.Timestamp(launch_date)]
+    else:
+        full_after = [y for y in full if y - 1 in full]
+    if max_years is not None:
+        full_after = full_after[-max_years:]
+    out = {str(y): (year_end[y] / year_end[y - 1] - 1) * 100 for y in full_after}
     current = int(series.index[-1].year)
     if current not in full and current - 1 in full:
         out["YTD"] = (series.iloc[-1] / year_end[current - 1] - 1) * 100
@@ -261,7 +272,8 @@ def calculate(prices: pd.DataFrame, profile: FundProfile, thresholds: Thresholds
                 result.not_available[key] = "not available: start or end price missing"
             else:
                 result.figures[key] = _figure(value, "%", f"12m to {end.isoformat()}", d)
-        for year, value in calendar_year_returns(lv.reset_index().rename(columns={lv.name: "v"}), "v").items():
+        for year, value in calendar_year_returns(lv.reset_index().rename(columns={lv.name: "v"}), "v",
+                                                 profile.launch_date, CALENDAR_YEARS_SHOWN).items():
             result.figures[f"{name}.calendar.{year}"] = _figure(value, "%", year, d)
         launched = since_launch(lv, profile.launch_date)
         if launched:
@@ -271,20 +283,18 @@ def calculate(prices: pd.DataFrame, profile: FundProfile, thresholds: Thresholds
             if ann is not None:
                 result.figures[f"{name}.since_launch.ann"] = _figure(ann, "%", period, d)
 
-        # 4.3 risk over the horizon, post-launch prices only
-        horizon = profile.time_horizon_years
-        start = start_price(lv, horizon, as_of)
-        if start is None:
-            result.not_available[f"{name}.vol.{horizon}y"] = "not available: price history shorter than the horizon"
-            continue
-        window = lv[(lv.index >= max(start[0], launch)) & (lv.index <= as_of)]
-        vol = volatility(period_returns(window), ppy)
-        result.figures[f"{name}.vol.{horizon}y"] = _figure(vol, "%", f"{horizon}y", d)
-        result.figures[f"{name}.mdd.{horizon}y"] = _figure(max_drawdown(window), "%", f"{horizon}y", d)
-        ann = result.value(f"{name}.ann.{horizon}y")
-        if ann is not None:
-            ann_full = annualise(cumulative_return(lv, horizon, as_of), horizon)
-            result.figures[f"{name}.sharpe.{horizon}y"] = _figure(sharpe_ratio(ann_full, vol, rf), "ratio", f"{horizon}y", d)
+        # 4.3 risk over the horizon, and over 3 years to cross-check the factsheet; post-launch prices only
+        for years in sorted({CROSS_CHECK_RISK_YEARS, profile.time_horizon_years}):
+            start = start_price(lv, years, as_of)
+            if start is None:
+                result.not_available[f"{name}.vol.{years}y"] = "not available: price history shorter than the period"
+                continue
+            window = lv[(lv.index >= max(start[0], launch)) & (lv.index <= as_of)]
+            vol = volatility(period_returns(window), ppy)
+            result.figures[f"{name}.vol.{years}y"] = _figure(vol, "%", f"{years}y", d)
+            result.figures[f"{name}.mdd.{years}y"] = _figure(max_drawdown(window), "%", f"{years}y", d)
+            ann = annualise(cumulative_return(lv, years, as_of), years)
+            result.figures[f"{name}.sharpe.{years}y"] = _figure(sharpe_ratio(ann, vol, rf), "ratio", f"{years}y", d)
 
     _relative(result, levels, index, profile, ppy, rf, as_of, launch, factsheet, d)
     return result

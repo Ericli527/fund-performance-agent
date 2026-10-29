@@ -138,6 +138,8 @@ class Figure(BaseModel):
     def display(self, percent_decimals: int = 1, ratio_decimals: int = 2) -> str:
         """ Percentages to 1 d.p. (spec 4), ratios such as beta to 2 d.p. """
         number = self.value if self.exact is None else self.exact
+        if self.unit.startswith("of "):                     # a count, e.g. hit rate "5 of 5"
+            return f"{int(number)} {self.unit}"
         if self.unit in ("%", "pp"):
             return f"{round(number, percent_decimals) + 0.0:.{percent_decimals}f}{'%' if self.unit == '%' else ' pp'}"
         return f"{round(number, ratio_decimals) + 0.0:.{ratio_decimals}f}"

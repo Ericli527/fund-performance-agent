@@ -132,7 +132,7 @@ Optional extra fields (all optional; added after the Test 1 factsheet review):
 | Pricing point | If fund is priced `midday` and index is `market_close`, use fund PNAV (market-close) for the fund-vs-index comparison when available | If PNAV unavailable: note "timing difference" and widen tolerance |
 | Missing values | Any missing NAV/index value | List the dates; exclude from return-based risk stats; never interpolate silently |
 | Gaps | Gap between observations > 35 days (monthly) or > 5 business days (daily) | Flag |
-| Repeated prices | Same NAV on two different dates (consecutive or within 3 periods) for an equity fund | Flag as "suspicious repeated price" with dates |
+| Repeated prices | Same NAV on two different dates (consecutive or within 3 periods) for an equity fund | Flag as "suspicious repeated price" with dates. If every factsheet discrete 12-month window around those dates matches the calculated return within `repeated_price_factsheet_match_pp` (0.1 pp), lower it to info with "checked against factsheet: consistent"; otherwise it stays a warning |
 | History length | Months of data < `time_horizon_years * 12` | Set `short_history = true` |
 | Cross-check | Calculated 1/3/5y return vs factsheet NAV return | If abs diff > 0.3 percentage points: flag; factsheet wins |
 | Implausible tracker gap | Index fund, price data only, abs(fund - index) annualised gap > 1.0% | Output `CHECK DATA` instead of Red |
@@ -146,14 +146,14 @@ Known traps (must be handled):
 
 ## 4. Calculator formulas (Step 3, code)
 
-Notation: `P_t` = price at month-end t; monthly return `r_t = P_t / P_{t-1} - 1`. Use monthly data unless stated. All outputs in % to 2 d.p. internally, displayed to 1 d.p.
+Notation: `P_t` = price at month-end t; monthly return `r_t = P_t / P_{t-1} - 1`. Use monthly data unless stated. All outputs in % to 2 d.p. internally, displayed to 1 d.p., rounded once from the exact value. Tracking error, tracking difference, alpha, beta, R2 and the information ratio are displayed to 2 d.p., as on the factsheet.
 
 ### 4.1 Returns
 - **Cumulative return over n years:** `R_cum = P_end / P_start - 1`, where `P_start` is the last price on or before `end_date - n years`.
 - **Annualised return:** `R_ann = (1 + R_cum)^(1/n) - 1`.
 - **Discrete 12-month returns:** cumulative return for each 12-month window ending on `as_of_date`, `as_of_date - 1y`, ... (last 5 windows).
-- **Calendar-year returns:** `P_Dec31(y) / P_Dec31(y-1) - 1`; current year labelled "YTD".
-- **Since launch (annualised):** use the first available price; required when `short_history = true`.
+- **Calendar-year returns:** `P_Dec31(y) / P_Dec31(y-1) - 1`; current year labelled "YTD". Only full calendar years after launch (the year-start price is on or after `launch_date`), the last 10 at most, as on the factsheet.
+- **Since launch (annualised):** use the first available price on or after `launch_date`; required when `short_history = true`. When the factsheet gives a since-launch figure it wins; any difference and its reason (e.g. no launch-day price) goes in the run log, not the report.
 
 ### 4.2 Relative performance
 - **Excess return (cumulative):** `R_cum_fund - R_cum_bench` (percentage points).
@@ -176,7 +176,7 @@ Notation: `P_t` = price at month-end t; monthly return `r_t = P_t / P_{t-1} - 1`
   approximated; the factsheet's figures are reported instead (`source: "factsheet"`).
 
 ### 4.4 Consistency
-- **Hit rate:** number of the last 5 discrete 12-month periods where the fund met its objective test (index fund: abs(TD for that year) <= tolerance; active: fund >= target).
+- **Hit rate:** number of the last 5 discrete 12-month periods where the fund met its objective test (index fund: abs(TD for that year) <= OCF + `hit_rate_td_margin_over_ocf_pp` (0.10); active: fund >= target).
 
 ### 4.5 Attribution by sector (optional, when weights and sector returns are supplied)
 - Brinson: allocation `= (w_f - w_b) * (R_b,sector - R_b,total)`; selection `= w_b * (R_f,sector - R_b,sector)`; interaction `= (w_f - w_b) * (R_f,sector - R_b,sector)`. Sum across sectors.
@@ -356,7 +356,8 @@ Expected:
   drawdown -15.1%. The CSV has no index series, so TE, beta, R2, information ratio and alpha are reported from
   the factsheet and their calculated versions are "not available: no index price series".
 - Mandate GREEN; Performance GREEN.
-- Data flags raised: 16 pre-launch prices (2012-11-30 to 2014-02-28, before the 2014-03-03 share class launch) at info level; repeated prices 2013-06-30/2013-08-31 and 2013-12-31/2014-02-28 at **info** level (pre-launch); **2024-07-31/2024-09-30 at warning level**; trailing comma handled; dates read as `MM/DD/YYYY`.
+- Data flags raised: 16 pre-launch prices (2012-11-30 to 2014-02-28, before the 2014-03-03 share class launch) at info level; repeated prices 2013-06-30/2013-08-31 and 2013-12-31/2014-02-28 at **info** level (pre-launch); 2024-07-31/2024-09-30 raised as a warning by the price check, then lowered to **info** in step 4 with "checked against factsheet: consistent" (12 months to 2024-09-30: 22.93% vs 22.9%; to 2025-09-30: 17.03% vs 17.0%); trailing comma handled; dates read as `MM/DD/YYYY`.
+- Factsheet precedence: reported 1/3/5y figures are the factsheet's; cross-check differences 0.01, 0.04 and 0.03 pp (no flag). Fair comparison PNAV vs index: excess -0.7 pp over 5 years, TD -0.10 pp a year, TD_ex_cost -0.04; hit rate 5 of 5. Calculated 3-year NAV volatility 13.92% matches the factsheet 13.92%.
 - Must NOT rate Performance RED from midday NAV 88.3% vs index 91.6%.
 
 ### Test 2: Fidelity S&P 500 Index Fund P EUR Acc (IE00BYX5MX67): currency trap

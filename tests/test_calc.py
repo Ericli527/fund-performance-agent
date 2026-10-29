@@ -188,6 +188,21 @@ def test_test1_discrete_and_calendar_returns_match_the_factsheet(test1):
 
 
 @requires_test1
+def test_test1_calendar_years_are_full_years_after_launch_last_10(test1):
+    _, _, _, r = test1
+    years = sorted(k.split(".")[-1] for k in r.figures if k.startswith("fund.calendar.") and k[-1].isdigit())
+    assert years == [str(y) for y in range(2016, 2026)]        # 2013-2014 pre-launch, 2015 beyond the last 10
+    assert r.figures["fund.calendar.YTD"].display() == "13.4%"
+
+
+@requires_test1
+def test_test1_3_year_risk_cross_checks_the_factsheet(test1):
+    _, _, fs, r = test1
+    assert r.figures["fund.vol.3y"].display(ratio_decimals=2) == "13.9%"
+    assert round(r.figures["fund.vol.3y"].exact, 2) == fs.risk("nav").fund_vol            # 13.92
+
+
+@requires_test1
 def test_test1_since_launch_leaves_out_pre_launch_prices(test1):
     _, _, fs, r = test1
     figure = r.figures["fund.since_launch.ann"]
@@ -222,14 +237,23 @@ def test_test1_effect_of_leaving_out_the_2024_09_30_price(test1):
         shown_b = b.display() if b else "not available"
         if shown_a != shown_b:
             changes.append((name, shown_a, shown_b))
-    exact = (kept.figures["fund.vol.5y"].exact, dropped.figures["fund.vol.5y"].exact)
+    exact = {n: (kept.figures[f"fund.vol.{n}y"].exact, dropped.figures[f"fund.vol.{n}y"].exact) for n in (3, 5)}
     print("\n2024-09-30 price left out: figures whose displayed value changes")
     print(f"  {'figure':32s} {'kept':>14s} {'left out':>14s}")
     for name, a, b in changes:
         print(f"  {name:32s} {a:>14s} {b:>14s}")
-    print(f"  5-year volatility exactly: {exact[0]:.2f}% kept vs {exact[1]:.2f}% left out "
-          f"({exact[1] - exact[0]:+.2f} pp)")
+    for n, (a, b) in exact.items():
+        print(f"  {n}-year volatility exactly: {a:.2f}% kept vs {b:.2f}% left out ({b - a:+.2f} pp)")
 
     assert [c[0] for c in changes] == ["fund.discrete_12m.2024-09-30", "fund.discrete_12m.2025-09-30",
-                                       "fund.sharpe.5y", "fund.vol.5y"]
+                                       "fund.sharpe.3y", "fund.sharpe.5y", "fund.vol.3y", "fund.vol.5y"]
     assert (kept.figures["fund.vol.5y"].display(), dropped.figures["fund.vol.5y"].display()) == ("13.7%", "13.9%")
+
+
+def test_calendar_years_only_after_launch_and_capped():
+    dates = pd.to_datetime([f"{y}-12-31" for y in range(2012, 2026)])
+    prices = pd.DataFrame({"date": dates, "nav": np.linspace(100, 230, len(dates))})
+    years = calc.calendar_year_returns(prices, "nav", launch_date=date(2014, 3, 3), max_years=10)
+    assert list(years) == [str(y) for y in range(2016, 2026)]
+    years = calc.calendar_year_returns(prices, "nav", launch_date=date(2014, 3, 3))
+    assert list(years)[0] == "2015"                          # first year whose start price is after launch

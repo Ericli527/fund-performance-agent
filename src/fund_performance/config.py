@@ -19,6 +19,7 @@ class DataChecks(_Section):
     repeated_price_window_periods: int
     currency_mismatch_calendar_year_pp: float
     timing_difference_extra_tolerance_pp: float
+    repeated_price_factsheet_match_pp: float
 
 
 class Calculator(_Section):
@@ -46,6 +47,7 @@ class PerformanceIndex(_Section):
     green_max_te_pct: float
     amber_td_margin_over_ocf_pp: float
     amber_max_te_pct: float
+    hit_rate_td_margin_over_ocf_pp: float
 
 
 class PerformanceActiveTarget(_Section):
