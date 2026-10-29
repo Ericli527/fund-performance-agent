@@ -363,11 +363,30 @@ def note_source_line(note: dict) -> str:
     return f"{prefix}{' · '.join(parts)}. {NOTE_SOURCES.get(note.get('kind'), 'Source: factsheet.')}"
 
 
+def plain_note(note: dict) -> str:
+    """ A data note's sentences for the report. The fee note is reworded in plain terms from its own figures
+    (facts.json and the Analyst keep the original wording) """
+    if note.get("kind") != "fee":
+        return note["note"]
+    fig = {f["label"].split(",")[0]: f["value"] for f in note["figures"]}
+    ocf, ex_cost = fig.get("Ongoing charge (OCF)"), fig.get("Cost-adjusted gap")
+    most = note["note"].startswith("Most")
+    first = "Most of the yearly gap is the fee." if most else "The fee explains only part of the yearly gap."
+    if ocf is None or ex_cost is None:
+        return first
+    if ex_cost == 0:
+        where = "would match its index"
+    else:
+        where = (f"would be {'only ' if most else ''}{abs(ex_cost):.2f}% a year "
+                 f"{'behind' if ex_cost < 0 else 'ahead of'} its index")
+    return f"{first} Without the {ocf:.2f}% yearly fee, the fund {where}."
+
+
 def _page2(inp: ReportInputs, out_dir: Path) -> str:
     path = "".join(f"<li>{escape(step)}</li>" for step in plain_path(inp.card.path))
     promises = ("".join(f"<li>{escape(x)}</li>" for x in inp.promises) if inp.promises
                 else "<li>Not read: the Mandate Agent was not run.</li>")
-    notes = "".join(f"<li>{escape(n['note'])}<br/><span class='small'>{escape(note_source_line(n))}</span></li>"
+    notes = "".join(f"<li>{escape(plain_note(n))}<br/><span class='small'>{escape(note_source_line(n))}</span></li>"
                     for n in inp.facts.get("data_notes", []))
     growth, yearly, caption = _chart_images(inp, out_dir)
     return f"""

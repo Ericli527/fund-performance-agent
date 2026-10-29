@@ -372,7 +372,9 @@ All agents return structured JSON validated with Pydantic. Use the OpenAI Agents
 - Citations: the market context cites sources as [1], [2]; the Analyst never sees or writes URLs, and the report
   lists each number with its URL under Sources.
 - Dates: a page with no publish date but an "as at" or "updated" date is kept with `date_basis: "as_at"`; only
-  pages with no date at all are excluded.
+  pages with no date at all are excluded. Approved sources and fund-specific facts (fund news, manager changes)
+  may be dated after the period end (e.g. a fund page "as at" the run date) and are excluded only if dated
+  before the period start; market news from web searches must fall inside the review period.
 - Relevance: a fund-news or manager summary must match the fund's name, ISIN, or share class with the manager's
   name, and US regulatory filings (sec.gov) are excluded for non-US funds; a market summary must name the market.
   Otherwise it is excluded with an info flag (Test 1: the SEC filing for a US Fidelity fund).
@@ -382,6 +384,10 @@ All agents return structured JSON validated with Pydantic. Use the OpenAI Agents
   (Test 1: the noon-pricing gap 3.3 pp and the 0.06% fee). A missing one triggers the one rewrite.
 - AI text writes periods in words ("5 years", not "5y"). If the rewrite still fails, the flag names the failed
   checks: "AI text failed checks: number / rating / wording / insights".
+- Wording checks in code (each triggers the one rewrite): at most 2 sentences per finding; no action containing
+  "note that", "remains understood" or "be aware" (each action must change or check something specific).
+- Definitions go in brackets after the term and its figure, the first time the term is used: "R² 1.00 (how
+  closely fund and index move together)" (prompt rule).
 
 ### 8.3 Number-guard validator (code)
 After the Analyst responds: extract all numbers from its text (regex for decimals and %). Every number must match a value in the facts JSON (allowing rounding to 1 d.p.). If not, reject and re-prompt once; if it fails again, use a template-only narrative and flag it.

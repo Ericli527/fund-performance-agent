@@ -16,13 +16,13 @@ from fund_performance.number_guard import check_numbers, check_ratings, mentions
 
 FINDINGS = 3
 MIN_ACTIONS, MAX_ACTIONS = 2, 3
+MAX_SENTENCES = 2                       # per finding
 CHECKS_FAILED = "AI text failed checks"
 AI_TEXT_UNAVAILABLE = "AI text unavailable"
 
 STYLE_EXAMPLE = (
-    "The fund tracks its index closely. Its noon price makes it look 3.3 pp behind over 5 years, because the "
-    "index is measured at market close. Using the fund's market-close price (PNAV), the gap is only 0.7 pp, and "
-    "most of it is the 0.06% yearly fee.")
+    "The fund moves with its index: R² 1.00 (how closely fund and index move together). Its noon price makes "
+    "it look 3.3 pp behind over 5 years; the index uses market close.")
 
 INSTRUCTIONS = f"""
 You are an investment oversight analyst. You explain ratings that have already been decided, for an
@@ -44,10 +44,11 @@ Style:
 - Plain meaning first, technical term second, in brackets. For example: "The fund falls behind its
   index by about 0.10% a year (tracking difference -0.10 pp)."
 - Never put a minus sign after "behind" or "below": say "behind by 0.10%", not "behind by -0.10%".
-- Explain each technical term once, the first time you use it, in under 10 words, using the glossary
-  below. After that, use the term alone.
+- Explain each technical term once, the first time you use it: put its glossary definition in brackets
+  right after the term and its figure, e.g. "R² 1.00 (how closely fund and index move together)". Never
+  explain a term in a separate sentence. After that, use the term alone.
 - No unexplained abbreviations: write "ongoing charge (OCF)", not "OCF".
-- Short sentences: under 20 words each. At most 2 sentences per finding.
+- Short sentences: under 20 words each. At most 2 sentences per finding (checked by code).
 - Every data note must be explained in the findings, using its key figure (marked "key": true). These are
   the "below the surface" points.
 - Write periods in words: "5 years", "12 months", never "5y" or "12m".
@@ -65,8 +66,11 @@ Example of the target style (from another review; never copy its numbers):
 Output:
 - key_findings: exactly 3 findings.
 - actions: 2 or 3 actions. Each is a real task for the oversight team and says when to do it
-  (e.g. "before signing off this review", "at the next quarterly review"). Never restate the verdict
-  as an action, and never write an internal or technical note about the data or the system.
+  (e.g. "before signing off this review", "at the next quarterly review"). Each action must change or
+  check something specific, e.g. "Add a comparable peer fund before the next quarterly review". Never
+  write an action that only asks people to notice or accept something ("note that", "remains
+  understood", "be aware"): code rejects these. Never restate the verdict as an action, and never write
+  an internal or technical note about the data or the system.
 - market_context: a short paragraph on what drove the market in the review period, based only on the
   numbered sources given. Cite them as [1], [2]; never write a web address. Use no figures from the
   sources; describe direction only (e.g. "US shares rose, led by technology [1]"). Describe only what
@@ -111,17 +115,27 @@ _URL = re.compile(r"https?://[^\s)\]]+|\bwww\.[^\s)\]]+")
 _MINUS_AFTER = re.compile(r"\b(behind|below)\b(\s+\w+){0,3}?\s*[-\u2212\u2013]\s?\d", re.IGNORECASE)
 _CITATION = re.compile(r"\[(\d+)\]")
 _SHORT_PERIOD = re.compile(r"\b\d+\s?(y|yr|yrs|m)\b")
+_SENTENCE_END = re.compile(r"[.!?](?=\s+[A-Z0-9\"'(\[]|\s*$)")      # not a decimal point or "e.g. the"
+_VAGUE_ACTION = re.compile(r"\bnote that\b|\bremains? understood\b|\bbe aware\b", re.IGNORECASE)
+
+
+def sentences(text: str) -> int:
+    return max(1, len(_SENTENCE_END.findall(text.strip())))
 
 
 def style_problems(out: AnalystOutput, sources: int) -> list[str]:
-    """ Wording rules checked by code: no minus after "behind"/"below", no web addresses in the text, and
-    citations only to sources that exist """
+    """ Wording rules checked by code: no minus after "behind"/"below", no web addresses in the text,
+    citations only to sources that exist, at most 2 sentences per finding, and actions that do something """
     text = out.text()
     found = [f"style: minus sign after '{m.group(1)}' in '{m.group(0)}'; write 'behind by 0.10%'"
              for m in _MINUS_AFTER.finditer(text)]
     found += [f"citation: web address in the text ({u}); cite the source as [n] instead" for u in _URL.findall(text)]
     found += [f"citation: [{n}] does not match a source" for n in _CITATION.findall(text) if not 1 <= int(n) <= sources]
     found += [f"style: write periods in words, not '{m.group(0)}'" for m in _SHORT_PERIOD.finditer(text)]
+    found += [f"style: finding {i} has {n} sentences; use at most {MAX_SENTENCES}"
+              for i, f in enumerate(out.key_findings, start=1) if (n := sentences(f)) > MAX_SENTENCES]
+    found += [f"style: action {i} only asks people to '{m.group(0).lower()}' something; make it change or check "
+              "something specific" for i, a in enumerate(out.actions, start=1) if (m := _VAGUE_ACTION.search(a))]
     return found
 
 

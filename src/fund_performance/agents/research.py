@@ -232,7 +232,7 @@ def _check_page(page: FetchedPage):
         except ValueError:
             when = None
         # The URL is the approved one from the config, never one the agent gives
-        return {"query": f"Approved source: {page.source.name}", "topic": page.source.topic,
+        return {"query": f"Approved source: {page.source.name}", "topic": page.source.topic, "approved": True,
                 "summary": summary[:MAX_SUMMARY_CHARS], "url": page.source.url, "title": page.title,
                 "date": when, "date_basis": (out.date_basis or "published") if when else None}
     return check
@@ -405,7 +405,11 @@ def vet_summaries(summaries: list[dict], profile: FundProfile, facts: dict,
     """ Leave out summaries with no date at all (a publish or an "as at" date both count), dated outside the
     review period, about a different fund or jurisdiction (fund searches) or not about the market (market
     searches), or with fund or index returns that differ from the factsheet by more than tolerance_pp
-    (owner decisions). Each exclusion gets an info flag """
+    (owner decisions). Each exclusion gets an info flag.
+
+    Dates: approved sources and fund-specific facts (fund news, manager changes) may be dated after the period
+    end, e.g. a fund page "as at" today; they are excluded only if dated before the period start. Market news
+    from web searches must fall inside the period """
     start, end = review_period(profile)
     kept, flags, log = [], [], []
 
@@ -418,12 +422,13 @@ def vet_summaries(summaries: list[dict], profile: FundProfile, facts: dict,
             exclude(s, "web source has no date (published or as at): excluded")
             continue
         when = date.fromisoformat(s["date"])
-        if not start <= when <= end:
+        topic = s.get("topic", "fund_news")
+        later_is_fine = s.get("approved") or topic in ("fund_news", "manager_changes")
+        if when < start or (when > end and not later_is_fine):
             basis = "as at" if s.get("date_basis") == "as_at" else "dated"
             exclude(s, f"web source {basis} {when.isoformat()}, outside the review period "
                        f"{start.isoformat()} to {end.isoformat()}: excluded")
             continue
-        topic = s.get("topic", "fund_news")
         text = f"{s['summary']} {s.get('title', '')}"
         if topic == "market_drivers":
             if market_name(profile).lower() not in text.lower():

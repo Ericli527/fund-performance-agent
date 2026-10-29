@@ -11,7 +11,7 @@ GLOSSARY: dict[str, str] = {
     "NAV": "net asset value: the fund's price per unit",
     "PNAV": "the fund's price worked out at market close",
     "ongoing charge (OCF)": "the yearly fee taken from the fund",
-    "R²": "how closely fund and index move together (max 1)",
+    "R²": "how closely fund and index move together",
     "beta": "how much the fund moves when the index moves",
     "alpha": "return above what the index's moves would explain",
     "Sharpe ratio": "return earned for each unit of risk taken",

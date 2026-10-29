@@ -222,3 +222,34 @@ def test_the_plain_template_covers_every_data_note_and_passes():
     assert problems(t, facts) == []
     assert "behind it by 0.10% a year over 5 years (tracking difference -0.10 pp)" in t.key_findings[1]
     assert "3.3 pp behind its index over 5 years" in t.key_findings[2]
+
+
+# Fixes from the full Test 1 run: sentence limit, bracketed definitions, actions that do something
+def test_at_most_two_sentences_per_finding():
+    four = "The fund tracks its index. It costs 0.06% a year. Its noon price differs. That explains the gap."
+    issues = problems(_out(key_findings=[four, "R² 1.00 (how closely fund and index move together), e.g. a tracker.",
+                                         "One sentence. Two sentences."]), FACTS)
+    assert issues == ["style: finding 1 has 4 sentences; use at most 2"]
+
+
+def test_too_many_sentences_trigger_the_rewrite():
+    long = draft(key_findings=["One point. Two points. Three points."] + GOOD["key_findings"][1:])
+    fake = FakeRun(long, draft())
+    result = asyncio.run(write_narrative(FACTS, run=fake))
+    assert result.source == "ai" and "finding 1 has 3 sentences" in fake.prompts[1]
+
+
+@pytest.mark.parametrize("action", ["Note that value cannot yet be judged without a peer.",
+                                    "It remains understood that the fee is low, before signing off.",
+                                    "Be aware of noon pricing at the next quarterly review."])
+def test_actions_that_only_ask_people_to_notice_are_rejected(action):
+    issues = problems(_out(actions=[action, GOOD["actions"][1]]), FACTS)
+    assert len(issues) == 1 and issues[0].startswith("style: action 1 only asks people to")
+
+
+def test_prompt_asks_for_bracketed_definitions_and_specific_actions():
+    from fund_performance.agents.analyst import INSTRUCTIONS
+    assert '"R² 1.00 (how closely fund and index move together)"' in INSTRUCTIONS
+    assert "change or\n  check something specific" in INSTRUCTIONS and '"note that"' in INSTRUCTIONS
+    for action in template(FACTS_NOTES | {"fund": {"time_horizon_years": 5}}).actions:
+        assert problems(_out(actions=[action, action]), FACTS) == []

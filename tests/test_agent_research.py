@@ -289,9 +289,24 @@ def test_returns_that_differ_from_the_factsheet_exclude_the_summary(summary, top
 
 @pytest.mark.parametrize("date,reason", [(None, "has no date"), ("2025-09-29", "outside the review period"),
                                           ("2026-10-01", "outside the review period")])
-def test_undated_or_out_of_period_summaries_are_excluded(date, reason):
-    out, flags, _ = vet_summaries([_s("Shares rose.", date=date)], profile(), VET_FACTS)
+def test_undated_or_out_of_period_market_news_is_excluded(date, reason):
+    out, flags, _ = vet_summaries([_s("Sample World shares rose.", date=date, topic="market_drivers")], profile(), VET_FACTS)
     assert out == [] and reason in flags[0].message and flags[0].level == "info"
+
+
+def test_approved_sources_and_fund_facts_may_be_dated_after_the_period_end():
+    """ Bug from the Test 1 run: both Fidelity pages were excluded for "as at 2026-10-29" (after 30 Sep 2026) """
+    fund_page = _s("Sample World Index Fund A Acc charges 0.10% a year.", date="2026-10-29", basis="as_at",
+                   url="https://example.com/fund") | {"query": "Approved source: Fund page", "approved": True}
+    index_page = _s("Sample World shares rose.", date="2026-10-29", basis="as_at", topic="market_drivers",
+                    url="https://example.com/index") | {"approved": True}
+    manager = _s("Sample World Index Fund A Acc has a new manager.", date="2026-10-15", topic="manager_changes")
+    market_news = _s("Sample World shares rose.", date="2026-10-15", topic="market_drivers")
+    too_old = fund_page | {"date": "2025-09-29"}
+    kept, flags, _ = vet_summaries([fund_page, index_page, manager, market_news, too_old], profile(), VET_FACTS)
+    assert kept == [fund_page, index_page, manager]
+    assert [f.message.split(", outside")[0] for f in flags] == ["web source dated 2026-10-15",
+                                                                 "web source as at 2025-09-29"]
 
 
 @requires_test1

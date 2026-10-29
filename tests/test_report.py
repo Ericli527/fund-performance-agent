@@ -132,6 +132,8 @@ def test_test1_page2_review_fixes(test1_pdf):
     # 3. Below the surface: plain sentences, then one short source line
     assert "The fair comparison uses the fund's market-close price (PNAV). 5 years: Fund noon price 88.3%" in p2
     assert "Fair gap −0.7 pp. Source: factsheet; gaps calculated." in p2
+    assert ("Most of the yearly gap is the fee. Without the 0.06% yearly fee, the fund would be only 0.04% a year "
+            "behind its index.") in p2
     # 4. Returns table note
     assert "Cumulative gaps to 1 d.p., yearly gaps to 2 d.p." in p2
 
@@ -178,3 +180,21 @@ def test_plain_decision_path_for_each_objective_type():
         assert len(steps) == 5 and "_" not in " ".join(steps)
     blocked = plain_path(decision_path(prof, True, [Flag(check="x", level="blocking", message="Currency mismatch")]))
     assert "since-launch figures are used" in blocked[2] and blocked[4].endswith("so the ratings wait for a data check.")
+
+
+def test_fee_note_wording_in_the_report_only():
+    from fund_performance.report import plain_note
+    note = {"kind": "fee", "note": "The fee explains only part of the yearly gap to the index. Adding ...",
+            "figures": [{"label": "Ongoing charge (OCF), a year", "value": 0.2, "unit": "%"},
+                        {"label": "Cost-adjusted gap, in plain terms (% a year), 5y", "value": 0.15, "unit": "%"}]}
+    assert plain_note(note) == ("The fee explains only part of the yearly gap. Without the 0.20% yearly fee, the fund "
+                                "would be 0.15% a year ahead of its index.")
+    pricing = {"kind": "pricing", "note": "Noon pricing.", "figures": []}
+    assert plain_note(pricing) == "Noon pricing."
+
+
+@requires_test1
+def test_test1_facts_keep_the_original_wording(test1_pdf):
+    facts = json.loads((test1_pdf.parent / "facts.json").read_text())
+    assert facts["data_notes"][1]["note"].startswith("Most of the yearly gap to the index is the fee. Adding")
+    assert "TD_ex_cost" in facts["decision_path"][0]

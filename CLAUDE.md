@@ -69,8 +69,10 @@ Instructions for Claude Code in this project. The build specification is
   periods, counts and dates not checked. Rating guard rejects a changed rating or verdict. One
   rewrite with the problem list, then template narrative + flag "AI text failed checks: number /
   rating / wording / insights" (listing those that failed). Every data note's key figure must appear in
-  the findings (insights check). Periods in words ("5 years", not "5y").
-- Analyst style: plain meaning first, term in brackets; terms explained once (<10 words) from the
+  the findings (insights check). Periods in words ("5 years", not "5y"). Code also rejects a finding
+  with more than 2 sentences and an action containing "note that", "remains understood" or "be aware".
+- Analyst style: plain meaning first, term in brackets; definitions in brackets after the term and its
+  figure ("R² 1.00 (how closely fund and index move together)"); terms explained once (<10 words) from the
   shared glossary (`glossary.py`, also printed at the end of the report in step 9); sentences under
   20 words; "Draft verdict"; one "below the surface" finding from the data notes (written by code);
   actions say what and when; market context uses no figures from search summaries.
@@ -83,13 +85,16 @@ Instructions for Claude Code in this project. The build specification is
   queries never name the fund (code drops them). Summaries with no date, outside the review period,
   or with fund/index returns >0.5 pp from the factsheet are excluded with an info flag. Market
   context cites [1], [2]; URLs only in the report's sources list. No minus sign after "behind"/
-  "below" (code check). "As at" dates count; fund news must match name/ISIN/share class (no sec.gov for
-  non-US funds), market news must name the market. v2: MCP Fetch for agent-chosen URLs.
+  "below" (code check). "As at" dates count; approved sources and fund/manager news may be dated
+  after the period end (excluded only before the start), market news keeps the strict window. Fund
+  news must match name/ISIN/share class (no sec.gov for non-US funds), market news must name the
+  market. v2: MCP Fetch for agent-chosen URLs.
 - Risk-free rate: 0 for v1, with a flag. Prefer the factsheet Sharpe ratios where supplied.
 - Charts are built in step 9 with the report.
 - Report (step 9): 3 main pages (Summary; Mandate and performance; Value, fees and AoV) plus an
   appendix, 4 pages, 5 at most. Over 5: shorten the appendix first; a main page running over is an
   error. Saved to `runs/<timestamp>/` with `facts.json` and `run_log.txt`; `--offline` skips AI steps.
+  Plain wording (decision path, fee note) is for the report only; facts.json and the Analyst keep the codes.
 - Emailing the report is a plain code function (not an AI agent), off by default, set up in
   step 10. Recipients come from settings only.
 - The old app (root-level `*.py`) keeps running until the new front end replaces it in step 11.
