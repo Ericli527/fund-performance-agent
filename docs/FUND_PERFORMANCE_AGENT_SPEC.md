@@ -317,8 +317,8 @@ All agents return structured JSON validated with Pydantic. Use the OpenAI Agents
 | Mandate | `objective_text` | Mandate JSON (Section 5) | Allowed values only |
 | Planner | Fund profile + scorecard | Search queries for fund or manager changes and market drivers for the period | Up to 3 web searches in total, fallbacks for unreadable approved pages first |
 | Search (parallel) | One query each, or the text of one approved page fetched by code | `{query, summary, url, date}` (for a page, the URL comes from the config) | One search or page each, no retries |
-| Oversight Analyst | facts JSON + scorecard + search summaries | Findings, actions, market context | Cannot change ratings; may only quote given numbers |
-| Evaluator | Analyst draft + facts JSON + scorecard + search summaries | `{pass: bool, issues: [..]}` (Section 8.4) | One rewrite only, then template fallback |
+| Oversight Analyst | facts JSON + scorecard + search summaries (+ code's finding 1 and actions, not to repeat) | Findings 2 and 3 (from the data notes) and market context; finding 1 and the actions are written by code | Cannot change ratings; may only quote given numbers; 2 rewrites after code's checks |
+| Evaluator | AI text (findings 2-3, market context) + facts JSON + search summaries | `{pass: bool, issues: [..]}` (Section 8.4) | Its own one rewrite, then template fallback |
 
 ### 8.1 Oversight Analyst system prompt (core rules)
 Who writes what (owner decision after the full Test 1 runs: too many rules for free text):
