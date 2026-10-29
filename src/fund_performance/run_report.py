@@ -81,7 +81,8 @@ async def run_review(folder: Path, question: str, out_root: Path, offline: bool 
         sources = load_sources()
         pages = await fetch_pages(sources.for_fund(profile.isin, market_name(profile)), sources.fetch)
         found = await research(profile, card, t.limits.max_web_searches, pages)
-        vetted, vet_flags, vet_log = vet_summaries(found.summaries, profile, facts)
+        vetted, vet_flags, vet_log = vet_summaries(found.summaries, profile, facts,
+                                                   market_grace_days=sources.vetting.market_grace_days)
         flags += found.flags + vet_flags
         log += found.log + vet_log
         narrative = await write_narrative(facts, vetted)

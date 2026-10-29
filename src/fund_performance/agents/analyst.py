@@ -9,10 +9,11 @@ import json
 import re
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
+from fund_performance.actions import action_problems, candidate_actions, default_actions
 from fund_performance.agents.base import RunFn, build_agent, run_structured
 from fund_performance.glossary import glossary_lines
 from fund_performance.models import DataFlag
-from fund_performance.number_guard import check_numbers, check_ratings, mentions
+from fund_performance.number_guard import check_labels, check_numbers, check_ratings, mentions
 
 FINDINGS = 3
 MIN_ACTIONS, MAX_ACTIONS = 2, 3
@@ -38,6 +39,9 @@ Numbers:
 - Only use numbers that appear in the facts. Do not calculate new numbers (no differences, sums,
   averages or conversions). Write each number with the same unit as in the facts: "%" or "pp".
   You may round to 1 or 2 decimal places.
+- Call a figure by what it is in the facts. A number next to "tracking difference", "tracking error" or
+  "ongoing charge" must be that figure, for that period (checked by code). A tracking difference is
+  yearly: write "a year" and its sign, e.g. "tracking difference -0.10 pp a year".
 - If a figure has the note "please verify", write "(please verify)" next to it.
 
 Style:
@@ -65,12 +69,13 @@ Example of the target style (from another review; never copy its numbers):
 
 Output:
 - key_findings: exactly 3 findings.
-- actions: 2 or 3 actions. Each is a real task for the oversight team and says when to do it
-  (e.g. "before signing off this review", "at the next quarterly review"). Each action must change or
-  check something specific, e.g. "Add a comparable peer fund before the next quarterly review". Never
-  write an action that only asks people to notice or accept something ("note that", "remains
-  understood", "be aware"): code rejects these. Never restate the verdict as an action, and never write
-  an internal or technical note about the data or the system.
+- actions: 2 or 3 actions, chosen ONLY from "candidate_actions" in the facts (written by code from the
+  ratings and data flags). Choose every candidate marked "required" first. For each, give its id as
+  "candidate" and reword its "action" as "text": plain English, under 20 words if you can, keeping its
+  task, its "keep_words" and when to do it (e.g. "before signing off this review"). Never add a new
+  action, and never write one about the report's method, prices or periods. Never write an action that
+  only asks people to notice or accept something ("note that", "remains understood", "be aware").
+  Code checks all of this.
 - market_context: a short paragraph on what drove the market in the review period, based only on the
   numbered sources given. Cite them as [1], [2]; never write a web address. Use no figures from the
   sources; describe direction only (e.g. "US shares rose, led by technology [1]"). Describe only what
@@ -79,14 +84,25 @@ Output:
 """
 
 
+class ChosenAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    candidate: str = Field(description="The id of the candidate action chosen")
+    text: str = Field(description="The candidate action reworded in plain English, keeping its task and timing")
+
+
 class AnalystOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     key_findings: list[str] = Field(description="Exactly 3 key findings")
-    actions: list[str] = Field(description="2 or 3 recommended actions")
+    actions: list[ChosenAction] = Field(description="2 or 3 actions chosen from the candidate actions")
     market_context: str | None = Field(description="Short market context from the search summaries, or null")
 
+    @property
+    def action_texts(self) -> list[str]:
+        return [a.text for a in self.actions]
+
     def text(self) -> str:
-        return "\n".join(self.key_findings + self.actions + ([self.market_context] if self.market_context else []))
+        return "\n".join(self.key_findings + self.action_texts
+                         + ([self.market_context] if self.market_context else []))
 
 
 @dataclass
@@ -135,7 +151,7 @@ def style_problems(out: AnalystOutput, sources: int) -> list[str]:
     found += [f"style: finding {i} has {n} sentences; use at most {MAX_SENTENCES}"
               for i, f in enumerate(out.key_findings, start=1) if (n := sentences(f)) > MAX_SENTENCES]
     found += [f"style: action {i} only asks people to '{m.group(0).lower()}' something; make it change or check "
-              "something specific" for i, a in enumerate(out.actions, start=1) if (m := _VAGUE_ACTION.search(a))]
+              "something specific" for i, a in enumerate(out.action_texts, start=1) if (m := _VAGUE_ACTION.search(a))]
     return found
 
 
@@ -151,8 +167,8 @@ def missing_insights(out: AnalystOutput, facts: dict) -> list[str]:
     return missing
 
 
-CHECK_KINDS = (("number", "number not in the facts"), ("rating", "rating:"), ("rating", "verdict:"),
-               ("wording", "style:"), ("wording", "citation:"), ("insights", "insight:"))
+CHECK_KINDS = (("number", "number not in the facts"), ("number", "label:"), ("rating", "rating:"), ("rating", "verdict:"),
+               ("wording", "style:"), ("wording", "citation:"), ("wording", "action:"), ("insights", "insight:"))
 
 
 def failed_checks(issues: list[str]) -> list[str]:
@@ -162,12 +178,19 @@ def failed_checks(issues: list[str]) -> list[str]:
 
 
 def problems(out: AnalystOutput, facts: dict, sources: int = 0) -> list[str]:
-    """ Everything wrong with a draft: numbers not in the facts, changed ratings or verdict, and the wording
+    """ Everything wrong with a draft: numbers not in the facts or under the wrong label, changed ratings or
+    verdict, and the wording
     rules above. Web addresses are taken out before the number check (they are reported as citation problems) """
     text = _URL.sub("[source]", out.text())
     bad = check_numbers(text, facts)
-    return ([f"number not in the facts: {n}" for n in bad]
-            + check_ratings(text, facts["scorecard"]) + style_problems(out, sources) + missing_insights(out, facts))
+    return ([f"number not in the facts: {n}" for n in bad] + check_labels(text, facts)
+            + check_ratings(text, facts["scorecard"]) + style_problems(out, sources) + missing_insights(out, facts)
+            + action_problems([(a.candidate, a.text) for a in out.actions], candidates_for(facts), MAX_ACTIONS))
+
+
+def candidates_for(facts: dict) -> list[dict]:
+    """ The candidate actions code wrote into the facts (built here when the facts have none, e.g. in tests) """
+    return facts.get("candidate_actions") or candidate_actions(facts)
 
 
 def numbered_sources(search_summaries: list[dict] | None) -> list[dict]:
@@ -259,18 +282,9 @@ def template(facts: dict) -> AnalystOutput:
     findings = [f"Draft verdict: {card['verdict']}. {reason}",
                 _performance_sentence(facts, pillars["Performance"], years),
                 _insight_sentence(facts, years) or _other_ratings_sentence(pillars)]
-    actions = []
-    if any(p["summary"] == "Add peer" for p in pillars.values()):
-        actions.append("Choose a comparable peer fund before the next quarterly review, so value and fees can be judged.")
-    if any(p["rating"] == "CHECK DATA" for p in pillars.values()):
-        actions.append("Resolve the data checks listed in the appendix before signing off this review.")
-    if any(p["rating"] == "MANUAL CHECK" for p in pillars.values()):
-        actions.append("Check the fund's style and holdings against its policy before signing off this review.")
-    if len(actions) < MIN_ACTIONS:
-        actions.append("Read the figures and their sources on pages 2 and 3 before signing off this review.")
-    if len(actions) < MIN_ACTIONS:
-        actions.append("Record the decision and its reasons in the approval box at this review.")
-    return AnalystOutput(key_findings=findings, actions=actions[:MAX_ACTIONS], market_context=None)
+    actions = [ChosenAction(candidate=i, text=t)
+               for i, t in default_actions(candidates_for(facts), MIN_ACTIONS, MAX_ACTIONS)]
+    return AnalystOutput(key_findings=findings, actions=actions, market_context=None)
 
 
 async def write_narrative(facts: dict, search_summaries: list[dict] | None = None, max_rewrites: int = 1,

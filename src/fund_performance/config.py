@@ -168,6 +168,10 @@ class FetchSettings(_Section):
     user_agent: str
 
 
+class VettingSettings(_Section):
+    market_grace_days: int          # market news may be dated this many days after the review period ends
+
+
 class ApprovedSource(_Section):
     name: str
     url: str
@@ -182,6 +186,7 @@ class ApprovedSource(_Section):
 
 class SourcesConfig(_Section):
     fetch: FetchSettings
+    vetting: VettingSettings
     funds: dict[str, list[ApprovedSource]] = {}
     markets: dict[str, list[ApprovedSource]] = {}
 

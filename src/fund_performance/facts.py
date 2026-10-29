@@ -1,6 +1,7 @@
 """ The facts JSON (spec 8.3): everything code has decided, in one place, for the Oversight Analyst to
 explain and for the number guard to check against. The Analyst may quote only numbers that appear here.
 """
+from fund_performance.actions import candidate_actions
 from fund_performance.models import DataFlag, Figure, FundProfile
 from fund_performance.precedence import ReportedFigures
 from fund_performance.scorecard import Scorecard
@@ -91,7 +92,7 @@ def data_notes(profile: FundProfile, reported: ReportedFigures, flags: list[Data
 def build_facts(profile: FundProfile, reported: ReportedFigures, card: Scorecard, flags: list[DataFlag],
                 promises: list[str] | None = None) -> dict:
     """ The facts JSON. Numbers keep their units so the number guard can tell 0.10 pp from 0.10% """
-    return {
+    facts = {
         "fund": {"fund_name": profile.fund_name, "isin": profile.isin, "share_class": profile.share_class,
                  "currency": profile.currency, "benchmark_name": profile.benchmark_name,
                  "objective_text": profile.objective_text, "objective_type": profile.objective_type,
@@ -109,3 +110,5 @@ def build_facts(profile: FundProfile, reported: ReportedFigures, card: Scorecard
                        if f.level in ("warning", "blocking")],
         "figures": [_figure(name, f) for name, f in reported.figures.items()],
     }
+    facts["candidate_actions"] = candidate_actions(facts)     # the only actions the Analyst may choose (code)
+    return facts

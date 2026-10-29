@@ -35,9 +35,9 @@ SOURCE_WORDS = {"factsheet": "Factsheet", "calculated": "Calculated", "ai_extrac
 AOV_DISCLAIMER = ("This is an indicative assessment from public data. It does not replace the AFM's formal "
                   "Assessment of Value.")
 KNOWN_LIMITATIONS = [
-    "A web figure with no stated period is compared with all of the factsheet's periods for that series, so a "
-    "wrong figure could pass by matching another period. Figures with a stated period are compared with that "
-    "period only.",
+    "Web figures are checked against the factsheet only when described as a return or performance with a "
+    "period (e.g. \"returned 17.1% over 1 year\"). Other figures in web text (fees, tax rates, returns with no "
+    "period) are not checked; the AI text may still quote only figures from the factsheet and calculations.",
     "Relevance checks match names and the ISIN in the summary text; a summary that names the fund another way "
     "(e.g. only by a ticker) is excluded.",
 ]
@@ -145,7 +145,7 @@ def _page1(inp: ReportInputs) -> str:
         f'{_chip(pillar.rating)}<td>{escape(plain_reason(inp, name))}</td></tr>'
         for name, pillar in card.pillars.items())
     findings = "".join(f"<li>{escape(t)}</li>" for t in inp.narrative.output.key_findings)
-    actions = "".join(f"<li>{escape(t)}</li>" for t in inp.narrative.output.actions)
+    actions = "".join(f"<li>{escape(t)}</li>" for t in inp.narrative.output.action_texts)
     origin = ("Written by AI and checked by code against the figures, ratings and wording rules."
               if inp.narrative.source == "ai" else
               "Written by code from the figures (template text)." + (f" {inp.run_note}." if inp.run_note else

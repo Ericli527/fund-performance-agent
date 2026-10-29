@@ -64,3 +64,56 @@ def test_a_different_rating_is_rejected(text):
 @pytest.mark.parametrize("text", ["We would Retain the fund.", "This calls for a Review.", "Verdict: Pending data check."])
 def test_a_different_verdict_is_rejected(text):
     assert any(p.startswith("verdict") for p in check_ratings(text, SCORECARD))
+
+
+# Label guard: a figure next to "tracking difference", "tracking error" or "ongoing charge" must be that fact
+from fund_performance.number_guard import check_labels  # noqa: E402
+
+LABEL_FACTS = {
+    "fund": {"ocf_pct": 0.06},
+    "figures": [{"name": "comparison.td.5y", "value": -0.1, "unit": "pp"},
+                {"name": "comparison.td_ex_cost.5y", "value": -0.04, "unit": "pp"},
+                {"name": "comparison.excess_cum.5y", "value": -0.7, "unit": "pp"},
+                {"name": "risk.pnav.tracking_error.3y", "value": 0.02, "unit": "%"}],
+    "data_notes": [{"kind": "pricing", "note": "Noon pricing.", "figures": [
+        {"label": "Gap at noon prices (NAV vs index), 5y", "value": -3.3, "unit": "pp", "display": "-3.3 pp"}]},
+        {"kind": "fee", "note": "Most of the gap is the fee.", "figures": [
+            {"label": "Fund behind its index, in plain terms (% a year), 5y", "value": -0.1, "unit": "%"},
+            {"label": "Cost-adjusted gap, in plain terms (% a year), 5y", "value": -0.04, "unit": "%"}]}]}
+
+
+def test_the_noon_gap_called_a_tracking_difference_is_rejected():
+    # From the full Test 1 run: -3.3 pp is the 5-year noon-price gap, not a tracking difference
+    issues = check_labels("Over 5 years, the fund shows a tracking difference −3.3 pp at noon prices.", LABEL_FACTS)
+    assert issues == ["label: '-3.3 pp' next to 'tracking difference' is not a tracking difference for 5 years in the facts"]
+
+
+def test_a_cost_adjusted_gap_needs_its_sign_and_a_year():
+    # From the full Test 1 run: "cost-adjusted gap 0.04 pp" leaves out the sign and "a year"
+    issues = check_labels("The cost-adjusted gap 0.04 pp is small.", LABEL_FACTS)
+    assert issues == ["label: '0.04 pp' next to 'cost-adjusted gap' is a yearly figure; add 'a year'",
+                      "label: '0.04 pp' next to 'cost-adjusted gap' is negative; write the minus sign or say 'behind'"]
+    assert check_labels("The cost-adjusted gap is -0.04 pp a year.", LABEL_FACTS) == []
+    assert check_labels("Without the fee, the cost-adjusted gap is 0.04 pp a year behind.", LABEL_FACTS) == []
+
+
+@pytest.mark.parametrize("text", [
+    "The fund is behind its index by 0.10% a year over 5 years (tracking difference -0.10 pp).",
+    "Ongoing charge (OCF) 0.06% (the yearly fee taken from the fund) explains most of the gap.",
+    "Tracking error 0.02% (how much that gap varies from month to month) is low.",
+    "Its noon price makes it look 3.3 pp behind over 5 years, but the tracking difference is -0.10 pp a year.",
+    "The 5-year gap is 0.7 pp, and the tracking error 0.02% is low.",
+])
+def test_correctly_labelled_figures_pass(text):
+    assert check_labels(text, LABEL_FACTS) == []
+
+
+@pytest.mark.parametrize("text, problem", [
+    ("Tracking error 0.02% over 5 years is low.", "is not a tracking error for 5 years"),
+    ("The ongoing charge is 0.10%.", "is not an ongoing charge"),
+    ("The tracking difference is -0.10% a year.", None),                 # the plain-terms % figure is allowed
+    ("The tracking error is 0.02 pp.", "is not a tracking error"),       # wrong unit
+])
+def test_wrong_type_period_or_unit_is_rejected(text, problem):
+    issues = check_labels(text, LABEL_FACTS)
+    assert (issues == []) if problem is None else (len(issues) == 1 and problem in issues[0])

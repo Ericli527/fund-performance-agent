@@ -15,6 +15,9 @@ fetch:
   max_page_chars: 12000      # text sent to the Search Agent is cut to this length
   user_agent: "Mozilla/5.0 (compatible; FundPerformanceAgent/1.0; public pages only)"
 
+vetting:
+  market_grace_days: 31      # market reviews come out just after the period: keep those dated up to 31 days after its end
+
 funds:
   GB00BJS8SH10:              # Fidelity Index US Fund P Accumulation (Test 1)
     - name: Fidelity fund page

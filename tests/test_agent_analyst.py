@@ -1,7 +1,7 @@
 """ Oversight Analyst: mocked pass / one rewrite / fallback; one live test on Test 1 that prints the text """
 import asyncio
 import pytest
-from fund_performance.agents.analyst import (AI_TEXT_UNAVAILABLE, CHECKS_FAILED, AnalystOutput, analyst_agent,
+from fund_performance.agents.analyst import (failed_checks, AI_TEXT_UNAVAILABLE, CHECKS_FAILED, AnalystOutput, analyst_agent,
                                              problems, template, write_narrative)
 from fund_performance.calc import calculate
 from fund_performance.checks import check_prices
@@ -35,7 +35,9 @@ FACTS = {
 GOOD = {"key_findings": ["The fund tracked its index closely: 13.8% a year against 13.9% over 5 years.",
                          "The tracking difference, the gap between fund and index returns, was -0.10 pp a year.",
                          "Value and fees cannot be judged until a peer fund is added."],
-        "actions": ["Add a comparable peer fund.", "Confirm the draft verdict in the approval section."],
+        "actions": [{"candidate": "add_peer", "text": "Add a comparable peer fund before the next quarterly review."},
+                    {"candidate": "record_decision",
+                     "text": "Record the decision and its reasons in the approval box at this review."}],
         "market_context": None}
 
 
@@ -53,7 +55,7 @@ def test_agent_settings(monkeypatch):
 def test_prompt_carries_the_style_rules_and_glossary():
     from fund_performance.agents.analyst import INSTRUCTIONS, STYLE_EXAMPLE
     for rule in ("Draft verdict", "Plain meaning first", "under 20 words", "ongoing charge (OCF)",
-                 "below the surface", "says when to do it", "Never restate the verdict",
+                 "below the surface", "chosen ONLY from \"candidate_actions\"", "Never add a new\n  action",
                  "Never put a minus sign after", "Cite them as [1], [2]", STYLE_EXAMPLE):
         assert rule in INSTRUCTIONS
 
@@ -92,7 +94,8 @@ def test_a_draft_that_changes_a_rating_is_rejected():
 
 
 def test_a_draft_that_changes_the_verdict_is_rejected():
-    changed = draft(actions=["Retain the fund.", "Add a comparable peer fund."])
+    changed = draft(actions=[{"candidate": "add_peer", "text": "Retain the fund; add a peer fund before the next quarterly review."},
+                             GOOD["actions"][1]])
     result = asyncio.run(write_narrative(FACTS, run=FakeRun(changed, changed)))
     assert result.source == "template" and any("uses 'Retain'" in line for line in result.log)
 
@@ -145,7 +148,7 @@ def test_live_test1_analyst():
         print(" -", f)
     print("Recommended actions:")
     for a in result.output.actions:
-        print(" -", a)
+        print(f" - [{a.candidate}] {a.text}")
     print("Market context:", result.output.market_context)
     print("Log:", *result.log, sep="\n  ")
     print("Flags:", [f.message for f in result.flags])
@@ -173,7 +176,7 @@ def test_minus_rule_triggers_one_rewrite():
 
 
 def test_template_actions_each_say_when():
-    for action in template(FACTS).actions:
+    for action in template(FACTS).action_texts:
         assert "before" in action or "at this review" in action or "at the next" in action
 
 
@@ -239,17 +242,29 @@ def test_too_many_sentences_trigger_the_rewrite():
     assert result.source == "ai" and "finding 1 has 3 sentences" in fake.prompts[1]
 
 
-@pytest.mark.parametrize("action", ["Note that value cannot yet be judged without a peer.",
-                                    "It remains understood that the fee is low, before signing off.",
-                                    "Be aware of noon pricing at the next quarterly review."])
+@pytest.mark.parametrize("action", ["Note that a peer fund is needed before the next quarterly review.",
+                                    "It remains understood that a peer is needed, before signing off this review.",
+                                    "Be aware that a peer fund is needed at the next quarterly review."])
 def test_actions_that_only_ask_people_to_notice_are_rejected(action):
-    issues = problems(_out(actions=[action, GOOD["actions"][1]]), FACTS)
+    issues = problems(_out(actions=[{"candidate": "add_peer", "text": action}, GOOD["actions"][1]]), FACTS)
     assert len(issues) == 1 and issues[0].startswith("style: action 1 only asks people to")
 
 
 def test_prompt_asks_for_bracketed_definitions_and_specific_actions():
     from fund_performance.agents.analyst import INSTRUCTIONS
     assert '"R² 1.00 (how closely fund and index move together)"' in INSTRUCTIONS
-    assert "change or\n  check something specific" in INSTRUCTIONS and '"note that"' in INSTRUCTIONS
-    for action in template(FACTS_NOTES | {"fund": {"time_horizon_years": 5}}).actions:
-        assert problems(_out(actions=[action, action]), FACTS) == []
+    assert "Never add a new\n  action" in INSTRUCTIONS and '"note that"' in INSTRUCTIONS
+    facts = FACTS_NOTES | {"fund": {"time_horizon_years": 5}}
+    assert problems(template(facts), facts) == []
+
+
+def test_a_mislabelled_figure_triggers_the_rewrite_and_counts_as_a_number_problem():
+    from test_number_guard import LABEL_FACTS
+    facts = FACTS_NOTES | {"fund": {"ocf_pct": 0.06, "time_horizon_years": 5},
+                           "figures": FACTS_NOTES.get("figures", []) + LABEL_FACTS["figures"]}
+    bad = ["The fund tracks its index. Over 5 years its tracking difference was -3.3 pp at noon prices.",
+           "At market close (PNAV) the gap is 0.7 pp, and most of it is the 0.06% yearly fee.",
+           "Value and fees cannot be judged until a peer fund is added."]
+    issues = problems(_out(key_findings=bad), facts)
+    assert any(i.startswith("label: '-3.3 pp' next to 'tracking difference'") for i in issues)
+    assert "number" in failed_checks([i for i in issues if i.startswith("label:")])

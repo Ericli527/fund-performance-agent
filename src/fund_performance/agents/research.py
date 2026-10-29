@@ -381,27 +381,40 @@ def _sentence_period(sentence: str) -> str | None:
     return year.group(1) if year else None
 
 
+_INDEX_NAME_WORDS = re.compile(r"\b(?:net |gross )?total return\b|\bprice return\b", re.IGNORECASE)
+
+
 def conflicting_figures(summary: str, profile: FundProfile, facts: dict, tolerance_pp: float) -> list[str]:
     """ Returns stated for the fund or its index that are more than tolerance_pp from every factsheet figure
-    for the same series (and the same period, when the sentence names one) """
+    for the same series and period. Only figures described as returns or performance with a period are
+    checked (a fee, a tax rate or a figure with no period is not a return); "total return" in an index's
+    name is not a return word """
     from fund_performance.number_guard import numbers_in
     official = _official_returns(facts)
     market = market_name(profile).lower()
     bad = []
     for sentence in re.split(r"(?<=[.!?;])\s+", summary):        # clauses, so a sector's figure is not read as the index's
         who = "fund" if names_the_fund(sentence, profile) else "index" if market in sentence.lower() else None
-        if who is None or not _RETURN_WORDS.search(sentence):
-            continue
         period = _sentence_period(sentence)
-        candidates = [v for p, v in official[who] if period is None or p == period]
+        if who is None or period is None or not _RETURN_WORDS.search(_INDEX_NAME_WORDS.sub(" ", sentence)):
+            continue
+        candidates = [v for p, v in official[who] if p == period]
         for n in numbers_in(sentence):
             if n.unit == "%" and candidates and not any(abs(abs(n.value) - abs(v)) <= tolerance_pp for v in candidates):
                 bad.append(f"{n.text.strip()} ({who}{', ' + period if period else ''})")
     return bad
 
 
-def vet_summaries(summaries: list[dict], profile: FundProfile, facts: dict,
-                  tolerance_pp: float = 0.5) -> tuple[list[dict], list[DataFlag], list[str]]:
+def same_url(url: str) -> str:
+    """ A URL in one form for comparing: no fragment, no trailing slash, scheme and host in lower case """
+    base = url.split("#", 1)[0].rstrip("/")
+    scheme, _, rest = base.partition("://")
+    host, _, path = rest.partition("/")
+    return f"{scheme.lower()}://{host.lower()}/{path}"
+
+
+def vet_summaries(summaries: list[dict], profile: FundProfile, facts: dict, tolerance_pp: float = 0.5,
+                  market_grace_days: int = 0) -> tuple[list[dict], list[DataFlag], list[str]]:
     """ Leave out summaries with no date at all (a publish or an "as at" date both count), dated outside the
     review period, about a different fund or jurisdiction (fund searches) or not about the market (market
     searches), or with fund or index returns that differ from the factsheet by more than tolerance_pp
@@ -409,7 +422,10 @@ def vet_summaries(summaries: list[dict], profile: FundProfile, facts: dict,
 
     Dates: approved sources and fund-specific facts (fund news, manager changes) may be dated after the period
     end, e.g. a fund page "as at" today; they are excluded only if dated before the period start. Market news
-    from web searches must fall inside the period """
+    from web searches must fall inside the period, or up to market_grace_days after its end (period reviews
+    come out just after the period).
+
+    A summary with the same URL as one already kept is left out (log only) """
     start, end = review_period(profile)
     kept, flags, log = [], [], []
 
@@ -424,7 +440,7 @@ def vet_summaries(summaries: list[dict], profile: FundProfile, facts: dict,
         when = date.fromisoformat(s["date"])
         topic = s.get("topic", "fund_news")
         later_is_fine = s.get("approved") or topic in ("fund_news", "manager_changes")
-        if when < start or (when > end and not later_is_fine):
+        if when < start or (when > end + timedelta(days=market_grace_days) and not later_is_fine):
             basis = "as at" if s.get("date_basis") == "as_at" else "dated"
             exclude(s, f"web source {basis} {when.isoformat()}, outside the review period "
                        f"{start.isoformat()} to {end.isoformat()}: excluded")
@@ -441,6 +457,9 @@ def vet_summaries(summaries: list[dict], profile: FundProfile, facts: dict,
         bad = conflicting_figures(s["summary"], profile, facts, tolerance_pp)
         if bad:
             exclude(s, f"{FIGURES_DIFFER}: {', '.join(bad)}")
+            continue
+        if any(same_url(k["url"]) == same_url(s["url"]) for k in kept):
+            log.append(f"Summary left out, same URL as a source already kept: {s['query']} ({s['url']})")
             continue
         kept.append(s)
     return kept, flags, log

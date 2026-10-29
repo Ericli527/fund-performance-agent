@@ -35,7 +35,8 @@ def made_up_inputs(objective_type="index_tracker", flags=(), findings=None):
     card = score(reported, prof, T, decision_path(prof, checked.short_history, all_flags), None)
     facts = build_facts(prof, reported, card, all_flags)
     narrative = Narrative(template(facts) if findings is None else AnalystOutput(
-        key_findings=findings, actions=["Act before signing off this review.", "Record it at this review."],
+        key_findings=findings, actions=[{"candidate": "record_decision", "text": "Record it at this review."},
+                                        {"candidate": "read_sources", "text": "Read the sources before signing off."}],
         market_context=None), "template" if findings is None else "ai")
     return ReportInputs(profile=prof, question="Is this fund meeting its mandate?", reported=reported, card=card,
                         facts=facts, narrative=narrative, thresholds=T, flags=all_flags, prices=checked.prices,

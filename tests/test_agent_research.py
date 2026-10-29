@@ -208,8 +208,12 @@ SUMMARIES = [{"query": "US shares 2026", "summary": "US shares rose 25.3% in the
               "url": "https://example.com/markets?page=3.5", "date": "2026-09-30"}]
 
 
+ACTIONS = [{"candidate": "record_decision", "text": "Record the decision and its reasons at this review."},
+           {"candidate": "read_sources", "text": "Read the figures and their sources before signing off this review."}]
+
+
 def _context(text):
-    return AnalystOutput(key_findings=["a", "b", "c"], actions=["x", "y"], market_context=text)
+    return AnalystOutput(key_findings=["a", "b", "c"], actions=ACTIONS, market_context=text)
 
 
 def test_market_context_cites_numbered_sources():
@@ -231,7 +235,7 @@ def test_figures_from_sources_are_not_allowed():
 
 
 def test_the_analyst_sees_numbered_sources_without_urls_and_the_report_gets_them():
-    good = {"key_findings": ["a", "b", "c"], "actions": ["x", "y"], "market_context": "US shares rose, led by technology [1]."}
+    good = {"key_findings": ["a", "b", "c"], "actions": ACTIONS, "market_context": "US shares rose, led by technology [1]."}
     fake = FakeRun(good)
     result = asyncio.run(write_narrative(FACTS, SUMMARIES, run=fake))
     assert result.source == "ai" and result.output.market_context.endswith("[1].")
@@ -357,7 +361,7 @@ def test_live_test1_research_and_analyst():
         print(" -", f)
     print("Actions:")
     for a in narrative.output.actions:
-        print(" -", a)
+        print(f" - [{a.candidate}] {a.text}")
     print("Market context:", narrative.output.market_context)
     print("Sources:", *[f"[{s['number']}] {s['url']} ({s['date']})" for s in narrative.sources], sep="\n  ")
     print("Analyst log:", *narrative.log, sep="\n  ")
@@ -411,3 +415,54 @@ def test_test1_sec_filing_is_excluded():
              "https://www.sec.gov/Archives/edgar/data/x.htm")
     out, flags, _ = vet_summaries([sec], read_json(TEST1_PROFILE), _test1_facts())
     assert out == [] and flags[0].level == "info" and "different fund or jurisdiction" in flags[0].message
+
+
+# Fixes from the full Test 1 run: figure vetting, market review window, duplicate URLs
+@requires_test1
+def test_test1_fidelity_page_figures_that_are_not_returns_are_not_checked():
+    """ The Fidelity fund page was excluded for 0.06% (the fee) and 15% (withholding tax in the index name) """
+    from test_agent_analyst import _test1_facts
+    from fund_performance.io import read_json
+    from fund_performance.agents.research import conflicting_figures
+    prof = read_json(TEST1_PROFILE)
+    facts = _test1_facts()
+    page = ("The fund aims to track the S&P 500 (NUK) Index, the net total return index with a 15% withholding tax "
+            "adjustment. Its ongoing charge is 0.06% and it tracks the S&P 500 index return closely, with a tracking "
+            "difference of -0.01%. Fidelity Index US Fund P Acc returned 15.49% over 1 year.")
+    assert conflicting_figures(page, prof, facts, 0.5) == ["15.49% (fund, 1y)"]       # a stated return is still checked
+    assert conflicting_figures(page.rsplit(" Fidelity", 1)[0], prof, facts, 0.5) == []
+
+
+def test_only_figures_described_as_returns_with_a_period_are_checked():
+    from fund_performance.agents.research import conflicting_figures
+    prof = profile()
+    assert conflicting_figures("Sample World Index Fund A Acc returned 30% over 1 year.", prof, VET_FACTS, 0.5)
+    assert conflicting_figures("Sample World Index Fund A Acc returned 30%.", prof, VET_FACTS, 0.5) == []   # no period
+    assert conflicting_figures("The Sample World total return index has a 15% tax adjustment over 1 year.",
+                               prof, VET_FACTS, 0.5) == []                             # no return word left
+
+
+@pytest.mark.parametrize("published, kept", [("2026-10-05", True), ("2026-10-31", True), ("2026-11-01", False)])
+def test_market_reviews_published_just_after_the_period_are_kept(published, kept):
+    """ The Nasdaq September 2026 review came out after 30 Sep 2026; 31 days of grace (config/sources.yaml) """
+    review = _s("Sample World shares rose in September 2026, led by technology.", date=published,
+                topic="market_drivers", url="https://www.nasdaq.com/articles/september-2026-review")
+    out, flags, _ = vet_summaries([review], profile(), VET_FACTS, market_grace_days=31)
+    assert bool(out) == kept
+    if not kept:
+        assert "outside the review period" in flags[0].message
+
+
+def test_market_grace_days_come_from_the_config():
+    from fund_performance.config import load_sources
+    assert load_sources().vetting.market_grace_days == 31
+
+
+def test_identical_urls_are_kept_once():
+    first = _s("Sample World Index Fund A Acc charges 0.10% a year.", url="https://example.com/fund/docs/") | {
+        "query": "Approved source: Documents page", "approved": True}
+    again = _s("Sample World Index Fund A Acc has no fee changes.", url="https://EXAMPLE.com/fund/docs#fees")
+    other = _s("Sample World Index Fund A Acc has a new manager.", url="https://example.com/news")
+    kept, flags, log = vet_summaries([first, again, other], profile(), VET_FACTS)
+    assert kept == [first, other] and flags == []
+    assert any("same URL as a source already kept" in line for line in log)

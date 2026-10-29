@@ -71,6 +71,10 @@ Instructions for Claude Code in this project. The build specification is
   rating / wording / insights" (listing those that failed). Every data note's key figure must appear in
   the findings (insights check). Periods in words ("5 years", not "5y"). Code also rejects a finding
   with more than 2 sentences and an action containing "note that", "remains understood" or "be aware".
+  Label guard: a number within 8 words of "tracking difference", "tracking error", "ongoing charge/OCF"
+  or "cost-adjusted gap" must be that fact (type, period, unit); tracking differences need "a year" and
+  their sign. Actions: code builds candidate actions from ratings and flags (`actions.py`); the AI only
+  chooses ({candidate, text}) and rewords them, never adds one (no method/period actions).
 - Analyst style: plain meaning first, term in brackets; definitions in brackets after the term and its
   figure ("R² 1.00 (how closely fund and index move together)"); terms explained once (<10 words) from the
   shared glossary (`glossary.py`, also printed at the end of the report in step 9); sentences under
@@ -83,7 +87,9 @@ Instructions for Claude Code in this project. The build specification is
   market drivers. Planner gets public fund details and ratings only; searches run in parallel, one
   each, no retries; failures are left out with a flag. Market-driver
   queries never name the fund (code drops them). Summaries with no date, outside the review period,
-  or with fund/index returns >0.5 pp from the factsheet are excluded with an info flag. Market
+  or with fund/index returns >0.5 pp from the factsheet are excluded with an info flag (only figures
+  described as returns with a period are checked; fees and tax rates are not returns). Identical URLs
+  kept once. Market news may be dated up to 31 days after the period end (`config/sources.yaml`). Market
   context cites [1], [2]; URLs only in the report's sources list. No minus sign after "behind"/
   "below" (code check). "As at" dates count; approved sources and fund/manager news may be dated
   after the period end (excluded only before the start), market news keeps the strict window. Fund

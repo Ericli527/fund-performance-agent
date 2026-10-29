@@ -329,6 +329,14 @@ All agents return structured JSON validated with Pydantic. Use the OpenAI Agents
 - Structure: 3 key findings, 2 to 3 recommended actions, short market context with sources.
 - Never a minus sign after "behind" or "below" ("behind by 0.10%"); code checks this. Every action is a real
   task with a when, never a restatement of the verdict or an internal technical note.
+- Actions come from code (`actions.py`): candidate actions built from the ratings and data flags, in priority
+  order (Check data, Red, Manual check, Add peer, Amber, data warnings, then "record the decision" and "read the
+  sources"), each with an id, a default wording with its timing, words a rewording must keep, and a `required`
+  mark. They are in the facts JSON as `candidate_actions`. The Analyst returns each action as
+  `{candidate, text}`: it may only choose candidates and reword them, and must choose every required one while
+  there is room. Code rejects an unknown candidate, a repeat, a left-out required candidate, missing keep-words,
+  no "when", and method or period words (PNAV, NAV, noon, pricing, method, basis, period, calculation) that the
+  candidate does not use. The template uses the default wording.
 - Readable for experts and newcomers: plain meaning first, technical term second in brackets; explain each
   term once in under 10 words using the shared glossary (`glossary.py`); no unexplained abbreviations
   ("ongoing charge (OCF)"); sentences under 20 words, at most 2 per finding; say "Draft verdict"; at least one
@@ -367,8 +375,14 @@ All agents return structured JSON validated with Pydantic. Use the OpenAI Agents
   fund's name. Prefer news and index-provider sources over fund data pages.
 - Vetting (code, before the Analyst): a summary is excluded, with an info flag, if it has no date, is dated outside
   the 12-month review period, or states a fund or index return more than 0.5 pp from the factsheet figure for the
-  same series (and period, where named): "web source figures differ from factsheet, likely different currency or
-  date: excluded". Test 1: Morningstar USD pages (11.99% vs 17.0%) are excluded.
+  same series and period: "web source figures differ from factsheet, likely different currency or date:
+  excluded". Test 1: Morningstar USD pages (11.99% vs 17.0%) are excluded.
+  - Only figures described as returns or performance (return, gained, fell, performance ...) with a period are
+    checked; "total return" in an index name is not a return word, so fees and tax rates are not read as returns
+    (Test 1: the Fidelity fund page's 0.06% fee and 15% withholding tax).
+  - Market news may be dated up to `vetting.market_grace_days` (31, `config/sources.yaml`) after the period end,
+    as period reviews come out just after the period (Test 1: the Nasdaq September 2026 review).
+  - Identical URLs are kept once; the first kept wins, so an approved source beats a web result (log only).
 - Citations: the market context cites sources as [1], [2]; the Analyst never sees or writes URLs, and the report
   lists each number with its URL under Sources.
 - Dates: a page with no publish date but an "as at" or "updated" date is kept with `date_basis: "as_at"`; only
@@ -393,6 +407,12 @@ All agents return structured JSON validated with Pydantic. Use the OpenAI Agents
 After the Analyst responds: extract all numbers from its text (regex for decimals and %). Every number must match a value in the facts JSON (allowing rounding to 1 d.p.). If not, reject and re-prompt once; if it fails again, use a template-only narrative and flag it.
 - Units must match: every figure in the facts JSON carries its unit (`%` for returns, `pp` for tracking differences and gaps), and a number in the text matches only a fact with the same unit, so -0.10 pp is never confused with a 0.10% return. Rounding to 1 or 2 d.p. is allowed; a whole number with % or pp must match exactly; a written minus must match a negative fact.
 - Not figures, so not checked: years (2024), periods ("5 years", "3y", "12-month"), counts ("4 questions", "5 of 5") and dates; in practice, any whole number without % or pp.
+- Label guard (code): if "tracking difference", "tracking error", "ongoing charge"/"OCF" or "cost-adjusted gap"
+  is within 8 words of a number (in the same sentence; the nearest label before the number with no other number
+  between, else one after it in the same clause), the number must be a fact of that type, in its unit and for the
+  period named nearby. A (cost-adjusted) tracking difference is yearly: "a year" must be nearby, and a negative
+  one needs its minus sign or a word such as "behind". Test 1: "tracking difference −3.3 pp" (the 5-year noon gap)
+  and "cost-adjusted gap 0.04 pp" (no sign, no "a year") are rejected. Counts as a number problem.
 - Rating guard (code): the text must not give a pillar a different rating, or use a verdict word other than the decided verdict. A failing draft is re-prompted once with the list of problems (bad numbers and changed ratings); then the template narrative is used with the flag "AI text failed number check".
 - The Analyst's inputs are the facts JSON (scorecard, decision-tree path, figures with units and sources, warning and blocking flags) and, from step 8, search summaries. Without search summaries, market context is null.
 
@@ -520,8 +540,9 @@ Definition of done: all unit tests pass; Test 1 and Test 2 expected values repro
 
 ## 12. Known limitations
 
-- A web figure with no stated period is compared with all of the factsheet's periods for that series, so a wrong
-  figure could pass by matching another period. Figures with a stated period are compared with that period only.
+- Web figures are checked against the factsheet only when described as a return or performance with a period
+  (e.g. "returned 17.1% over 1 year"). Other figures in web text (fees, tax rates, returns with no period) are not
+  checked; the AI text may still quote only figures from the factsheet and calculations.
 - Relevance checks match names and the ISIN in the summary text; a summary about this fund that names it in
   another way (e.g. only by a ticker) is excluded.
 
@@ -531,5 +552,7 @@ Definition of done: all unit tests pass; Test 1 and Test 2 expected values repro
 |---|---|
 | **v1: next two days** | Steps 1 to 11 above on Test 1 (Fidelity Index US Fund). Value and Fees show "Add peer" when no peer is supplied. |
 | **v2: next step** | Peer comparison for value and fees (e.g. SPDR S&P 500 UCITS ETF); run Tests 2, 3 and 4 (currency trap, dual objective, short history, active fund). |
+| **v2: peers** | Allow the peer to be a sector median OCF (e.g. IA North America index funds, 0.10%), as Fidelity's own Assessment of Value does, as well as a single peer fund. |
+| **v2: share classes** | Optional share-class table input (class, OCF, minimum investment, who can buy it) for the AoV "Classes of units" factor, which is "Not assessed" without it. |
 | **v2: sources** | v1 fetches the approved pages in `config/sources.yaml` in code. v2 option: the MCP Fetch server, so an agent can choose and fetch further URLs (checked against an approved-domain list) instead of open web search. |
 | **v3: later** | Agree thresholds and rating rules with the oversight team; adapt inputs to the team's own data and processes. |
