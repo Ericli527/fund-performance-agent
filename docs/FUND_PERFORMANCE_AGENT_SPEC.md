@@ -171,6 +171,9 @@ Notation: `P_t` = price at month-end t; monthly return `r_t = P_t / P_{t-1} - 1`
 - **Alpha (annualised, simple):** `R_ann_fund - [rf + beta * (R_ann_bench - rf)]`.
 - **Relative volatility:** `sigma_fund / sigma_bench`.
 - Prefer factsheet risk figures when supplied; show calculated ones as a cross-check.
+- Benchmark-relative measures (TE, beta, R2, information ratio, alpha, relative volatility, TD) need an
+  index price series. Without one they are marked "not available: no index price series" and never
+  approximated; the factsheet's figures are reported instead (`source: "factsheet"`).
 
 ### 4.4 Consistency
 - **Hit rate:** number of the last 5 discrete 12-month periods where the fund met its objective test (index fund: abs(TD for that year) <= tolerance; active: fund >= target).
@@ -349,6 +352,9 @@ Expected:
 - Calculated NAV cumulative returns match factsheet: **1y 17.5%, 3y 69.0%, 5y 88.3%** (5y annualised 13.5%).
 - Fair comparison uses PNAV vs index: **1y 17.0 vs 17.1, 3y 69.0 vs 69.5, 5y 90.9 vs 91.6**; 5y annualised 13.8% vs about 13.9%.
 - OCF 0.06%; TE (3y) 0.02; beta 1.00; R2 1.00 (factsheet).
+- Calculated from the NAV CSV (cross-checks only, tested to 1 d.p.): 5-year volatility 13.7%, 5-year maximum
+  drawdown -15.1%. The CSV has no index series, so TE, beta, R2, information ratio and alpha are reported from
+  the factsheet and their calculated versions are "not available: no index price series".
 - Mandate GREEN; Performance GREEN.
 - Data flags raised: 16 pre-launch prices (2012-11-30 to 2014-02-28, before the 2014-03-03 share class launch) at info level; repeated prices 2013-06-30/2013-08-31 and 2013-12-31/2014-02-28 at **info** level (pre-launch); **2024-07-31/2024-09-30 at warning level**; trailing comma handled; dates read as `MM/DD/YYYY`.
 - Must NOT rate Performance RED from midday NAV 88.3% vs index 91.6%.

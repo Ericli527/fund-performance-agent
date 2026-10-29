@@ -35,6 +35,11 @@ Instructions for Claude Code in this project. The build specification is
   risk statistics and since-launch figures. Repeated prices in that period are info, not warning.
 - Ambiguous dates: use the format that gives one price per month in date order; if both formats
   do, stop and ask the user.
+- Benchmark-relative risk (TE, beta, R², information ratio, alpha) is calculated only from an index
+  price series. Without one: "not available: no index price series", factsheet figures reported with
+  `source: "factsheet"`, never approximated.
+- Figures are stored to 2 d.p. but displayed from the exact value, so they are rounded once
+  (10.5499 shows as 10.5%, not 10.55 -> 10.6%).
 - Risk-free rate: 0 for v1, with a flag. Prefer the factsheet Sharpe ratios where supplied.
 - Charts are built in step 9 with the report.
 - Emailing the report is a plain code function (not an AI agent), off by default, set up in

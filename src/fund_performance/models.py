@@ -125,11 +125,22 @@ class Peer(_Strict):
 
 
 class Figure(BaseModel):
-    """ One number in the report, always with its source (spec principle 4) """
+    """ One number in the report, always with its source (spec principle 4).
+    value is stored to 2 d.p. (spec 4); exact keeps full precision so the 1 d.p. display is rounded once,
+    not twice (10.5499 shows as 10.5, not 10.55 -> 10.6) """
     value: float
+    exact: float | None = None
     unit: str
     source: Source
     period: str | None = None
+    basis: str | None = None            # e.g. "pnav" or "nav" for factsheet risk figures
+
+    def display(self, percent_decimals: int = 1, ratio_decimals: int = 2) -> str:
+        """ Percentages to 1 d.p. (spec 4), ratios such as beta to 2 d.p. """
+        number = self.value if self.exact is None else self.exact
+        if self.unit in ("%", "pp"):
+            return f"{round(number, percent_decimals) + 0.0:.{percent_decimals}f}{'%' if self.unit == '%' else ' pp'}"
+        return f"{round(number, ratio_decimals) + 0.0:.{ratio_decimals}f}"
 
     @property
     def needs_verification(self) -> bool:
