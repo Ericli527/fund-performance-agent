@@ -1,0 +1,19 @@
+{
+  "fund_name": "Sample World Index Fund A Acc",
+  "isin": "XX0000000001",
+  "share_class": "A Acc",
+  "currency": "GBP",
+  "distribution": "accumulation",
+  "hedged": false,
+  "launch_date": "2018-01-02",
+  "objective_text": "Made-up test fund. Aims to track the Sample World Index over 5 years or more.",
+  "objective_type": "index_tracker",
+  "benchmark_name": "Sample World Index",
+  "benchmark_role": "target",
+  "time_horizon_years": 5,
+  "secondary_objective": null,
+  "ocf_pct": 0.10,
+  "performance_fee": false,
+  "pricing_point": "market_close",
+  "as_of_date": "2026-09-30"
+}

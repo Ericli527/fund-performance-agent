@@ -1,0 +1,7 @@
+{
+  "name": "Sample World Index Tracker B",
+  "ocf_pct": 0.05,
+  "returns": {"1y": 10.2, "3y": 9.4, "5y": 8.6, "basis": "annualised"},
+  "currency": "GBP",
+  "share_class": "B Acc"
+}

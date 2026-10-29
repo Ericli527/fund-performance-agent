@@ -4,3 +4,9 @@ __pycache__/
 .venv/
 venv/
 .gradio/
+
+# Fund data and run logs stay local (public repo): never commit prices, factsheets, KIDs or answer keys
+data/*
+!data/README.md
+runs/
+.pytest_cache/

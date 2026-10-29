@@ -1,0 +1,20 @@
+# Fund Performance Agent: run settings (step 10)
+#
+# timeouts_seconds: the longest each AI step may take. A step that runs over is stopped and handled like a
+#   failed step (flagged in the report), so one slow call cannot hold up the review.
+# email: sending the report is plain code (not an AI agent) and is OFF by default. It goes through Resend over
+#   HTTPS (as in the old app; Render's free plan blocks SMTP ports). The key is RESEND_API_KEY in .env, never in
+#   this file. Recipients come only from EMAIL_TO in .env (or Render's environment), comma-separated, so they are
+#   never in the public repository. Sender: `sender` below, else EMAIL_FROM, else Resend's test sender (delivers
+#   only to your Resend account's address). Only the PDF of public data is sent.
+
+timeouts_seconds:
+  extractor: 180
+  mandate: 90
+  research: 240        # approved pages, planner and web searches together
+  narrative: 300       # Analyst, code checks, Evaluator and the one rewrite together
+
+email:
+  enabled: false
+  sender: ""           # e.g. "Fund Report <reports@yourdomain.com>" (a domain verified in Resend)
+  subject: "Fund performance review (draft): {fund_name}, figures to {as_of_date}"

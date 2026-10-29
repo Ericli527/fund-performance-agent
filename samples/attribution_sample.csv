@@ -1,9 +1,0 @@
-sector,fund_weight,benchmark_weight,fund_return,benchmark_return
-Information Technology,28.0,24.0,14.2,12.5
-Financials,14.0,16.0,6.1,6.8
-Health Care,13.0,12.0,3.5,2.2
-Consumer Discretionary,12.0,11.0,9.8,8.1
-Industrials,11.0,11.0,7.4,7.9
-Energy,4.0,6.0,-2.1,-1.5
-Consumer Staples,9.0,10.0,2.9,3.4
-Utilities,9.0,10.0,4.0,4.6

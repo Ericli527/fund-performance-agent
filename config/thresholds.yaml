@@ -1,0 +1,75 @@
+# Fund Performance Agent: thresholds and limits
+#
+# ILLUSTRATIVE: these defaults come from docs/FUND_PERFORMANCE_AGENT_SPEC.md and are not yet
+# agreed with the oversight team. They are printed in every report.
+# Do not change this file unless the project owner asks (CLAUDE.md, rule 3).
+#
+# Units: values ending _pp are percentage points; _pct are percent; returns are in percent.
+
+status: illustrative
+note: "Illustrative thresholds, to be agreed with the oversight team."
+
+# Section 3.4: data quality checks
+data_checks:
+  cross_check_tolerance_pp: 0.3          # calculated vs factsheet 1/3/5y return; above this, flag (factsheet wins)
+  implausible_tracker_gap_pct: 1.0       # index fund, price data only: annualised gap above this -> CHECK DATA
+  max_gap_days_monthly: 35               # gap between monthly observations
+  max_gap_business_days_daily: 5         # gap between daily observations
+  repeated_price_window_periods: 3       # same NAV within this many periods (equity fund) -> flag
+  currency_mismatch_calendar_year_pp: 0.5  # price-file index vs factsheet index, any calendar year (owner decision)
+  timing_difference_extra_tolerance_pp: 0.20  # widen tolerance when PNAV is unavailable (owner decision)
+  repeated_price_factsheet_match_pp: 0.1  # repeated price lowered to info if the 12-month windows around it match the factsheet within this (owner decision)
+
+# Section 4: calculator
+calculator:
+  periods_per_year_monthly: 12
+  periods_per_year_daily: 252
+  discrete_12m_windows: 5
+  risk_free_rate_pct: null               # null = use 0 and flag it (v1 decision)
+  decimals_internal: 2
+  decimals_display: 1
+
+# Section 5.1: decision tree
+decision_tree:
+  default_time_horizon_years: 5
+
+# Section 6.1: Mandate (index funds)
+mandate_index:
+  green_min_r2: 0.98
+  green_beta_range: [0.95, 1.05]
+  amber_min_r2: 0.95
+  amber_beta_range: [0.90, 1.10]
+
+# Section 6.2: Performance vs benchmark
+# Index funds: TD and TE are rated separately; Performance is the weaker of the two (owner decision)
+performance_index:
+  green_td_margin_over_ocf_pp: 0.10      # TD: GREEN if abs(TD) <= OCF + 0.10
+  green_max_te_pct: 0.30                 # TE: GREEN if TE <= 0.30
+  amber_td_margin_over_ocf_pp: 0.30      # TD: AMBER if abs(TD) <= OCF + 0.30, else RED
+  amber_max_te_pct: 1.00                 # TE: AMBER if TE <= 1.00, else RED
+  hit_rate_td_margin_over_ocf_pp: 0.10   # hit rate (spec 4.4): a 12-month window counts if abs(TD) <= OCF + 0.10 (owner decision)
+performance_active_target:
+  green_min_excess_pct: 0.0              # GREEN: annualised excess over horizon >= 0
+  red_below_excess_pct: -1.0             # RED: < -1.0; AMBER in between
+  min_hit_rate: 3                        # AMBER if excess >= 0 but hit rate below 3 of 5
+  hit_rate_windows: 5
+performance_comparator:
+  green_max_quartile: 2
+  amber_quartile: 3
+  red_quartile: 4
+
+# Section 6.3: Value for investors (peer return gap, annualised, net of fees)
+value:
+  green_max_peer_outperformance_pp: 0.10
+  amber_max_peer_outperformance_pp: 0.50
+
+# Section 6.4: Is the fee justified? (index funds)
+fees_index:
+  green_max_ocf_over_peer_pp: 0.05
+  amber_max_ocf_over_peer_pp: 0.20
+
+# Sections 1 and 8.5: run limits (demo settings)
+limits:
+  max_web_searches: 3
+  max_analyst_rewrites: 2      # rewrites after code's checks (number, label, rating, wording, insights)
+  max_evaluator_rewrites: 1    # rewrites after the Evaluator's quality check (owner decision: separate from the above)

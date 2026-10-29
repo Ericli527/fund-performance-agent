@@ -1,0 +1,30 @@
+# Fund Performance Agent: which model each AI agent uses
+#
+# agents: the model for each agent. To try another model for ONE agent while testing, set an
+#   environment variable FUND_MODEL_<AGENT> (e.g. FUND_MODEL_MANDATE=gpt-5.4). The model must be
+#   listed under `models` below, so its settings are known.
+# models: what each model accepts. GPT-5.x and newer reasoning models may reject a temperature,
+#   so temperature is sent only where supports_temperature is true; otherwise a low reasoning
+#   effort is sent instead.
+#
+# Data sharing: this API key has OpenAI data sharing on. Public data only; never upload
+# confidential or client data.
+
+agents:
+  extractor: gpt-5.4-mini
+  mandate: gpt-5.4-mini
+  planner: gpt-5.4-mini
+  search: gpt-5.4-mini
+  analyst: gpt-5.4
+  evaluator: gpt-6.1-sol          # a different model from the Analyst, with its own strict checking prompt (step 10)
+
+models:
+  gpt-5.4-mini:
+    supports_temperature: false
+    reasoning_effort: low
+  gpt-5.4:
+    supports_temperature: false
+    reasoning_effort: low
+  gpt-6.1-sol:
+    supports_temperature: false
+    reasoning_effort: low

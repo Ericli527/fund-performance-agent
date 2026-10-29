@@ -1,0 +1,34 @@
+# Fund Performance Agent: approved sources (spec Section 8.2)
+#
+# Code fetches these pages directly. No AI agent chooses a URL. The Search Agent only summarises
+# the text code gives it, and the summary goes through the same date, relevance and figure checks
+# as a web search result. A page that comes back nearly empty (JavaScript-only or blocked) gets an
+# info flag and is replaced by a web search, which counts towards limits.max_web_searches.
+#
+# Public pages only (data sharing is on for the API key). Add a fund by its ISIN and a market by
+# the market name the report uses (the benchmark without words like "Index", "NUK", "TR").
+# topic: fund_news (the fund's own pages) or market_drivers (the index provider's page).
+
+fetch:
+  timeout_seconds: 15
+  min_page_chars: 400        # less text than this after removing HTML = nearly empty
+  max_page_chars: 12000      # text sent to the Search Agent is cut to this length
+  user_agent: "Mozilla/5.0 (compatible; FundPerformanceAgent/1.0; public pages only)"
+
+vetting:
+  market_grace_days: 31      # market reviews come out just after the period: keep those dated up to 31 days after its end
+
+funds:
+  GB00BJS8SH10:              # Fidelity Index US Fund P Accumulation (Test 1)
+    - name: Fidelity fund page
+      url: https://www.fidelity.co.uk/factsheet-data/factsheet/GB00BJS8SH10-fidelity-index-us-fund-p-acc/key-statistics
+      topic: fund_news
+    - name: Fidelity charges and key documents page
+      url: https://www.fidelity.co.uk/factsheet-data/factsheet/GB00BJS8SH10-fidelity-index-us-fund-p-acc/charges-and-key-documents
+      topic: fund_news
+
+markets:
+  "S&P 500":
+    - name: S&P Dow Jones Indices S&P 500 page
+      url: https://www.spglobal.com/spdji/en/indices/equity/sp-500/
+      topic: market_drivers
