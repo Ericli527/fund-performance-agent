@@ -32,6 +32,7 @@ class Pillar:
     sub_ratings: list[SubRating] = field(default_factory=list)
     summary: str | None = None          # short label for the summary page, e.g. "Add peer"
     notes: list[str] = field(default_factory=list)
+    values: dict = field(default_factory=dict)   # the figures behind the reason, for plain wording (Value, Fees)
 
 
 @dataclass
@@ -218,7 +219,9 @@ def value_rating(reported: ReportedFigures, profile: FundProfile, t: Thresholds,
     gap = peer_ann - fund
     rating = _band(gap, t.value.green_max_peer_outperformance_pp, t.value.amber_max_peer_outperformance_pp)
     return Pillar("Value for investors", rating, f"{peer.name} returned {_fmt(gap, ' pp')} a year vs the fund ({n}y, "
-                                                  "annualised, both net of fees)")
+                                                  "annualised, both net of fees)",
+                  values={"peer": peer.name, "years": n, "peer_ann": round(peer_ann, 2), "fund_ann": round(fund, 2),
+                          "gap_pp": round(gap, 2)})
 
 
 def fees_rating(profile: FundProfile, t: Thresholds, peer: Peer | None, performance: str) -> Pillar:
@@ -247,7 +250,9 @@ def fees_rating(profile: FundProfile, t: Thresholds, peer: Peer | None, performa
             if rating == GREEN:
                 rating = AMBER
     return Pillar("Fees", rating, f"OCF {profile.ocf_pct:.2f}% vs {peer.name} {peer.ocf_pct:.2f}% "
-                                  f"(gap {_fmt(gap, ' pp')})", notes=notes)
+                                  f"(gap {_fmt(gap, ' pp')})", notes=notes,
+                  values={"peer": peer.name, "fund_ocf": profile.ocf_pct, "peer_ocf": peer.ocf_pct,
+                          "gap_pp": round(gap, 2)})
 
 
 # --- 6.5 Verdict -------------------------------------------------------------------------------------------------

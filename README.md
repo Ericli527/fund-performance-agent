@@ -44,7 +44,8 @@ cp .env.example .env            # add your OPENAI_API_KEY
 python app.py                   # opens on http://127.0.0.1:7860
 ```
 
-Click **Use the demo files (made-up fund)** and **Run the review** to try it without any AI calls.
+Click **Use the demo files (made-up fund)** and **Run the review** to try it without any AI calls. On your own
+computer, AI runs need no login unless you set `APP_USERNAME` and `APP_PASSWORD` in `.env`.
 
 From the command line:
 
@@ -59,8 +60,10 @@ Tests: `pytest -q` (AI calls are mocked; `pytest --run-live` runs the few live t
 
 1. In the Render dashboard: **New > Blueprint**, pick this repository. `render.yaml` sets up the web service
    (`python app.py`, free plan, deploys from `main`).
-2. Enter the secrets when Render asks: `OPENAI_API_KEY`, and (recommended for a public link) `APP_USERNAME` and
-   `APP_PASSWORD`. `RESEND_API_KEY` and `EMAIL_FROM` are only needed to email the report.
+2. Enter the secrets when Render asks: `OPENAI_API_KEY`, `APP_USERNAME` and `APP_PASSWORD`. On a server, AI runs
+   need this login (on the page); without it, visitors can only run the offline demo, so a public link cannot
+   spend your API credit. `RESEND_API_KEY`, `EMAIL_FROM` and `EMAIL_TO` (the recipients) are only needed to
+   email the report.
 3. After a push to `main`, Render rebuilds and redeploys.
 
 Runs are kept on the server's disk until the next deploy (Render's free plan has no permanent disk).
@@ -72,6 +75,6 @@ Runs are kept on the server's disk until the next deploy (Render's free plan has
 | `config/thresholds.yaml` | Rating thresholds and run limits (illustrative, to be agreed with the oversight team) |
 | `config/models.yaml` | The model for each AI agent |
 | `config/sources.yaml` | Approved web pages per fund and market, fetched by code |
-| `config/settings.yaml` | Timeouts per AI step, and email (off by default; recipients set here only) |
+| `config/settings.yaml` | Timeouts per AI step, and email on/off (off by default; recipients come from `EMAIL_TO`) |
 
 Everything in `data/` is gitignored: the repository is public, so price files, factsheets and KIDs stay local.

@@ -112,7 +112,7 @@ def build_facts(profile: FundProfile, reported: ReportedFigures, card: Scorecard
             "verdict": card.verdict, "verdict_reason": card.verdict_reason,
             "pillars": [{"name": p.name, "rating": p.rating, "reason": p.reason, "summary": p.summary,
                          "sub_ratings": [{"name": s.name, "rating": s.rating, "reason": s.reason} for s in p.sub_ratings],
-                         "notes": p.notes} for p in card.pillars.values()]},
+                         "notes": p.notes, "values": p.values} for p in card.pillars.values()]},
         "decision_path": card.path.steps,
         "data_notes": data_notes(profile, reported, flags),
         "data_flags": [{"check": f.check, "level": f.level, "message": f.message} for f in flags

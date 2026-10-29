@@ -215,19 +215,11 @@ class Timeouts(_Section):
 
 
 class EmailSettings(_Section):
+    """ Recipients are not here: they come from the EMAIL_TO environment variable, so they never reach the public
+    repository """
     enabled: bool
-    recipients: list[str]
     sender: str
     subject: str
-
-    @model_validator(mode="after")
-    def _complete_when_on(self) -> "EmailSettings":
-        if self.enabled and not self.recipients:
-            raise ValueError("email is enabled but no recipients are set")
-        bad = [r for r in self.recipients if "@" not in r]
-        if bad:
-            raise ValueError(f"not an email address: {bad}")
-        return self
 
 
 class RunSettings(_Section):

@@ -97,7 +97,7 @@ Instructions for Claude Code in this project. The build specification is
   Plain wording (decision path, fee note) is for the report only; facts.json and the Analyst keep the codes.
 - Emailing the report is a plain code function (`emailer.py`, not an AI agent), off by default
   (`config/settings.yaml`). Resend over HTTPS, as in the old app (RESEND_API_KEY, EMAIL_FROM in .env).
-  Recipients come from settings only.
+  Recipients come only from the EMAIL_TO environment variable (never the public repo).
 - Evaluator (step 10, gpt-6.1-sol): judges only the market context on 5 checks (no_rating_change,
   supported_claims, sources_cited, check_data_handled, plain_english); output {pass, issues} only; runs only
   on drafts that pass code's checks. Rejected -> "AI text failed quality check: the Evaluator rejected the
@@ -110,4 +110,8 @@ Instructions for Claude Code in this project. The build specification is
   the report's sources list comes from it.
 - Front end (step 11): `src/fund_performance/web.py` + `app.py` (Gradio; Render runs `python app.py`,
   blueprint in `render.yaml`). Public-data warning first; demo = made-up fund in `demo/sample_index_fund`
-  (offline). Optional login via APP_USERNAME/APP_PASSWORD. The old root-level app was removed in step 11.
+  (offline). Results table has a "Why" column. AI runs need the in-page login when APP_USERNAME/APP_PASSWORD
+  are set; without login only the offline demo runs; on a server with no login set up AI runs are off.
+  Page events are private (not in Gradio's API). The old root-level app was removed in step 11.
+- Value and Fees reasons (findings, report, page) give the peer return gap and the fee gap (`plain.py`,
+  from the figures the scorecard keeps in `Pillar.values`).

@@ -196,10 +196,11 @@ def test_email_when_switched_on_goes_through_resend_and_is_logged(tmp_path, monk
     from test_emailer import FakePost
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
     s = settings()
-    s.email = s.email.model_copy(update={"enabled": True, "recipients": ["oversight@example.com"]})
+    monkeypatch.setenv("EMAIL_TO", "oversight@example.com")
+    s.email = s.email.model_copy(update={"enabled": True})
     post = FakePost()
     result = asyncio.run(run_review(TEST1, out_root=tmp_path, offline=True, settings=s,
                                     runners=Runners(email_post=post)))
     email = result.log.step("email")
-    assert email.status == "ok" and email.notes == ["Email: sent to 1 recipient(s) from config/settings.yaml"]
+    assert email.status == "ok" and email.notes == ["Email: sent to 1 recipient(s) from EMAIL_TO"]
     assert post.calls[0]["json"]["attachments"][0]["filename"] == "report.pdf"

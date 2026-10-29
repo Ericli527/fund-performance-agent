@@ -20,6 +20,7 @@ from fund_performance.agents.evaluator import Review
 from fund_performance.glossary import glossary_lines
 from fund_performance.models import DataFlag
 from fund_performance.number_guard import check_labels, check_ratings, numbers_in
+from fund_performance.plain import plain_peer_reason
 
 MIN_ACTIONS, MAX_ACTIONS = 2, 3
 MAX_CONTEXT_SENTENCES = 3
@@ -308,14 +309,18 @@ def _note_sentence(note: dict, years: int) -> str | None:
 
 
 def _other_ratings_sentence(pillars: dict) -> str:
+    """ Value for investors and Fees, each with its reason: the peer return gap and the fee gap """
     parts = []
     for name, p in pillars.items():
         if name in ("Mandate", "Performance"):
             continue
-        parts.append(f"{name} needs a peer fund to be judged" if p.get("summary") == "Add peer"
-                     else _rating_phrase(name, p["rating"]))
-    text = "; ".join(parts)
-    return (text[:1].upper() + text[1:] + ".") if text else "The figures and their sources are on pages 2 and 3."
+        if p.get("summary") == "Add peer":
+            parts.append(f"{name} needs a peer fund to be judged.")
+        elif (reason := plain_peer_reason(name, p.get("values") or {})) and p["rating"] in RATING_IN_WORDS:
+            parts.append(f"{_rating_phrase(name, p['rating'])}: {reason}.")
+        else:
+            parts.append(f"{_rating_phrase(name, p['rating'])}: {_plain(p['reason'])}.")
+    return " ".join(parts) or "The figures and their sources are on pages 2 and 3."
 
 
 def template(facts: dict) -> AnalystOutput:

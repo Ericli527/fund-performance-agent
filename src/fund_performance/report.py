@@ -22,6 +22,7 @@ from fund_performance.facts import TWO_DP
 from fund_performance.glossary import used_in
 from fund_performance.mandate import DecisionPath
 from fund_performance.models import DataFlag, Figure, FundProfile, Peer
+from fund_performance.plain import plain_peer_reason
 from fund_performance.precedence import ReportedFigures
 from fund_performance.scorecard import AMBER, CHECK_DATA, GREEN, MANUAL_CHECK, RED, Scorecard
 
@@ -118,6 +119,8 @@ def plain_reason(inp: ReportInputs, name: str) -> str:
         return f"Add peer: no comparison fund was supplied, so {what} cannot be judged."
     if pillar.rating in (MANUAL_CHECK, CHECK_DATA):
         return pillar.reason.replace(f"{n}y", f"{n} years")
+    if (peer_reason := plain_peer_reason(name, pillar.values)):
+        return peer_reason[:1].upper() + peer_reason[1:] + "."
     if name == "Mandate" and inp.profile.objective_type == "index_tracker":
         r2 = _f(inp, f"relative.r2.{n}y") or _f(inp, "risk.pnav.r2.3y")
         beta = _f(inp, f"relative.beta.{n}y") or _f(inp, "risk.pnav.beta.3y")

@@ -38,7 +38,7 @@ from fund_performance.io import detect_file_type, read_document, read_json, read
 from fund_performance.mandate import decision_path
 from fund_performance.models import DataFlag, FactsheetPerformance, FundProfile, Peer
 from fund_performance.precedence import apply_precedence
-from fund_performance.report import ReportInputs, ReportLayoutError, build_report
+from fund_performance.report import ReportInputs, ReportLayoutError, build_report, plain_reason
 from fund_performance.scorecard import score
 
 DEFAULT_QUESTION = "Is this index fund meeting its mandate, and is its fee justified?"
@@ -123,6 +123,7 @@ class RunResult:
     log: RunLog
     narrative: Narrative | None = None
     facts: dict | None = None
+    reasons: dict[str, str] = field(default_factory=dict)    # one-line plain reason per rating, as on report page 1
 
 
 def _now() -> str:
@@ -341,10 +342,10 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     text_log += [f"[{f.level}] {f.message}" for f in flags]
     log.end(step, outputs={"pdf": str(pdf)})
 
-    # 10. Email (plain code, off by default; recipients from settings only)
+    # 10. Email (plain code, off by default; recipients from EMAIL_TO only)
     step = log.start("email")
     line = send_report(pdf, s.email, profile.fund_name, f"{profile.as_of_date:%d %b %Y}",
                        **({"post": r.email_post} if r.email_post else {}))
     text_log.append(line)
     log.end(step, "ok" if line.startswith("Email: sent") else "failed" if s.email.enabled else "skipped", notes=[line])
-    return RunResult(pdf, run_dir, log, narrative, facts)
+    return RunResult(pdf, run_dir, log, narrative, facts, {name: plain_reason(inputs, name) for name in card.pillars})

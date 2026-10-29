@@ -584,10 +584,15 @@ Keep the manager's published Value Assessment Report out of the agent's inputs. 
 11. **Gradio front end** (upload files, ask the question, download the PDF); deploy as with the existing project.
     As built: `src/fund_performance/web.py` (the page) and `app.py` (starts it; Render runs `python app.py`). The
     page shows the public-data warning first; uploads go to a fresh folder for the controller; it shows the draft
-    verdict, ratings, findings and actions, with the PDF and log.json to download; a run that cannot be scored
-    shows the controller's message. "Use the demo files" loads a made-up fund (`demo/sample_index_fund`) and ticks
-    "Offline" (no AI calls). Optional login (APP_USERNAME, APP_PASSWORD); MAX_CONCURRENT_RUNS reviews at once;
-    uploads up to 20 MB. `render.yaml` keeps the old service name, so the existing Render service is updated. The
+    verdict, the ratings with a "Why" column (the same one-line reasons as report page 1), the findings and actions,
+    with the PDF and log.json to download; a run that cannot be scored shows the controller's message. "Use the
+    demo files" loads a made-up fund (`demo/sample_index_fund`) and ticks "Offline" (no AI calls).
+    Protecting the API key: when APP_USERNAME and APP_PASSWORD are set, AI runs need the in-page login; without
+    it, only the offline demo runs (files checked byte for byte against the demo). On a server with no login set
+    up, AI runs are off; on your own computer (no PORT) they are on. Checked on the server for every run. Login:
+    constant-time comparison, 5 tries per visitor, logins paused after 20 failures in 10 minutes; the page's
+    events are not exposed through Gradio's API. MAX_CONCURRENT_RUNS reviews at once; uploads up to 20 MB.
+    Value and Fees findings and reasons give the peer return gap and the fee gap (from `Pillar.values`). `render.yaml` keeps the old service name, so the existing Render service is updated. The
     old root-level app is removed.
 12. **Run all 4 test cases**, compare Test 1 with the published Value Assessment Report, and record results in `tests/RESULTS.md`.
 

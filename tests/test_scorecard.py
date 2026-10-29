@@ -291,3 +291,20 @@ def test_manual_check_is_named_in_the_reason_and_listed_for_the_approval_box():
     assert card.pillars["Mandate"].rating == MANUAL_CHECK
     assert card.verdict == "Retain" and card.verdict_reason.endswith("Mandate need a reviewer check")
     assert [p.name for p in card.manual_checks] == ["Mandate"]
+
+
+def test_value_and_fees_keep_the_figures_behind_their_reasons():
+    """ For plain wording in the findings, the report and the page (owner review of step 11) """
+    from fund_performance.plain import fees_sentence, value_sentence
+    v = {"peer": "P", "years": 5, "peer_ann": 9.0, "fund_ann": 8.5, "gap_pp": 0.5}
+    assert value_sentence(v) == "the peer, P, returned 0.50 pp a year more than the fund over 5 years, both after fees"
+    assert value_sentence(v | {"gap_pp": 0.0}).startswith("the peer, P, returned the same as the fund")
+    f = {"peer": "P", "fund_ocf": 0.06, "peer_ocf": 0.10, "gap_pp": -0.04}
+    assert fees_sentence(f) == "the fund's 0.06% yearly ongoing charge (OCF) is 0.04 pp below the peer's 0.10%"
+
+
+def test_value_and_fees_pillars_carry_their_values():
+    pillar = sc.value_rating(figures(fund_nav__ann__5y=13.8), profile(), T, peer(y5=13.5))
+    assert pillar.values["gap_pp"] == -0.3 and pillar.values["years"] == 5
+    fees = sc.fees_rating(profile(ocf_pct=0.06), T, peer(ocf=0.03), GREEN)
+    assert fees.values == {"peer": fees.values["peer"], "fund_ocf": 0.06, "peer_ocf": 0.03, "gap_pp": 0.03}

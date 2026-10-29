@@ -114,7 +114,20 @@ def test_code_writes_one_finding_per_data_note_and_defines_pp_once():
 
 def test_without_data_notes_the_other_ratings_fill_in():
     findings = code_findings(FACTS)
-    assert findings[1] == "Value for investors needs a peer fund to be judged; Fees needs a peer fund to be judged."
+    assert findings[1] == "Value for investors needs a peer fund to be judged. Fees needs a peer fund to be judged."
+
+
+def test_value_and_fees_findings_give_their_reasons():
+    """ Owner review of step 11: the colour alone is not enough; give the peer return gap and the fee gap """
+    with_peer = FACTS | {"scorecard": FACTS["scorecard"] | {"pillars": FACTS["scorecard"]["pillars"][:2] + [
+        {"name": "Value for investors", "rating": "GREEN", "reason": "x", "summary": None,
+         "values": {"peer": "Sample Tracker B", "years": 5, "peer_ann": 8.6, "fund_ann": 9.77, "gap_pp": -1.17}},
+        {"name": "Fees", "rating": "GREEN", "reason": "x", "summary": None,
+         "values": {"peer": "Sample Tracker B", "fund_ocf": 0.10, "peer_ocf": 0.05, "gap_pp": 0.05}}]}}
+    assert code_findings(with_peer)[1] == (
+        "Value for investors is Green: the peer, Sample Tracker B, returned 1.17 pp a year less than the fund over 5 "
+        "years, both after fees. Fees is Green: the fund's 0.10% yearly ongoing charge (OCF) is 0.05 pp above the "
+        "peer's 0.05%.")
 
 
 def test_the_narrative_puts_code_and_ai_text_together():

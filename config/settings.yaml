@@ -4,8 +4,9 @@
 #   failed step (flagged in the report), so one slow call cannot hold up the review.
 # email: sending the report is plain code (not an AI agent) and is OFF by default. It goes through Resend over
 #   HTTPS (as in the old app; Render's free plan blocks SMTP ports). The key is RESEND_API_KEY in .env, never in
-#   this file. Recipients come from this file only. Sender: `sender` below, else EMAIL_FROM in .env, else
-#   Resend's test sender (delivers only to your Resend account's address). Only the PDF of public data is sent.
+#   this file. Recipients come only from EMAIL_TO in .env (or Render's environment), comma-separated, so they are
+#   never in the public repository. Sender: `sender` below, else EMAIL_FROM, else Resend's test sender (delivers
+#   only to your Resend account's address). Only the PDF of public data is sent.
 
 timeouts_seconds:
   extractor: 180
@@ -15,6 +16,5 @@ timeouts_seconds:
 
 email:
   enabled: false
-  recipients: []       # e.g. ["oversight-team@example.com"]
   sender: ""           # e.g. "Fund Report <reports@yourdomain.com>" (a domain verified in Resend)
   subject: "Fund performance review (draft): {fund_name}, figures to {as_of_date}"

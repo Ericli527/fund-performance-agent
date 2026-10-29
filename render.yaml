@@ -22,6 +22,8 @@ services:
         sync: false
       - key: EMAIL_FROM
         sync: false
+      - key: EMAIL_TO                    # comma-separated recipients; kept out of the public repository
+        sync: false
       # Plain settings
       - key: MAX_CONCURRENT_RUNS
         value: "2"

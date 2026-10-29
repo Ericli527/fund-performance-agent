@@ -1,12 +1,12 @@
-""" Emailing the report (step 10): plain code, off by default, Resend over HTTPS, recipients from settings only """
+""" Emailing the report (step 10): plain code, off by default, Resend over HTTPS, recipients from EMAIL_TO only """
+from pathlib import Path
 import base64
 import pytest
 import requests
 from fund_performance.config import EmailSettings, load_settings
 from fund_performance.emailer import RESEND_URL, TEST_SENDER, send_report
 
-ON = EmailSettings(enabled=True, recipients=["oversight@example.com", "director@example.com"], sender="",
-                   subject="Fund performance review (draft): {fund_name}, figures to {as_of_date}")
+ON = EmailSettings(enabled=True, sender="", subject="Fund performance review (draft): {fund_name}, figures to {as_of_date}")
 
 
 class FakePost:
@@ -34,12 +34,14 @@ def pdf(tmp_path):
 @pytest.fixture
 def resend_key(monkeypatch):
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
+    monkeypatch.setenv("EMAIL_TO", "oversight@example.com, director@example.com")
     monkeypatch.delenv("EMAIL_FROM", raising=False)
 
 
-def test_email_is_off_by_default():
+def test_email_is_off_by_default_and_has_no_recipients_in_the_repo():
     s = load_settings().email
-    assert s.enabled is False and s.recipients == []
+    assert s.enabled is False and "recipients" not in EmailSettings.model_fields
+    assert "@" not in (Path(__file__).resolve().parents[1] / "config" / "settings.yaml").read_text().split("email:")[1]
 
 
 def test_off_means_nothing_is_sent(pdf, resend_key):
@@ -48,11 +50,11 @@ def test_off_means_nothing_is_sent(pdf, resend_key):
     assert post.calls == []
 
 
-def test_sends_through_resend_to_the_configured_recipients_only(pdf, resend_key):
+def test_sends_through_resend_to_the_email_to_recipients_only(pdf, resend_key):
     post = FakePost()
     line = send_report(pdf, ON, "Fidelity Index US Fund P Accumulation", "30 Sep 2026", post=post)
     call = post.calls[0]
-    assert line == "Email: sent to 2 recipient(s) from config/settings.yaml"
+    assert line == "Email: sent to 2 recipient(s) from EMAIL_TO"
     assert call["url"] == RESEND_URL and call["headers"] == {"Authorization": "Bearer re_test"}
     assert call["json"]["to"] == ["oversight@example.com", "director@example.com"]
     assert call["json"]["from"] == TEST_SENDER                                   # no sender set anywhere
@@ -81,8 +83,8 @@ def test_failures_never_raise(pdf, resend_key, monkeypatch):
     assert send_report(pdf, ON, "F", "d", post=FakePost()) == "Email: not sent, RESEND_API_KEY is missing from .env"
 
 
-def test_email_settings_are_checked():
-    with pytest.raises(ValueError, match="no recipients are set"):
-        EmailSettings(**(ON.model_dump() | {"recipients": []}))
-    with pytest.raises(ValueError, match="not an email address"):
-        EmailSettings(**(ON.model_dump() | {"recipients": ["oversight team"]}))
+def test_missing_or_bad_email_to_is_not_sent(pdf, resend_key, monkeypatch):
+    monkeypatch.delenv("EMAIL_TO")
+    assert send_report(pdf, ON, "F", "d", post=FakePost()) == "Email: not sent, EMAIL_TO is not set"
+    monkeypatch.setenv("EMAIL_TO", "oversight team")
+    assert send_report(pdf, ON, "F", "d", post=FakePost()).startswith("Email: not sent, EMAIL_TO has an entry")
