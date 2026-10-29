@@ -13,11 +13,12 @@ import json
 from pathlib import Path
 from fund_performance.agents.analyst import Narrative, template, write_narrative
 from fund_performance.agents.mandate import read_mandate
-from fund_performance.agents.research import research, vet_summaries
+from fund_performance.agents.research import market_name, research, vet_summaries
 from fund_performance.calc import calculate
 from fund_performance.checks import check_prices
-from fund_performance.config import load_thresholds
+from fund_performance.config import load_sources, load_thresholds
 from fund_performance.facts import build_facts
+from fund_performance.fetch import fetch_pages
 from fund_performance.io import detect_file_type, read_json, read_prices
 from fund_performance.mandate import decision_path
 from fund_performance.models import DataFlag, FactsheetPerformance, FundProfile, Peer
@@ -27,7 +28,7 @@ from fund_performance.scorecard import score
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_QUESTION = "Is this index fund meeting its mandate, and is its fee justified?"
-OFFLINE_NOTE = "Offline run: AI steps skipped (no Mandate Agent, web research or Analyst)"
+OFFLINE_NOTE = "Offline run: AI steps skipped (no Mandate Agent, approved sources, web research or Analyst)"
 
 
 def find_inputs(folder: Path) -> dict:
@@ -77,7 +78,9 @@ async def run_review(folder: Path, question: str, out_root: Path, offline: bool 
     if offline:
         narrative = Narrative(template(facts), "template")
     else:
-        found = await research(profile, card, t.limits.max_web_searches)
+        sources = load_sources()
+        pages = await fetch_pages(sources.for_fund(profile.isin, market_name(profile)), sources.fetch)
+        found = await research(profile, card, t.limits.max_web_searches, pages)
         vetted, vet_flags, vet_log = vet_summaries(found.summaries, profile, facts)
         flags += found.flags + vet_flags
         log += found.log + vet_log

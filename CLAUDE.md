@@ -74,13 +74,17 @@ Instructions for Claude Code in this project. The build specification is
   shared glossary (`glossary.py`, also printed at the end of the report in step 9); sentences under
   20 words; "Draft verdict"; one "below the surface" finding from the data notes (written by code);
   actions say what and when; market context uses no figures from search summaries.
-- Research (`agents/research.py`): Planner gets public fund details and ratings only; max 5 searches
-  (config), run in parallel, one each, no retries; failures are left out with a flag. Market-driver
+- Research (`agents/research.py`): approved sources in `config/sources.yaml` are fetched by code
+  (`fetch.py`; no AI chooses URLs) and summarised by a Search agent with no web tool, with the same
+  checks as web results. A failed or nearly empty page: info flag + a code-written web search, taking
+  the budget first. Then at most 3 web searches in total (config), only for fund/manager changes and
+  market drivers. Planner gets public fund details and ratings only; searches run in parallel, one
+  each, no retries; failures are left out with a flag. Market-driver
   queries never name the fund (code drops them). Summaries with no date, outside the review period,
   or with fund/index returns >0.5 pp from the factsheet are excluded with an info flag. Market
   context cites [1], [2]; URLs only in the report's sources list. No minus sign after "behind"/
   "below" (code check). "As at" dates count; fund news must match name/ISIN/share class (no sec.gov for
-  non-US funds), market news must name the market. v2: MCP Fetch with an approved source list.
+  non-US funds), market news must name the market. v2: MCP Fetch for agent-chosen URLs.
 - Risk-free rate: 0 for v1, with a flag. Prefer the factsheet Sharpe ratios where supplied.
 - Charts are built in step 9 with the report.
 - Report (step 9): 3 main pages (Summary; Mandate and performance; Value, fees and AoV) plus an

@@ -1,5 +1,5 @@
-""" Loads config/thresholds.yaml (every threshold the spec needs) and config/models.yaml (the model
-for each AI agent), and checks both """
+""" Loads config/thresholds.yaml (every threshold the spec needs), config/models.yaml (the model
+for each AI agent) and config/sources.yaml (approved pages fetched by code), and checks them """
 from pathlib import Path
 import os
 from typing import Literal, get_args
@@ -154,3 +154,43 @@ class ModelsConfig(_Section):
 def load_models(path: str | Path = MODELS_PATH) -> ModelsConfig:
     with open(path, encoding="utf-8") as f:
         return ModelsConfig.model_validate(yaml.safe_load(f))
+
+
+# --- config/sources.yaml: approved pages that code fetches directly -------------------------------------
+
+SOURCES_PATH = Path(__file__).resolve().parents[2] / "config" / "sources.yaml"
+
+
+class FetchSettings(_Section):
+    timeout_seconds: float
+    min_page_chars: int
+    max_page_chars: int
+    user_agent: str
+
+
+class ApprovedSource(_Section):
+    name: str
+    url: str
+    topic: Literal["fund_news", "market_drivers"]
+
+    @model_validator(mode="after")
+    def _https(self) -> "ApprovedSource":
+        if not self.url.startswith("https://"):
+            raise ValueError(f"approved source {self.name!r} must use https://")
+        return self
+
+
+class SourcesConfig(_Section):
+    fetch: FetchSettings
+    funds: dict[str, list[ApprovedSource]] = {}
+    markets: dict[str, list[ApprovedSource]] = {}
+
+    def for_fund(self, isin: str, market: str) -> list[ApprovedSource]:
+        """ The fund's own pages (by ISIN) and its market's pages (by market name), fund pages first """
+        markets = {k.lower(): v for k, v in self.markets.items()}
+        return self.funds.get(isin.upper(), []) + markets.get(market.lower(), [])
+
+
+def load_sources(path: str | Path = SOURCES_PATH) -> SourcesConfig:
+    with open(path, encoding="utf-8") as f:
+        return SourcesConfig.model_validate(yaml.safe_load(f))

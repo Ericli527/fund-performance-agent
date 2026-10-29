@@ -1,9 +1,16 @@
-""" Planner and Search agents (spec Sections 8 and 8.2): up to 5 web searches about the fund, its manager and
-what drove its market in the review period, run in parallel, one search each, no retries.
+""" Planner and Search agents (spec Sections 8 and 8.2): approved sources plus up to 3 web searches.
+
+1. Approved sources (config/sources.yaml): code fetches the fund's and the index provider's pages directly
+   (fetch.py), and a Search agent summarises each page's text. No AI chooses these URLs.
+2. A page that failed or came back nearly empty gets an info flag and a web search instead. These fallback
+   searches use the web-search budget first.
+3. The Planner gets what is left of the budget, for fund or manager changes and what drove the market in
+   the review period. Searches run in parallel, one search each, no retries.
 
 Only public facts reach these agents: the Planner sees the fund's name, ISIN, share class, benchmark,
 objective type, review period and ratings, and never figures, uploaded documents or client data; each Search
-agent sees only its query and the reason for it. Data sharing is on for the API key: public data only.
+agent sees only its query (or a public page) and the reason for it. Data sharing is on for the API key:
+public data only.
 """
 import asyncio
 from dataclasses import dataclass, field
@@ -13,6 +20,7 @@ from typing import Literal
 from agents import WebSearchTool
 from pydantic import BaseModel, ConfigDict
 from fund_performance.agents.base import RunFn, build_agent, run_structured
+from fund_performance.fetch import FetchedPage
 from fund_performance.models import DataFlag, FundProfile
 from fund_performance.scorecard import Scorecard
 
@@ -29,8 +37,11 @@ PLANNER_INSTRUCTIONS = """
 You plan web searches for an investment oversight review of one fund. Return up to {max_searches} search
 queries, each with a topic and a one-line reason.
 
+The fund's own pages and the index provider's page are already read from approved sources, so search
+only for changes and for what drove the market.
+
 Topics:
-- fund_news: news about this fund or share class (e.g. changes to the fund, its fees or its index).
+- fund_news: changes to this fund or share class (e.g. its fees, its index, a merger or closure).
 - manager_changes: changes at the fund manager or the team that runs the fund.
 - market_drivers: what drove the fund's market in the review period.
 
@@ -60,6 +71,20 @@ You run one web search for an investment oversight review and summarise what you
 """
 
 
+PAGE_INSTRUCTIONS = """
+You summarise one public web page for an investment oversight review. The page text is given to you; do not
+search the web.
+
+- Summary: 2 to 4 short sentences in plain English on what the page says that matters for the reason
+  given. Only report what the page says. No opinions, no investment advice.
+- date: the page's publication date as YYYY-MM-DD, with date_basis "published". If there is no
+  publication date but the page states an "as at", "as of" or "updated" date, give that date with
+  date_basis "as_at". If the page shows no date at all, give null for both.
+"""
+PAGE_REASONS = {"fund_news": "What the fund's own page says about the fund, its fees, its index and its documents",
+                "market_drivers": "What the index provider says about the market in the review period"}
+
+
 class PlannedSearch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     topic: Topic
@@ -81,10 +106,17 @@ class SearchSummary(BaseModel):
     date_basis: Literal["published", "as_at"] | None
 
 
+class PageSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    summary: str
+    date: str | None
+    date_basis: Literal["published", "as_at"] | None
+
+
 @dataclass
 class Research:
     plan: list[PlannedSearch] = field(default_factory=list)
-    summaries: list[dict] = field(default_factory=list)       # {query, summary, url, date}, for the Analyst
+    summaries: list[dict] = field(default_factory=list)       # {query, topic, summary, url, date, date_basis}
     flags: list[DataFlag] = field(default_factory=list)
     log: list[str] = field(default_factory=list)
 
@@ -96,6 +128,11 @@ def planner_agent(max_searches: int):
 def search_agent():
     return build_agent("Search Agent", SEARCH_INSTRUCTIONS, SearchSummary, "search",
                        tools=[WebSearchTool(search_context_size="low")], tool_choice="required")
+
+
+def page_agent():
+    """ The Search agent's approved-page mode: no web tool, it reads only the text code fetched """
+    return build_agent("Search Agent (approved page)", PAGE_INSTRUCTIONS, PageSummary, "search")
 
 
 def review_period(profile: FundProfile) -> tuple[date, date]:
@@ -135,7 +172,7 @@ def review_months(profile: FundProfile) -> int:
     return (end.year - start.year) * 12 + end.month - start.month
 
 
-def planner_input(profile: FundProfile, card: Scorecard) -> str:
+def planner_input(profile: FundProfile, card: Scorecard, covered: list[str] | None = None) -> str:
     """ Public fund details and the ratings only: no figures, documents or client data """
     start, end = review_period(profile)
     ratings = "; ".join(f"{p.name}: {p.rating}" for p in card.pillars.values())
@@ -147,7 +184,8 @@ def planner_input(profile: FundProfile, card: Scorecard) -> str:
             f"Objective type: {profile.objective_type}\n"
             f"Review period: {period} ({start:%d %b %Y} to {end:%d %b %Y}; "
             f"main test period: {profile.time_horizon_years} years to {end:%d %b %Y})"
-            f"{whole}\nRatings: {ratings}\nDraft verdict: {card.verdict}")
+            f"{whole}\nRatings: {ratings}\nDraft verdict: {card.verdict}"
+            + (f"\nAlready read from approved sources: {'; '.join(covered)}" if covered else ""))
 
 
 def tidy_plan(plan: SearchPlan, max_searches: int, profile: FundProfile | None = None) -> tuple[list[PlannedSearch], list[str]]:
@@ -167,6 +205,47 @@ def tidy_plan(plan: SearchPlan, max_searches: int, profile: FundProfile | None =
     if len(kept) > max_searches:
         log.append(f"Planner asked for {len(kept)} searches; only the first {max_searches} are run")
     return kept[:max_searches], log
+
+
+def _period_words(profile: FundProfile) -> str:
+    start, end = review_period(profile)
+    return f"{start + timedelta(days=1):%b %Y} to {end:%b %Y}"
+
+
+def fallback_search(page: FetchedPage, profile: FundProfile) -> PlannedSearch:
+    """ The web search that replaces an approved page that could not be read. Code writes the query """
+    period = _period_words(profile)
+    if page.source.topic == "market_drivers":
+        return PlannedSearch(topic="market_drivers", query=f"{market_name(profile)} review {period}",
+                             reason=f"Replaces the approved page '{page.source.name}': what drove the market in the review period")
+    return PlannedSearch(topic="fund_news", query=f"{profile.fund_name} {profile.isin} fund changes {period}",
+                         reason=f"Replaces the approved page '{page.source.name}': changes to the fund, its fees or its index")
+
+
+def _check_page(page: FetchedPage):
+    def check(out: PageSummary) -> dict:
+        summary = " ".join(out.summary.split())
+        if not summary:
+            raise ValueError("empty summary")
+        try:
+            when = date.fromisoformat(out.date).isoformat() if out.date else None
+        except ValueError:
+            when = None
+        # The URL is the approved one from the config, never one the agent gives
+        return {"query": f"Approved source: {page.source.name}", "topic": page.source.topic,
+                "summary": summary[:MAX_SUMMARY_CHARS], "url": page.source.url, "title": page.title,
+                "date": when, "date_basis": (out.date_basis or "published") if when else None}
+    return check
+
+
+async def summarise_page(page: FetchedPage, run: RunFn | None = None) -> tuple[dict | None, str]:
+    """ One approved page, summarised once (no retries, like a search) """
+    prompt = (f"Source: {page.source.name}\nReason: {PAGE_REASONS[page.source.topic]}\n"
+              f"Page title: {page.title or 'none'}\n\nPage text:\n{page.text}")
+    result = await run_structured(page_agent(), prompt, PageSummary, convert=_check_page(page), run=run, attempts=1)
+    if result.ok:
+        return result.output, f"Read approved source: {page.source.name}"
+    return None, f"Approved source left out ({page.source.name}): {'; '.join(result.errors)}"
 
 
 def _check_summary(planned: PlannedSearch):
@@ -196,28 +275,71 @@ async def search_one(planned: PlannedSearch, run: RunFn | None = None) -> tuple[
     return None, f"Search left out ({planned.query}): {'; '.join(result.errors)}"
 
 
-async def research(profile: FundProfile, card: Scorecard, max_searches: int, run_planner: RunFn | None = None,
-                   run_search: RunFn | None = None) -> Research:
-    """ Plan, then run the searches in parallel. Research is optional: if it fails, the review goes on
-    without market context """
+async def research(profile: FundProfile, card: Scorecard, max_searches: int, pages: list[FetchedPage] = (),
+                   run_planner: RunFn | None = None, run_search: RunFn | None = None,
+                   run_page: RunFn | None = None) -> Research:
+    """ Approved pages first, then web searches: fallbacks for pages that could not be read, then the
+    Planner's searches with what is left of max_searches. Research is optional: if it fails, the review
+    goes on without market context """
     out = Research()
-    planned = await run_structured(planner_agent(max_searches), planner_input(profile, card), SearchPlan, run=run_planner)
-    if not planned.ok:
-        out.flags.append(DataFlag(check="research", level="warning",
-                                  message="No web research: the Planner gave no valid plan, so there is no market context"))
-        out.log.append("Planner failed: " + "; ".join(planned.errors))
-        return out
-    out.plan, notes = tidy_plan(planned.output, max_searches, profile)
-    out.log += notes
-    results = await asyncio.gather(*(search_one(item, run_search) for item in out.plan))
-    for summary, line in results:
+    readable = [p for p in pages if p.ok]
+    fallbacks: list[PlannedSearch] = []
+    for page in pages:
+        if page.ok:
+            continue
+        search = fallback_search(page, profile)
+        new = search.query.lower() not in {f.query.lower() for f in fallbacks}
+        if new and len(fallbacks) < max_searches:
+            fallbacks.append(search)
+        replaced = "web search used instead" if new and search in fallbacks else (
+            "covered by the same web search as another page" if not new else "no web search left to replace it")
+        out.flags.append(DataFlag(check="research", level="info",
+                                  message=f"Approved source {page.source.name} {page.problem}: {replaced} ({page.source.url})"))
+    left = max_searches - len(fallbacks)
+
+    async def planned_searches() -> list[PlannedSearch]:
+        if left <= 0:
+            out.log.append("No planned web searches: the budget went to replacing approved pages")
+            return []
+        covered = [p.source.name for p in readable]
+        planned = await run_structured(planner_agent(left), planner_input(profile, card, covered), SearchPlan,
+                                       run=run_planner)
+        if not planned.ok:
+            out.flags.append(DataFlag(check="research", level="warning",
+                                      message="No planned web searches: the Planner gave no valid plan"))
+            out.log.append("Planner failed: " + "; ".join(planned.errors))
+            return []
+        kept, notes = tidy_plan(planned.output, left, profile)
+        out.log += notes
+        return [k for k in kept if k.query.lower() not in {f.query.lower() for f in fallbacks}]
+
+    page_results, plan = await asyncio.gather(
+        asyncio.gather(*(summarise_page(p, run_page) for p in readable)), planned_searches())
+    out.plan = fallbacks + plan
+    search_results = await asyncio.gather(*(search_one(item, run_search) for item in out.plan))
+
+    for summary, line in page_results:
         out.log.append(line)
         if summary is not None:
             out.summaries.append(summary)
-    failed = len(out.plan) - len(out.summaries)
-    if failed:
+    unread = len(readable) - len(out.summaries)
+    if unread:
         out.flags.append(DataFlag(check="research", level="info",
-                                  message=f"{failed} of {len(out.plan)} web searches gave no usable result and were left out"))
+                                  message=f"{unread} of {len(readable)} approved sources could not be summarised and were left out"))
+    found = 0
+    for summary, line in search_results:
+        out.log.append(line)
+        if summary is not None:
+            out.summaries.append(summary)
+            found += 1
+    if len(out.plan) - found:
+        out.flags.append(DataFlag(check="research", level="info",
+                                  message=f"{len(out.plan) - found} of {len(out.plan)} web searches gave no usable result and were left out"))
+    out.log.append(f"Research: {len(readable)} of {len(pages)} approved sources read; "
+                   f"{len(out.plan)} of at most {max_searches} web searches run ({len(fallbacks)} replacing approved pages)")
+    if not out.summaries:
+        out.flags.append(DataFlag(check="research", level="warning",
+                                  message="No web research results, so there is no market context"))
     return out
 
 

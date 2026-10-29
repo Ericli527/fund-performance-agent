@@ -3,7 +3,7 @@
 Purpose: fund documents in, a 3-page performance review (plus an appendix) out.
 **Code does the maths and the decisions. AI reads and writes. A person makes the final call.**
 
-This spec follows the design diagram `Fund_Performance_Agent_Overview.pdf` (workflow controller in code, 7 steps, 6 AI agents, 4 oversight questions, max 5 web searches in the demo, 3-page report plus an appendix, 1 person signs off). The 6 AI agents are: Extractor, Mandate, Planner, Search (several copies run in parallel), Oversight Analyst, Evaluator. Build in the order given in Section 11.
+This spec follows the design diagram `Fund_Performance_Agent_Overview.pdf` (workflow controller in code, 7 steps, 6 AI agents, 4 oversight questions, approved sources + up to 3 web searches in the demo, 3-page report plus an appendix, 1 person signs off). The 6 AI agents are: Extractor, Mandate, Planner, Search (several copies run in parallel), Oversight Analyst, Evaluator. Build in the order given in Section 11.
 
 ---
 
@@ -15,7 +15,7 @@ This spec follows the design diagram `Fund_Performance_Agent_Overview.pdf` (work
 4. **Every number has a source.** Each figure carries a `source` field: `factsheet`, `calculated`, `ai_extracted` (must be labelled "please verify"), or `web`.
 5. **The AI explains but cannot change.** The Oversight Analyst may only quote numbers present in the facts JSON it is given (enforced by a validator, Section 8.3).
 6. **A person decides.** The verdict is a draft until the reviewer signs Retain / Monitor / Review.
-7. **Kept in bounds.** At most 5 web searches per run (demo setting, in config); public data only; no confidential client data uploaded. This API key has OpenAI data sharing on: public data only, never upload confidential or client data.
+7. **Kept in bounds.** Approved sources (fetched by code from `config/sources.yaml`) plus at most 3 web searches per run (demo setting, in config); public data only; no confidential client data uploaded. This API key has OpenAI data sharing on: public data only, never upload confidential or client data.
 9. **Code controls the flow.** A workflow controller in code runs the steps in a fixed order. No AI agent decides which step runs next.
 8. **All thresholds live in `config/thresholds.yaml`**, are printed in the report, and are clearly labelled as illustrative until agreed with the oversight team.
 
@@ -315,8 +315,8 @@ All agents return structured JSON validated with Pydantic. Use the OpenAI Agents
 |---|---|---|---|
 | Extractor | Factsheet/KID text | `factsheet_performance.json`, draft `fund_profile.json` | Labels all values `ai_extracted` |
 | Mandate | `objective_text` | Mandate JSON (Section 5) | Allowed values only |
-| Planner | Fund profile + scorecard | Up to 5 search queries (fund news, manager changes, market drivers for the period) | Max 5 queries |
-| Search (parallel) | One query each | `{query, summary, url, date}` | One search each, no retries |
+| Planner | Fund profile + scorecard | Search queries for fund or manager changes and market drivers for the period | Up to 3 web searches in total, fallbacks for unreadable approved pages first |
+| Search (parallel) | One query each, or the text of one approved page fetched by code | `{query, summary, url, date}` (for a page, the URL comes from the config) | One search or page each, no retries |
 | Oversight Analyst | facts JSON + scorecard + search summaries | Findings, actions, market context | Cannot change ratings; may only quote given numbers |
 | Evaluator | Analyst draft + facts JSON + scorecard + search summaries | `{pass: bool, issues: [..]}` (Section 8.4) | One rewrite only, then template fallback |
 
@@ -341,15 +341,27 @@ All agents return structured JSON validated with Pydantic. Use the OpenAI Agents
   direction and cites the URLs.
 
 ### 8.2 Planner/Search rules
+- Approved sources (step 9b, `config/sources.yaml`): per fund (by ISIN) and per market (by market name), e.g.
+  for Test 1 the Fidelity fund page, the Fidelity charges and key documents page, and the S&P Dow Jones Indices
+  S&P 500 page. Code fetches them directly (`fetch.py`, in parallel); no AI chooses URLs. A Search agent with no
+  web tool summarises each page's text, and the URL in the summary is the one from the config. The summary gets
+  the same date, relevance and figure checks as a web result.
+- A page that fails (HTTP error, no connection) or is nearly empty after removing HTML (JavaScript-only or
+  blocked; under `fetch.min_page_chars`) gets an info flag and is replaced by a web search written by code
+  (fund pages: fund name, ISIN, "fund changes", period; market pages: "<market> review <period>"). These
+  fallbacks use the web-search budget first; two pages that need the same search share one.
+- Web searches: at most `limits.max_web_searches` (3) per run, used only for fund or manager changes and for
+  what drove the market in the review period. The Planner gets what is left after fallbacks, and is told which
+  approved sources were read. If nothing is left, the Planner is not run.
 - Queries must be about the fund, its manager, or market drivers in the review period.
 - Never send client data or uploaded documents to search.
 - Each summary must cite its URL; the report lists all sources.
 - v1 (`agents/research.py`): the Planner sees only public fund details (name, ISIN, share class, benchmark,
   objective type, review period) and the ratings; never figures, uploaded documents or client data. Each Search
-  agent sees only its query and reason. Code caps the plan at `limits.max_web_searches` (5) and drops empty,
+  agent sees only its query and reason. Code caps the plan at what is left of `limits.max_web_searches` (3) and drops empty,
   overlong or repeated queries. Searches run in parallel, one web search each, no retries; a failed search or a
-  summary without a URL is left out (info flag). If the Planner fails twice, the review goes on without market
-  context (warning flag). The report lists the planned query, URL and date of every summary used.
+  summary without a URL is left out (info flag). If the Planner fails twice, the review goes on with the approved
+  sources and fallback searches only (warning flag); with no results at all, there is no market context (warning flag). The report lists the planned query, URL and date of every summary used.
 - Queries: market_drivers queries are about the market, never the fund (e.g. "S&P 500 performance drivers Oct 2025
   to Sep 2026"); code drops any that name the fund. Only fund-specific searches (changes, manager, fees) use the
   fund's name. Prefer news and index-provider sources over fund data pages.
@@ -477,14 +489,14 @@ Keep the manager's published Value Assessment Report out of the agent's inputs. 
 
 ## 11. Build order for Claude Code
 
-1. **Project setup:** modules in the package `src/fund_performance/`: `io.py` (file reader), `checks.py` (Section 3.4), `calc.py` (Section 4), `precedence.py` (factsheet precedence and cross-check, step 4), `facts.py` (the facts JSON, step 7), `number_guard.py` (Section 8.3, step 7), `mandate.py` (decision tree), `scorecard.py` (Section 6), `agents/` (Section 8), `report.py` (Section 9), `controller.py` (Section 8.5); `config/thresholds.yaml`; `tests/`.
+1. **Project setup:** modules in the package `src/fund_performance/`: `io.py` (file reader), `checks.py` (Section 3.4), `calc.py` (Section 4), `precedence.py` (factsheet precedence and cross-check, step 4), `facts.py` (the facts JSON, step 7), `number_guard.py` (Section 8.3, step 7), `mandate.py` (decision tree), `scorecard.py` (Section 6), `agents/` (Section 8), `fetch.py` (approved sources, Section 8.2), `report.py` (Section 9), `controller.py` (Section 8.5); `config/thresholds.yaml`; `tests/`.
 2. **File reader + data checks** with unit tests for Tests 1 and 2 (dates, trailing comma, `-` values, repeated prices, currency mismatch).
 3. **Calculator** with unit tests reproducing the Test 1 figures exactly.
 4. **Factsheet precedence and cross-check** (0.3 pp tolerance).
 5. **Decision tree + scorecard** driven by `thresholds.yaml`; unit tests for each branch (index, active, dual, short history, CHECK DATA).
 6. **Extractor and Mandate agents** with Pydantic schemas.
 7. **Oversight Analyst + number-guard validator.**
-8. **Planner + parallel Search agents** (max 5, no retries).
+8. **Planner + parallel Search agents** (no retries). 9b: approved sources fetched by code + up to 3 web searches.
 9. **PDF report** (3 main pages + appendix, 5 pages at most) with charts and approval box.
 10. **Evaluator agent + workflow controller** (Sections 8.4 and 8.5); unit test that a draft with a changed rating or an unsupported claim is rejected.
 11. **Gradio front end** (upload files, ask the question, download the PDF); deploy as with the existing project.
@@ -507,5 +519,5 @@ Definition of done: all unit tests pass; Test 1 and Test 2 expected values repro
 |---|---|
 | **v1: next two days** | Steps 1 to 11 above on Test 1 (Fidelity Index US Fund). Value and Fees show "Add peer" when no peer is supplied. |
 | **v2: next step** | Peer comparison for value and fees (e.g. SPDR S&P 500 UCITS ETF); run Tests 2, 3 and 4 (currency trap, dual objective, short history, active fund). |
-| **v2: sources** | Option to fetch from an approved source list in config through the MCP Fetch server, instead of open web search. |
+| **v2: sources** | v1 fetches the approved pages in `config/sources.yaml` in code. v2 option: the MCP Fetch server, so an agent can choose and fetch further URLs (checked against an approved-domain list) instead of open web search. |
 | **v3: later** | Agree thresholds and rating rules with the oversight team; adapt inputs to the team's own data and processes. |

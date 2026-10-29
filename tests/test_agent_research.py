@@ -6,9 +6,10 @@ import pytest
 from agents import WebSearchTool
 from agents.exceptions import AgentsException
 from fund_performance.agents.analyst import AnalystOutput, problems, prompt as analyst_prompt, write_narrative
-from fund_performance.agents.research import (FIGURES_DIFFER, planner_agent, planner_input, research, search_agent,
-                                              tidy_plan, vet_summaries, SearchPlan)
-from fund_performance.config import load_thresholds
+from fund_performance.agents.research import (FIGURES_DIFFER, page_agent, planner_agent, planner_input, research,
+                                              search_agent, tidy_plan, vet_summaries, SearchPlan)
+from fund_performance.config import ApprovedSource, load_thresholds
+from fund_performance.fetch import FetchedPage
 from fund_performance.mandate import decision_path
 from fund_performance.models import FundProfile
 from fund_performance.scorecard import Pillar, Scorecard
@@ -43,12 +44,12 @@ def summary_for(prompt_text):
 
 
 def test_limits_and_settings(monkeypatch):
-    assert MAX == 5
+    assert MAX == 3
     for agent in ("PLANNER", "SEARCH"):
         monkeypatch.delenv(f"FUND_MODEL_{agent}", raising=False)
     s = search_agent()
     assert s.model == "gpt-5.4-mini" and isinstance(s.tools[0], WebSearchTool) and s.model_settings.tool_choice == "required"
-    assert planner_agent(MAX).model == "gpt-5.4-mini" and "up to 5" in planner_agent(MAX).instructions
+    assert planner_agent(MAX).model == "gpt-5.4-mini" and "up to 3" in planner_agent(MAX).instructions
 
 
 def test_planner_sees_public_fund_details_only():
@@ -64,7 +65,7 @@ def test_plan_is_capped_and_cleaned():
                                                    "reason": "repeat"}, {"topic": "fund_news", "query": "x" * 300,
                                                                          "reason": "too long"}]))
     kept, log = tidy_plan(raw, MAX)
-    assert len(kept) == 5 and len(log) == 3
+    assert len(kept) == 3 and len(log) == 3
 
 
 def test_searches_run_in_parallel_one_each():
@@ -81,7 +82,7 @@ def test_searches_run_in_parallel_one_each():
         return await asyncio.wait_for(research(profile(), card(), MAX, run_planner=FakeRun(plan(8)),
                                                run_search=FakeRunBy(answer)), timeout=5)
     out = asyncio.run(go())
-    assert len(out.plan) == 5 and len(out.summaries) == 5 and len(started) == 5 and out.flags == []
+    assert len(out.plan) == 3 and len(out.summaries) == 3 and len(started) == 3 and out.flags == []
     assert all(s["url"].startswith("https://") for s in out.summaries)
 
 
@@ -97,9 +98,9 @@ def test_a_failed_search_is_not_retried_and_is_left_out():
     def answer(prompt_text):
         calls[prompt_text] = calls.get(prompt_text, 0) + 1
         return AgentsException("timeout") if "question B" in prompt_text else summary_for(prompt_text)
-    out = asyncio.run(research(profile(), card(), MAX, run_planner=FakeRun(plan(5)), run_search=FakeRunBy(answer)))
-    assert len(out.summaries) == 4 and set(calls.values()) == {1}
-    assert out.flags[0].level == "info" and out.flags[0].message.startswith("1 of 5 web searches")
+    out = asyncio.run(research(profile(), card(), MAX, run_planner=FakeRun(plan(3)), run_search=FakeRunBy(answer)))
+    assert len(out.summaries) == 2 and set(calls.values()) == {1}
+    assert out.flags[0].level == "info" and out.flags[0].message.startswith("1 of 3 web searches")
 
 
 def test_a_summary_without_a_url_is_left_out_without_retry():
@@ -122,7 +123,80 @@ def test_the_planned_query_is_kept_and_bad_dates_dropped():
 
 def test_planner_failure_means_no_research_but_the_review_goes_on():
     out = asyncio.run(research(profile(), card(), MAX, run_planner=FakeRun({"searches": "x"}, {"plan": []})))
-    assert out.summaries == [] and out.flags[0].level == "warning" and "no market context" in out.flags[0].message
+    assert out.summaries == [] and [f.level for f in out.flags] == ["warning", "warning"]
+    assert "Planner gave no valid plan" in out.flags[0].message and "no market context" in out.flags[1].message
+
+
+# Approved sources (step 9b): code fetches the pages, the Search agent summarises them, failures fall back
+FUND_SRC = ApprovedSource(name="Fund page", url="https://example.com/fund", topic="fund_news")
+DOCS_SRC = ApprovedSource(name="Documents page", url="https://example.com/docs", topic="fund_news")
+INDEX_SRC = ApprovedSource(name="Index page", url="https://example.com/index", topic="market_drivers")
+
+
+def page(source, ok=True):
+    return (FetchedPage(source, text=f"Text of the {source.name}.", title=source.name) if ok
+            else FetchedPage(source, problem="nearly empty (12 characters of text; likely JavaScript-only or blocked)"))
+
+
+def page_summary(prompt_text):
+    name = re.search(r"Source: (.*)", prompt_text).group(1)
+    return {"summary": f"Sample World Index Fund A Acc and the Sample World market, from the {name}.",
+            "date": "2026-09-30", "date_basis": "as_at"}
+
+
+def test_approved_pages_are_summarised_with_the_url_from_the_config():
+    pages_run = FakeRunBy(page_summary)
+    out = asyncio.run(research(profile(), card(), MAX, [page(FUND_SRC), page(INDEX_SRC)],
+                               run_planner=FakeRun(plan(1)), run_search=FakeRunBy(summary_for), run_page=pages_run))
+    first, second = out.summaries[:2]
+    assert first["url"] == FUND_SRC.url and first["query"] == "Approved source: Fund page" and first["topic"] == "fund_news"
+    assert second["url"] == INDEX_SRC.url and second["topic"] == "market_drivers" and second["date_basis"] == "as_at"
+    assert len(out.summaries) == 3 and out.flags == []                     # 2 pages, then 1 planned search
+    assert all("Page text:\nText of the" in p for p in pages_run.prompts)
+    assert page_agent().tools == []                                        # reads the given text; no web tool
+
+
+def test_an_agent_given_url_is_never_used():
+    out = asyncio.run(research(profile(), card(), MAX, [page(FUND_SRC)], run_planner=FakeRun({"searches": []}),
+                               run_page=FakeRunBy(lambda p: page_summary(p) | {"url": "https://elsewhere.com"})))
+    assert out.summaries == [] and "could not be summarised" in out.flags[0].message
+
+
+def test_an_empty_page_is_flagged_and_replaced_by_a_web_search_from_the_budget():
+    planner = FakeRun(plan(8))
+    search = FakeRunBy(summary_for)
+    out = asyncio.run(research(profile(), card(), MAX, [page(FUND_SRC), page(INDEX_SRC, ok=False)],
+                               run_planner=planner, run_search=search, run_page=FakeRunBy(page_summary)))
+    assert out.flags[0].level == "info" and out.flags[0].message.startswith("Approved source Index page nearly empty")
+    assert "web search used instead (https://example.com/index)" in out.flags[0].message
+    assert len(out.plan) == MAX and out.plan[0].query == "Sample World review Oct 2025 to Sep 2026"
+    assert "Sample World Index Fund" not in out.plan[0].query                # a market query never names the fund
+    assert "Already read from approved sources: Fund page" in planner.prompts[0]
+    assert len(search.prompts) == MAX and len(out.summaries) == 1 + MAX
+
+
+def test_fallbacks_use_the_budget_first_and_the_planner_gets_what_is_left():
+    planner = FakeRun()                                                    # must not be called
+    out = asyncio.run(research(profile(), card(), 1, [page(FUND_SRC, False), page(DOCS_SRC, False), page(INDEX_SRC, False)],
+                               run_planner=planner, run_search=FakeRunBy(summary_for)))
+    assert [p.query for p in out.plan] == ["Sample World Index Fund A Acc XX0000000001 fund changes Oct 2025 to Sep 2026"]
+    messages = [f.message for f in out.flags]
+    assert "web search used instead" in messages[0]
+    assert "covered by the same web search as another page" in messages[1]
+    assert "no web search left to replace it" in messages[2]
+    assert planner.prompts == [] and any("budget went to replacing approved pages" in line for line in out.log)
+
+
+def test_approved_page_summaries_get_the_same_checks_as_web_results():
+    prof = profile()
+    good = {"query": "Approved source: Fund page", "topic": "fund_news", "url": FUND_SRC.url, "date": "2026-09-30",
+            "date_basis": "as_at", "summary": "Sample World Index Fund A Acc charges 0.10% a year."}
+    old = good | {"date": "2024-03-31"}
+    other = good | {"summary": "Another Manager Global Fund changed its index."}
+    market = good | {"topic": "market_drivers", "url": INDEX_SRC.url, "summary": "Bond yields rose."}
+    kept, flags, _ = vet_summaries([good, old, other, market], prof, {"figures": []})
+    assert kept == [good] and len(flags) == 3
+    assert "as at 2024-03-31, outside the review period" in flags[0].message
 
 
 # The Analyst with sources
