@@ -72,9 +72,36 @@ This spec follows the design diagram `Fund_Performance_Agent_Overview.pdf` (work
   },
   "calendar_years": {"index": {"2021": 29.6, "2022": -8.0, "2023": 18.9, "2024": 27.0, "2025": 9.6}},
   "risk_3y": {"fund_vol": 12.14, "index_vol": 12.15, "tracking_error": 0.02, "beta": 1.00, "r2": 1.00,
-              "sharpe_fund": 1.57, "sharpe_index": 1.58, "info_ratio": -5.27},
-  "source": "factsheet"
+              "sharpe_fund": 1.57, "sharpe_index": 1.58, "info_ratio": -5.27, "alpha": -0.09, "basis": "pnav"},
+  "source": "factsheet",
+  "entered_by": "manual"
 }
+```
+
+Optional extra fields (all optional; added after the Test 1 factsheet review):
+```json
+{
+  "series_annualised": {
+    "fund_nav":  {"1y": 17.5, "3y": 19.1, "5y": 13.5, "since_launch": 15.7, "basis": "annualised", "pricing": "midday"},
+    "fund_pnav": {"1y": 17.0, "3y": 19.1, "5y": 13.8, "since_launch": 15.6, "basis": "annualised", "pricing": "market_close"},
+    "index":     {"1y": 17.1, "3y": 19.2, "5y": 13.9, "since_launch": 15.7, "basis": "annualised", "pricing": "market_close"}
+  },
+  "discrete_12m": {
+    "fund_nav":  {"2022-09-30": 2.7, "2023-09-30": 8.5, "2024-09-30": 22.9, "2025-09-30": 17.0, "2026-09-30": 17.5},
+    "fund_pnav": {"2022-09-30": 1.8, "2023-09-30": 10.9, "2024-09-30": 23.7, "2025-09-30": 16.9, "2026-09-30": 17.0},
+    "index":     {"2022-09-30": 1.9, "2023-09-30": 10.9, "2024-09-30": 23.8, "2025-09-30": 16.9, "2026-09-30": 17.1}
+  },
+  "risk_3y_nav": {"fund_vol": 13.92, "sharpe_fund": 1.37, "basis": "nav"}
+}
+```
+- `series` may also hold `since_launch` (cumulative). `series_annualised` holds the factsheet's annualised
+  figures; official figures come first, so these are preferred over calculated annualised returns.
+- `discrete_12m` is keyed by the end date of each 12-month window; step 4 uses it for cross-checking.
+- Risk figures carry a `basis` label (`nav` or `pnav`) so the two sets are never mixed: `risk_3y_nav` is
+  always `nav`, and when it is present `risk_3y` must be `pnav`.
+- `entered_by` is `manual` for figures typed by a person, `extractor` for the Extractor Agent.
+- `fund_profile.json` also takes an optional `asset_class` (default `equity`). A `transaction_cost_pct`
+  that is not in the documents stays `null`; the report shows "Not disclosed in the documents provided".
 ```
 
 ---
@@ -109,6 +136,7 @@ This spec follows the design diagram `Fund_Performance_Agent_Overview.pdf` (work
 | History length | Months of data < `time_horizon_years * 12` | Set `short_history = true` |
 | Cross-check | Calculated 1/3/5y return vs factsheet NAV return | If abs diff > 0.3 percentage points: flag; factsheet wins |
 | Implausible tracker gap | Index fund, price data only, abs(fund - index) annualised gap > 1.0% | Output `CHECK DATA` instead of Red |
+| Pre-launch prices | Any price dated before the share class `launch_date` | Info flag "pre-launch (likely simulated)" with the dates; leave these prices out of risk statistics and since-launch figures; repeated prices in this period are info level, not warning |
 
 Known traps (must be handled):
 - Index level supplied in a different currency to the share class (e.g. EUR share class with USD index).
@@ -241,7 +269,7 @@ The FCA rule (COLL 6.6.20R) requires an annual assessment of whether charges are
 |---|---|---|
 | 1. Quality of service | Not public | "Requires internal data" |
 | 2. Performance | Scorecard 6.1 + 6.2 | n/a |
-| 3. AFM costs | OCF, transaction costs, performance fee | Flag missing |
+| 3. AFM costs | OCF, transaction costs, performance fee | Flag missing; if transaction costs are not disclosed, show "Not disclosed in the documents provided" and mark the factor "Partly" |
 | 4. Economies of scale | Fund size; OCF history if supplied | "Requires OCF history" |
 | 5. Comparable market rates | Scorecard 6.4 (peer OCF) | "No peer supplied" |
 | 6. Comparable services | Other share classes/mandates of same manager, if supplied | "Requires internal data" |
@@ -322,7 +350,7 @@ Expected:
 - Fair comparison uses PNAV vs index: **1y 17.0 vs 17.1, 3y 69.0 vs 69.5, 5y 90.9 vs 91.6**; 5y annualised 13.8% vs about 13.9%.
 - OCF 0.06%; TE (3y) 0.02; beta 1.00; R2 1.00 (factsheet).
 - Mandate GREEN; Performance GREEN.
-- Data flags raised: repeated prices on 2013-06-30/2013-08-31, 2013-12-31/2014-02-28, **2024-07-31/2024-09-30**; trailing comma handled.
+- Data flags raised: 16 pre-launch prices (2012-11-30 to 2014-02-28, before the 2014-03-03 share class launch) at info level; repeated prices 2013-06-30/2013-08-31 and 2013-12-31/2014-02-28 at **info** level (pre-launch); **2024-07-31/2024-09-30 at warning level**; trailing comma handled; dates read as `MM/DD/YYYY`.
 - Must NOT rate Performance RED from midday NAV 88.3% vs index 91.6%.
 
 ### Test 2: Fidelity S&P 500 Index Fund P EUR Acc (IE00BYX5MX67): currency trap

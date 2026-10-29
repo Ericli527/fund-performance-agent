@@ -1,5 +1,6 @@
 """ The input file shapes from spec Section 2: valid files load, mistakes are rejected """
 import json
+from datetime import date
 import pytest
 from pydantic import ValidationError
 from fund_performance.models import FundProfile, FactsheetPerformance, Peer, Figure, DataFlag
@@ -82,3 +83,56 @@ def test_test1_profile_file_loads():
     p = FundProfile.model_validate(load(TEST1_PROFILE))
     assert p.isin == "GB00BJS8SH10" and p.ocf_pct == 0.06 and p.pricing_point == "midday"
     assert p.objective_type == "index_tracker" and p.time_horizon_years == 5
+
+
+# Optional extras added after the Test 1 factsheet review
+def _sample():
+    return load(FIXTURES / "factsheet_performance_sample.json")
+
+
+def test_optional_extras_load():
+    data = _sample() | {
+        "series_annualised": {"fund_nav": {"1y": 10.0, "3y": 9.1, "5y": 8.4, "since_launch": 7.0, "basis": "annualised"}},
+        "discrete_12m": {"fund_nav": {"2025-09-30": 12.0, "2026-09-30": 10.0}},
+        "risk_3y": {"tracking_error": 0.05, "alpha": -0.02, "basis": "pnav"},
+        "risk_3y_nav": {"fund_vol": 13.0, "sharpe_fund": 1.2, "basis": "nav"}}
+    f = FactsheetPerformance.model_validate(data)
+    assert f.series_annualised["fund_nav"].since_launch == 7.0
+    assert list(f.discrete_12m["fund_nav"])[0].isoformat() == "2025-09-30"
+    assert f.risk("pnav").alpha == -0.02 and f.risk("nav").fund_vol == 13.0
+
+
+def test_extras_are_optional():
+    f = FactsheetPerformance.model_validate(_sample())
+    assert f.series_annualised == {} and f.discrete_12m == {} and f.risk_3y_nav is None
+
+
+def test_annualised_series_must_say_annualised():
+    data = _sample() | {"series_annualised": {"fund_nav": {"1y": 10.0, "basis": "cumulative"}}}
+    with pytest.raises(ValidationError, match="annualised"):
+        FactsheetPerformance.model_validate(data)
+
+
+@pytest.mark.parametrize("risk_3y,risk_3y_nav", [
+    ({"beta": 1.0, "basis": "pnav"}, {"fund_vol": 13.0, "basis": "pnav"}),   # NAV set labelled pnav
+    ({"beta": 1.0, "basis": "nav"}, {"fund_vol": 13.0, "basis": "nav"}),     # two NAV sets
+    ({"beta": 1.0}, {"fund_vol": 13.0, "basis": "nav"}),                     # main set unlabelled
+])
+def test_nav_and_pnav_risk_are_never_mixed(risk_3y, risk_3y_nav):
+    with pytest.raises(ValidationError):
+        FactsheetPerformance.model_validate(_sample() | {"risk_3y": risk_3y, "risk_3y_nav": risk_3y_nav})
+
+
+def test_discrete_12m_keys_must_be_dates():
+    with pytest.raises(ValidationError):
+        FactsheetPerformance.model_validate(_sample() | {"discrete_12m": {"index": {"Sep 2026": 17.1}}})
+
+
+@requires_test1
+def test_test1_extras_match_the_factsheet():
+    f = FactsheetPerformance.model_validate(load(TEST1_FACTSHEET))
+    ann = f.series_annualised
+    assert (ann["fund_pnav"].y5, ann["index"].y5, ann["fund_nav"].y5) == (13.8, 13.9, 13.5)
+    assert f.discrete_12m["index"][date(2026, 9, 30)] == 17.1
+    assert f.risk("pnav").alpha == -0.09 and f.risk("pnav").tracking_error == 0.02
+    assert (f.risk("nav").fund_vol, f.risk("nav").sharpe_fund) == (13.92, 1.37)

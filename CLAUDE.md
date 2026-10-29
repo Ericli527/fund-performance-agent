@@ -26,6 +26,13 @@ Instructions for Claude Code in this project. The build specification is
   that need the real Test 1 files are skipped when those files are missing.
 - Factsheet figures typed by hand carry `source: "factsheet"` and `entered_by: "manual"`.
 - Fund profile: optional `asset_class`, default `equity`.
+- Transaction cost not in the documents stays `null`. The report shows "Not disclosed in the
+  documents provided" and marks the AoV Costs factor "Partly". Never use a figure from elsewhere.
+- Factsheet schema extras (all optional): `series_annualised` (preferred over calculated
+  annualised returns), `discrete_12m` (for the step 4 cross-check), `alpha`, and NAV-basis risk in
+  `risk_3y_nav`. Risk figures carry `basis` (`nav`/`pnav`) and the two sets are never mixed.
+- Prices before `launch_date` get an info flag "pre-launch (likely simulated)" and are left out of
+  risk statistics and since-launch figures. Repeated prices in that period are info, not warning.
 - Ambiguous dates: use the format that gives one price per month in date order; if both formats
   do, stop and ask the user.
 - Risk-free rate: 0 for v1, with a flag. Prefer the factsheet Sharpe ratios where supplied.

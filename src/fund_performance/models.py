@@ -1,7 +1,7 @@
 """ Data shapes shared by every step (spec Sections 1 and 2), validated with Pydantic """
 from datetime import date
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Source = Literal["factsheet", "calculated", "ai_extracted", "web"]
 ObjectiveType = Literal["index_tracker", "active_target", "active_comparator", "active_constraint",
@@ -9,6 +9,7 @@ ObjectiveType = Literal["index_tracker", "active_target", "active_comparator", "
 BenchmarkRole = Literal["target", "comparator", "constraint", "none"]
 PricingPoint = Literal["midday", "market_close"]
 Basis = Literal["cumulative", "annualised"]
+RiskBasis = Literal["nav", "pnav"]
 
 
 class _Strict(BaseModel):
@@ -46,6 +47,7 @@ class SeriesReturns(_Strict):
     y1: float | None = Field(default=None, alias="1y")
     y3: float | None = Field(default=None, alias="3y")
     y5: float | None = Field(default=None, alias="5y")
+    since_launch: float | None = None
     basis: Basis
     pricing: PricingPoint | None = None
 
@@ -60,6 +62,8 @@ class Risk3y(_Strict):
     sharpe_fund: float | None = None
     sharpe_index: float | None = None
     info_ratio: float | None = None
+    alpha: float | None = None
+    basis: RiskBasis | None = None
 
 
 class FactsheetPerformance(_Strict):
@@ -71,6 +75,35 @@ class FactsheetPerformance(_Strict):
     risk_3y: Risk3y | None = None
     source: Literal["factsheet", "ai_extracted"]
     entered_by: Literal["manual", "extractor"] | None = None
+    # Optional extras (spec 2.2): official annualised figures, discrete 12-month windows, NAV-basis risk
+    series_annualised: dict[str, SeriesReturns] = Field(default_factory=dict)
+    discrete_12m: dict[str, dict[date, float]] = Field(default_factory=dict)
+    risk_3y_nav: Risk3y | None = None
+
+    @field_validator("series_annualised")
+    @classmethod
+    def _annualised_basis(cls, value: dict[str, SeriesReturns]) -> dict[str, SeriesReturns]:
+        wrong = [name for name, s in value.items() if s.basis != "annualised"]
+        if wrong:
+            raise ValueError(f"series_annualised must have basis 'annualised': {wrong}")
+        return value
+
+    @model_validator(mode="after")
+    def _risk_bases_never_mixed(self) -> "FactsheetPerformance":
+        if self.risk_3y_nav is not None:
+            if self.risk_3y_nav.basis != "nav":
+                raise ValueError("risk_3y_nav must have basis 'nav'")
+            if self.risk_3y is not None and self.risk_3y.basis != "pnav":
+                raise ValueError("when risk_3y_nav is given, risk_3y must have basis 'pnav'")
+        return self
+
+    def risk(self, basis: RiskBasis) -> Risk3y | None:
+        """ The 3-year risk figures on one basis only, so NAV and PNAV figures are never mixed """
+        if self.risk_3y_nav is not None and basis == "nav":
+            return self.risk_3y_nav
+        if self.risk_3y is not None and self.risk_3y.basis == basis:
+            return self.risk_3y
+        return None
 
     @field_validator("calendar_years")
     @classmethod
