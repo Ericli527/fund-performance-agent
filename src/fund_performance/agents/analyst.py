@@ -12,11 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from fund_performance.agents.base import RunFn, build_agent, run_structured
 from fund_performance.glossary import glossary_lines
 from fund_performance.models import DataFlag
-from fund_performance.number_guard import check_numbers, check_ratings
+from fund_performance.number_guard import check_numbers, check_ratings, mentions
 
 FINDINGS = 3
 MIN_ACTIONS, MAX_ACTIONS = 2, 3
-NUMBER_CHECK_FAILED = "AI text failed number check"
+CHECKS_FAILED = "AI text failed checks"
 AI_TEXT_UNAVAILABLE = "AI text unavailable"
 
 STYLE_EXAMPLE = (
@@ -48,8 +48,9 @@ Style:
   below. After that, use the term alone.
 - No unexplained abbreviations: write "ongoing charge (OCF)", not "OCF".
 - Short sentences: under 20 words each. At most 2 sentences per finding.
-- At least one finding must explain a "below the surface" point from the data notes, when there are
-  data notes.
+- Every data note must be explained in the findings, using its key figure (marked "key": true). These are
+  the "below the surface" points.
+- Write periods in words: "5 years", "12 months", never "5y" or "12m".
 - Do not repeat a point in both the findings and the actions.
 - If an item is CHECK DATA, say what needs checking instead of drawing a conclusion. If an item is
   MANUAL CHECK, say what the reviewer must check. If a rating says "Add peer", say that a peer fund is
@@ -68,8 +69,9 @@ Output:
   as an action, and never write an internal or technical note about the data or the system.
 - market_context: a short paragraph on what drove the market in the review period, based only on the
   numbered sources given. Cite them as [1], [2]; never write a web address. Use no figures from the
-  sources; describe direction only (e.g. "US shares rose, led by technology [1]"). If no sources are
-  given, return null.
+  sources; describe direction only (e.g. "US shares rose, led by technology [1]"). Describe only what
+  the cited sources cover: if they cover only part of the review period, say which part. If no sources
+  are given, return null.
 """
 
 
@@ -108,6 +110,7 @@ def _check_shape(out: AnalystOutput) -> AnalystOutput:
 _URL = re.compile(r"https?://[^\s)\]]+|\bwww\.[^\s)\]]+")
 _MINUS_AFTER = re.compile(r"\b(behind|below)\b(\s+\w+){0,3}?\s*[-\u2212\u2013]\s?\d", re.IGNORECASE)
 _CITATION = re.compile(r"\[(\d+)\]")
+_SHORT_PERIOD = re.compile(r"\b\d+\s?(y|yr|yrs|m)\b")
 
 
 def style_problems(out: AnalystOutput, sources: int) -> list[str]:
@@ -118,7 +121,30 @@ def style_problems(out: AnalystOutput, sources: int) -> list[str]:
              for m in _MINUS_AFTER.finditer(text)]
     found += [f"citation: web address in the text ({u}); cite the source as [n] instead" for u in _URL.findall(text)]
     found += [f"citation: [{n}] does not match a source" for n in _CITATION.findall(text) if not 1 <= int(n) <= sources]
+    found += [f"style: write periods in words, not '{m.group(0)}'" for m in _SHORT_PERIOD.finditer(text)]
     return found
+
+
+def missing_insights(out: AnalystOutput, facts: dict) -> list[str]:
+    """ Each data note must be covered in the findings: at least one of its key figures appears there """
+    findings = " ".join(out.key_findings)
+    missing = []
+    for note in facts.get("data_notes", []):
+        keys = [f for f in note["figures"] if f.get("key")]
+        if keys and not any(mentions(findings, f["value"], f["unit"]) for f in keys):
+            missing.append(f"insight: the findings do not cover this data note (use {keys[0]['display']}): "
+                           f"{note['note']}")
+    return missing
+
+
+CHECK_KINDS = (("number", "number not in the facts"), ("rating", "rating:"), ("rating", "verdict:"),
+               ("wording", "style:"), ("wording", "citation:"), ("insights", "insight:"))
+
+
+def failed_checks(issues: list[str]) -> list[str]:
+    """ Which checks a draft failed, in a fixed order: number, rating, wording, insights """
+    kinds = {kind for kind, prefix in CHECK_KINDS for i in issues if i.startswith(prefix)}
+    return [k for k in ("number", "rating", "wording", "insights") if k in kinds]
 
 
 def problems(out: AnalystOutput, facts: dict, sources: int = 0) -> list[str]:
@@ -127,7 +153,7 @@ def problems(out: AnalystOutput, facts: dict, sources: int = 0) -> list[str]:
     text = _URL.sub("[source]", out.text())
     bad = check_numbers(text, facts)
     return ([f"number not in the facts: {n}" for n in bad]
-            + check_ratings(text, facts["scorecard"]) + style_problems(out, sources))
+            + check_ratings(text, facts["scorecard"]) + style_problems(out, sources) + missing_insights(out, facts))
 
 
 def numbered_sources(search_summaries: list[dict] | None) -> list[dict]:
@@ -137,7 +163,8 @@ def numbered_sources(search_summaries: list[dict] | None) -> list[dict]:
 
 def prompt(facts: dict, search_summaries: list[dict] | None = None) -> str:
     # The Analyst sees each source's number, query, date and summary, but not its URL, so it cites [n] only
-    sources = [{"source": f"[{s['number']}]", "query": s["query"], "date": s["date"], "summary": s["summary"]}
+    sources = [{"source": f"[{s['number']}]", "query": s["query"], "date": s["date"],
+                "date_basis": s.get("date_basis") or "published", "summary": s["summary"]}
                for s in numbered_sources(search_summaries)]
     return ("Facts (decided by code; quote only these numbers):\n" + json.dumps(facts, indent=1, ensure_ascii=False)
             + "\n\nSources:\n" + (json.dumps(sources, indent=1, ensure_ascii=False) if sources else "none"))
@@ -150,26 +177,85 @@ def rewrite_prompt(original: str, draft: AnalystOutput, issues: list[str]) -> st
               "exactly as given.")
 
 
+RATING_WORDS = {"GREEN": "Green", "AMBER": "Amber", "RED": "Red", "CHECK DATA": "a data check",
+                "MANUAL CHECK": "a manual check"}
+
+
+def _note(facts: dict, kind: str) -> dict | None:
+    return next((n for n in facts.get("data_notes", []) if n.get("kind") == kind), None)
+
+
+def _fig(note: dict, label_start: str, unit: str) -> float | None:
+    return next((f["value"] for f in note["figures"] if f["label"].startswith(label_start) and f["unit"] == unit), None)
+
+
+def _pct(value: float, unit: str, decimals: int) -> str:
+    return f"{abs(value):.{decimals}f}%" if unit == "%" else f"{abs(value):.{decimals}f} pp"
+
+
+def _performance_sentence(facts: dict, perf: dict, years: int) -> str:
+    """ Plain meaning first, the technical term second (in brackets); figures taken from the data notes """
+    fee = _note(facts, "fee")
+    td_pct = _fig(fee, "Fund behind its index, in plain terms", "%") if fee else None
+    td_pp = _fig(fee, "Tracking difference", "pp") if fee else None
+    ocf = _fig(fee, "Ongoing charge", "%") if fee else None
+    if td_pct is None or td_pp is None:
+        return f"Performance is rated {RATING_WORDS.get(perf['rating'], perf['rating'])}; the reasons are on page 2."
+    side = "behind" if td_pct < 0 else "ahead of"
+    close = "stays close to" if perf["rating"] == "GREEN" else "does not track"
+    first = (f"The fund {close} its index: it is {side} it by {_pct(td_pct, '%', 2)} a year over {years} years "
+             f"(tracking difference {td_pp:+.2f} pp).")
+    if ocf is not None and fee["note"].startswith("Most"):
+        return first + f" Most of this is the {ocf:.2f}% yearly ongoing charge (OCF)."
+    return first
+
+
+def _insight_sentence(facts: dict, years: int) -> str | None:
+    pricing, timing = _note(facts, "pricing"), _note(facts, "timing")
+    if pricing:
+        noon = _fig(pricing, "Gap at noon prices", "pp")
+        fair = _fig(pricing, "Fair gap", "pp")
+        return (f"Its noon price makes it look {_pct(noon, 'pp', 1)} behind its index over {years} years. "
+                f"At market close (PNAV) the gap is only {_pct(fair, 'pp', 1)}.")
+    if timing:
+        return "Part of the gap to the index may be timing, because no market-close price (PNAV) is available."
+    return None
+
+
+def _other_ratings_sentence(pillars: dict) -> str:
+    parts = []
+    for name, p in pillars.items():
+        if name == "Performance":
+            continue
+        if p["summary"] == "Add peer":
+            parts.append(f"{name} needs a peer fund to be judged")
+        else:
+            parts.append(f"{name} is {RATING_WORDS.get(p['rating'], p['rating'])}")
+    return "; ".join(parts).capitalize()[:1] + "; ".join(parts)[1:] + "."
+
+
 def template(facts: dict) -> AnalystOutput:
-    """ A narrative written by code from the scorecard alone, used when the AI text fails its checks """
+    """ A narrative written by code, in plain English, used when the AI text fails its checks. Its figures come
+    from the data notes, so it passes the number guard and covers every required insight """
     card = facts["scorecard"]
     pillars = {p["name"]: p for p in card["pillars"]}
-    perf = pillars["Performance"]
-    others = "; ".join(f"{name} {p['summary'] or p['rating']}" for name, p in pillars.items() if name != "Performance")
-    findings = [f"Draft verdict: {card['verdict']}. {card['verdict_reason']}.",
-                f"Performance is {perf['rating']}: {perf['reason']}.",
-                f"Other questions: {others}."]
+    years = facts.get("fund", {}).get("time_horizon_years", 5)
+    reason = ("Value and fees cannot be judged until a comparable peer fund is added."
+              if card["verdict"] == "Monitor until a peer is added" else f"{card['verdict_reason']}.")
+    findings = [f"Draft verdict: {card['verdict']}. {reason}",
+                _performance_sentence(facts, pillars["Performance"], years),
+                _insight_sentence(facts, years) or _other_ratings_sentence(pillars)]
     actions = []
     if any(p["summary"] == "Add peer" for p in pillars.values()):
         actions.append("Choose a comparable peer fund before the next quarterly review, so value and fees can be judged.")
     if any(p["rating"] == "CHECK DATA" for p in pillars.values()):
-        actions.append("Resolve the data checks listed in the report before signing off this review.")
+        actions.append("Resolve the data checks listed in the appendix before signing off this review.")
     if any(p["rating"] == "MANUAL CHECK" for p in pillars.values()):
         actions.append("Check the fund's style and holdings against its policy before signing off this review.")
     if len(actions) < MIN_ACTIONS:
         actions.append("Read the figures and their sources on pages 2 and 3 before signing off this review.")
     if len(actions) < MIN_ACTIONS:
-        actions.append("Record the decision and its reasons in the approval section at this review.")
+        actions.append("Record the decision and its reasons in the approval box at this review.")
     return AnalystOutput(key_findings=findings, actions=actions[:MAX_ACTIONS], market_context=None)
 
 
@@ -194,7 +280,8 @@ async def write_narrative(facts: dict, search_summaries: list[dict] | None = Non
             log.append("Analyst draft passed the number, rating and wording checks" + (" after one rewrite" if attempt else ""))
             sources = numbered_sources(search_summaries) if result.output.market_context else []
             return Narrative(result.output, "ai", [], log, sources)
-        log.append(f"Analyst draft {attempt + 1} rejected: " + "; ".join(issues))
+        log.append(f"Analyst draft {attempt + 1} rejected ({' / '.join(failed_checks(issues))}): " + "; ".join(issues))
         request = rewrite_prompt(first, result.output, issues)
+    failed = " / ".join(failed_checks(issues))
     return Narrative(template(facts), "template", [DataFlag(
-        check="analyst", level="warning", message=f"{NUMBER_CHECK_FAILED}: template narrative used")], log)
+        check="analyst", level="warning", message=f"{CHECKS_FAILED}: {failed}; template narrative used")], log)

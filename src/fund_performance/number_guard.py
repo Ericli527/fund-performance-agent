@@ -89,6 +89,12 @@ def _matches(n: Number, value: float, unit: str | None) -> bool:
     return abs(target - n.value) <= 0.5 * 10 ** -n.decimals + 1e-9
 
 
+def mentions(text: str, value: float, unit: str | None) -> bool:
+    """ True if the text states this figure (same unit, rounded to 1 or 2 d.p., sign optional) """
+    unit = _unit_of(unit) if unit not in (UNIT_PCT, UNIT_PP, UNIT_NONE) else unit
+    return any(_matches(Number(abs(n.value), n.decimals, n.unit, n.text), abs(value), unit) for n in numbers_in(text))
+
+
 def check_numbers(text: str, facts: dict) -> list[str]:
     """ The figures in the text that match nothing in the facts """
     allowed = allowed_numbers(facts)

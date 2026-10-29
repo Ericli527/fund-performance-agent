@@ -38,11 +38,11 @@ def _figure(name: str, f: Figure) -> dict:
             **({"note": "please verify"} if f.source == "ai_extracted" else {})}
 
 
-def _note_figure(label_text: str, value: float, unit: str, decimals: int = 1) -> dict:
+def _note_figure(label_text: str, value: float, unit: str, decimals: int = 1, key: bool = False) -> dict:
     """ Returns and cumulative gaps to 1 d.p.; yearly tracking differences and the fee to 2 d.p. """
     value = round(value, 2) + 0.0
     shown = f"{value:+.{decimals}f} pp" if unit == "pp" else f"{value:.{decimals}f}%"
-    return {"label": label_text, "value": value, "unit": unit, "display": shown}
+    return {"label": label_text, "value": value, "unit": unit, "display": shown, **({"key": True} if key else {})}
 
 
 def data_notes(profile: FundProfile, reported: ReportedFigures, flags: list[DataFlag]) -> list[dict]:
@@ -57,16 +57,18 @@ def data_notes(profile: FundProfile, reported: ReportedFigures, flags: list[Data
     nav, pnav, index = value(f"fund_nav.cum.{n}y"), value(f"fund_pnav.cum.{n}y"), value(f"index.cum.{n}y")
     if pricing is not None and pricing.level == "info" and None not in (nav, pnav, index):
         notes.append({
+            "kind": "pricing",
             "note": (f"The fund is priced at noon and the index at market close. Compared at noon prices, the fund "
                      f"looks further behind its index over {n} years than it really is. The fair comparison uses "
                      f"the fund's market-close price (PNAV)."),
             "figures": [_note_figure(f"Fund noon price (NAV), cumulative return, {n}y", nav, "%"),
                         _note_figure(f"Index, cumulative return, {n}y", index, "%"),
-                        _note_figure(f"Gap at noon prices (NAV vs index), {n}y", nav - index, "pp"),
+                        _note_figure(f"Gap at noon prices (NAV vs index), {n}y", nav - index, "pp", key=True),
                         _note_figure(f"Fund market-close price (PNAV), cumulative return, {n}y", pnav, "%"),
                         _note_figure(f"Fair gap (PNAV vs index), {n}y", pnav - index, "pp")]})
     elif pricing is not None and pricing.level == "warning":
-        notes.append({"note": "The fund and the index are priced at different times and no market-close price (PNAV) "
+        notes.append({"kind": "timing",
+                      "note": "The fund and the index are priced at different times and no market-close price (PNAV) "
                               "is available, so part of the gap to the index may be timing, not performance.",
                       "figures": []})
 
@@ -76,10 +78,11 @@ def data_notes(profile: FundProfile, reported: ReportedFigures, flags: list[Data
         share = "Most of the yearly gap to the index is the fee." if abs(td_ex) <= abs(td) / 2 \
             else "The fee explains only part of the yearly gap to the index."
         notes.append({
+            "kind": "fee",
             "note": f"{share} Adding the ongoing charge back leaves the cost-adjusted gap.",
             "figures": [_note_figure(f"Tracking difference, a year, {n}y", td, "pp", 2),
                         _note_figure(f"Fund behind its index, in plain terms (% a year), {n}y", td, "%", 2),
-                        _note_figure("Ongoing charge (OCF), a year", profile.ocf_pct, "%", 2),
+                        _note_figure("Ongoing charge (OCF), a year", profile.ocf_pct, "%", 2, key=True),
                         _note_figure(f"Cost-adjusted tracking difference, a year, {n}y", td_ex, "pp", 2),
                         _note_figure(f"Cost-adjusted gap, in plain terms (% a year), {n}y", td_ex, "%", 2)]})
     return notes

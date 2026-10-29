@@ -1,7 +1,7 @@
 """ Oversight Analyst: mocked pass / one rewrite / fallback; one live test on Test 1 that prints the text """
 import asyncio
 import pytest
-from fund_performance.agents.analyst import (AI_TEXT_UNAVAILABLE, NUMBER_CHECK_FAILED, AnalystOutput, analyst_agent,
+from fund_performance.agents.analyst import (AI_TEXT_UNAVAILABLE, CHECKS_FAILED, AnalystOutput, analyst_agent,
                                              problems, template, write_narrative)
 from fund_performance.calc import calculate
 from fund_performance.checks import check_prices
@@ -79,7 +79,7 @@ def test_fallback_to_the_template_after_a_failed_rewrite():
     result = asyncio.run(write_narrative(FACTS, run=FakeRun(bad, bad)))
     assert result.source == "template"
     [flag] = result.flags
-    assert flag.level == "warning" and flag.message.startswith(NUMBER_CHECK_FAILED)
+    assert flag.level == "warning" and flag.message == f"{CHECKS_FAILED}: number; template narrative used"
     assert result.output == template(FACTS)
 
 
@@ -175,3 +175,50 @@ def test_minus_rule_triggers_one_rewrite():
 def test_template_actions_each_say_when():
     for action in template(FACTS).actions:
         assert "before" in action or "at this review" in action or "at the next" in action
+
+
+# Part 1 fixes: required insights, periods in words, which checks failed
+NOTES = [{"kind": "pricing", "note": "Noon pricing.", "figures": [
+             {"label": "Gap at noon prices (NAV vs index), 5y", "value": -3.3, "unit": "pp", "display": "-3.3 pp", "key": True},
+             {"label": "Fair gap (PNAV vs index), 5y", "value": -0.7, "unit": "pp", "display": "-0.7 pp"}]},
+         {"kind": "fee", "note": "Most of the yearly gap to the index is the fee.", "figures": [
+             {"label": "Tracking difference, a year, 5y", "value": -0.1, "unit": "pp", "display": "-0.10 pp"},
+             {"label": "Fund behind its index, in plain terms (% a year), 5y", "value": -0.1, "unit": "%", "display": "-0.10%"},
+             {"label": "Ongoing charge (OCF), a year", "value": 0.06, "unit": "%", "display": "0.06%", "key": True}]}]
+FACTS_NOTES = FACTS | {"data_notes": NOTES}
+COVERED = ["The fund tracks its index closely. Its noon price makes it look 3.3 pp behind over 5 years.",
+           "At market close (PNAV) the gap is 0.7 pp, and most of it is the 0.06% yearly fee.",
+           "Value and fees cannot be judged until a peer fund is added."]
+
+
+def test_findings_that_cover_every_data_note_pass():
+    assert problems(_out(key_findings=COVERED), FACTS_NOTES) == []
+
+
+def test_a_missing_data_note_triggers_the_rewrite():
+    without_fee = ["The fund tracks its index closely. Its noon price makes it look 3.3 pp behind over 5 years.",
+                   "At market close (PNAV) the gap is 0.7 pp.", "Value and fees need a peer fund."]
+    issues = problems(_out(key_findings=without_fee), FACTS_NOTES)
+    assert len(issues) == 1 and issues[0].startswith("insight: the findings do not cover this data note (use 0.06%)")
+    fake = FakeRun(draft(key_findings=without_fee), draft(key_findings=COVERED))
+    result = asyncio.run(write_narrative(FACTS_NOTES, run=fake))
+    assert result.source == "ai" and "insight:" in fake.prompts[1]
+
+
+def test_periods_are_written_in_words():
+    issues = problems(_out(key_findings=["The fund returned 13.8% a year over 5y.", "b", "c"]), FACTS)
+    assert issues == ["style: write periods in words, not '5y'"]
+
+
+def test_the_flag_lists_which_checks_failed():
+    bad = draft(key_findings=["Fees are Green; the fund returned 14.2% over 5y.", "b", "c"])
+    result = asyncio.run(write_narrative(FACTS_NOTES, run=FakeRun(bad, bad)))
+    assert result.flags[0].message == "AI text failed checks: number / rating / wording / insights; template narrative used"
+
+
+def test_the_plain_template_covers_every_data_note_and_passes():
+    facts = FACTS_NOTES | {"fund": {"time_horizon_years": 5}}
+    t = template(facts)
+    assert problems(t, facts) == []
+    assert "behind it by 0.10% a year over 5 years (tracking difference -0.10 pp)" in t.key_findings[1]
+    assert "3.3 pp behind its index over 5 years" in t.key_findings[2]

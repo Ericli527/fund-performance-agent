@@ -359,6 +359,17 @@ All agents return structured JSON validated with Pydantic. Use the OpenAI Agents
   date: excluded". Test 1: Morningstar USD pages (11.99% vs 17.0%) are excluded.
 - Citations: the market context cites sources as [1], [2]; the Analyst never sees or writes URLs, and the report
   lists each number with its URL under Sources.
+- Dates: a page with no publish date but an "as at" or "updated" date is kept with `date_basis: "as_at"`; only
+  pages with no date at all are excluded.
+- Relevance: a fund-news or manager summary must match the fund's name, ISIN, or share class with the manager's
+  name, and US regulatory filings (sec.gov) are excluded for non-US funds; a market summary must name the market.
+  Otherwise it is excluded with an info flag (Test 1: the SEC filing for a US Fidelity fund).
+- Review period longer than 3 months: market queries ask for a review of the whole period, and the market context
+  describes only what the cited sources cover.
+- Required insights (code): every data note must be covered in the findings, i.e. one of its key figures appears
+  (Test 1: the noon-pricing gap 3.3 pp and the 0.06% fee). A missing one triggers the one rewrite.
+- AI text writes periods in words ("5 years", not "5y"). If the rewrite still fails, the flag names the failed
+  checks: "AI text failed checks: number / rating / wording / insights".
 
 ### 8.3 Number-guard validator (code)
 After the Analyst responds: extract all numbers from its text (regex for decimals and %). Every number must match a value in the facts JSON (allowing rounding to 1 d.p.). If not, reject and re-prompt once; if it fails again, use a template-only narrative and flag it.
@@ -453,7 +464,14 @@ Definition of done: all unit tests pass; Test 1 and Test 2 expected values repro
 
 ---
 
-## 12. Roadmap (as shared with the team)
+## 12. Known limitations
+
+- A web figure with no stated period is compared with all of the factsheet's periods for that series, so a wrong
+  figure could pass by matching another period. Figures with a stated period are compared with that period only.
+- Relevance checks match names and the ISIN in the summary text; a summary about this fund that names it in
+  another way (e.g. only by a ticker) is excluded.
+
+## 13. Roadmap (as shared with the team)
 
 | Phase | Scope |
 |---|---|

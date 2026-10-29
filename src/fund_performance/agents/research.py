@@ -21,6 +21,9 @@ MAX_QUERY_CHARS = 200
 MAX_SUMMARY_CHARS = 1200
 MARKET_NOISE = {"index", "nuk", "net", "tr", "total", "return", "gross", "price", "hedged", "gbp", "usd", "eur"}
 FIGURES_DIFFER = "web source figures differ from factsheet, likely different currency or date: excluded"
+NOT_THE_FUND = "web source about a different fund or jurisdiction: excluded"
+NOT_THE_MARKET = "web source not about the fund's market: excluded"
+US_FILINGS = ("sec.gov",)            # US regulatory filings describe US-registered funds
 
 PLANNER_INSTRUCTIONS = """
 You plan web searches for an investment oversight review of one fund. Return up to {max_searches} search
@@ -51,7 +54,9 @@ You run one web search for an investment oversight review and summarise what you
 - Summary: 2 to 4 short sentences in plain English on what the sources say that matters for the reason
   given. Only report what the sources say. No opinions, no investment advice.
 - url: the web address of the main source you used.
-- date: the source's publication date as YYYY-MM-DD if it is shown, otherwise null.
+- date: the source's publication date as YYYY-MM-DD, with date_basis "published". If there is no
+  publication date but the page states an "as at" or "updated" date, give that date with date_basis
+  "as_at". If the page shows no date at all, give null for both.
 """
 
 
@@ -73,6 +78,7 @@ class SearchSummary(BaseModel):
     summary: str
     url: str
     date: str | None
+    date_basis: Literal["published", "as_at"] | None
 
 
 @dataclass
@@ -117,16 +123,31 @@ def names_the_fund(text: str, profile: FundProfile) -> bool:
     return fund_stem(profile).lower() in lower or profile.isin.lower() in lower
 
 
+def matches_fund(text: str, profile: FundProfile) -> bool:
+    """ The fund's name or ISIN, or its share class together with the manager's name (e.g. 'Fidelity ... P Acc') """
+    lower = text.lower()
+    brand = fund_stem(profile).split()[0].lower()
+    return names_the_fund(text, profile) or (profile.share_class.lower() in lower and brand in lower)
+
+
+def review_months(profile: FundProfile) -> int:
+    start, end = review_period(profile)
+    return (end.year - start.year) * 12 + end.month - start.month
+
+
 def planner_input(profile: FundProfile, card: Scorecard) -> str:
     """ Public fund details and the ratings only: no figures, documents or client data """
     start, end = review_period(profile)
     ratings = "; ".join(f"{p.name}: {p.rating}" for p in card.pillars.values())
+    period = f"{start + timedelta(days=1):%b %Y} to {end:%b %Y}"
+    whole = (f"\nMarket-driver queries must ask for a review of the whole period, e.g. "
+             f"\"{market_name(profile)} review {period}\"" if review_months(profile) > 3 else "")
     return (f"Fund: {profile.fund_name}\nISIN: {profile.isin}\nShare class: {profile.share_class}\n"
             f"Benchmark: {profile.benchmark_name}\nMarket (for market_drivers queries): {market_name(profile)}\n"
             f"Objective type: {profile.objective_type}\n"
-            f"Review period: {start + timedelta(days=1):%b %Y} to {end:%b %Y} ({start:%d %b %Y} to {end:%d %b %Y}; "
-            f"main test period: {profile.time_horizon_years} years to {end:%d %b %Y})\n"
-            f"Ratings: {ratings}\nDraft verdict: {card.verdict}")
+            f"Review period: {period} ({start:%d %b %Y} to {end:%d %b %Y}; "
+            f"main test period: {profile.time_horizon_years} years to {end:%d %b %Y})"
+            f"{whole}\nRatings: {ratings}\nDraft verdict: {card.verdict}")
 
 
 def tidy_plan(plan: SearchPlan, max_searches: int, profile: FundProfile | None = None) -> tuple[list[PlannedSearch], list[str]]:
@@ -159,8 +180,9 @@ def _check_summary(planned: PlannedSearch):
             when = date.fromisoformat(out.date).isoformat() if out.date else None
         except ValueError:
             when = None
-        # The planned query is kept, so the report lists exactly what was searched
-        return {"query": planned.query, "summary": summary[:MAX_SUMMARY_CHARS], "url": out.url, "date": when}
+        # The planned query and topic are kept, so the report lists exactly what was searched
+        return {"query": planned.query, "topic": planned.topic, "summary": summary[:MAX_SUMMARY_CHARS],
+                "url": out.url, "date": when, "date_basis": (out.date_basis or "published") if when else None}
     return check
 
 
@@ -244,7 +266,7 @@ def conflicting_figures(summary: str, profile: FundProfile, facts: dict, toleran
     official = _official_returns(facts)
     market = market_name(profile).lower()
     bad = []
-    for sentence in re.split(r"(?<=[.!?])\s+", summary):
+    for sentence in re.split(r"(?<=[.!?;])\s+", summary):        # clauses, so a sector's figure is not read as the index's
         who = "fund" if names_the_fund(sentence, profile) else "index" if market in sentence.lower() else None
         if who is None or not _RETURN_WORDS.search(sentence):
             continue
@@ -258,8 +280,10 @@ def conflicting_figures(summary: str, profile: FundProfile, facts: dict, toleran
 
 def vet_summaries(summaries: list[dict], profile: FundProfile, facts: dict,
                   tolerance_pp: float = 0.5) -> tuple[list[dict], list[DataFlag], list[str]]:
-    """ Leave out summaries with no date, dated outside the review period, or with fund or index returns that
-    differ from the factsheet by more than tolerance_pp (owner decisions). Each exclusion gets an info flag """
+    """ Leave out summaries with no date at all (a publish or an "as at" date both count), dated outside the
+    review period, about a different fund or jurisdiction (fund searches) or not about the market (market
+    searches), or with fund or index returns that differ from the factsheet by more than tolerance_pp
+    (owner decisions). Each exclusion gets an info flag """
     start, end = review_period(profile)
     kept, flags, log = [], [], []
 
@@ -269,12 +293,23 @@ def vet_summaries(summaries: list[dict], profile: FundProfile, facts: dict,
 
     for s in summaries:
         if not s.get("date"):
-            exclude(s, "web source has no date: excluded")
+            exclude(s, "web source has no date (published or as at): excluded")
             continue
         when = date.fromisoformat(s["date"])
         if not start <= when <= end:
-            exclude(s, f"web source dated {when.isoformat()}, outside the review period "
+            basis = "as at" if s.get("date_basis") == "as_at" else "dated"
+            exclude(s, f"web source {basis} {when.isoformat()}, outside the review period "
                        f"{start.isoformat()} to {end.isoformat()}: excluded")
+            continue
+        topic = s.get("topic", "fund_news")
+        text = f"{s['summary']} {s.get('title', '')}"
+        if topic == "market_drivers":
+            if market_name(profile).lower() not in text.lower():
+                exclude(s, f"{NOT_THE_MARKET} ({market_name(profile)})")
+                continue
+        elif not matches_fund(text, profile) or (
+                not profile.isin.upper().startswith("US") and any(d in s["url"].lower() for d in US_FILINGS)):
+            exclude(s, NOT_THE_FUND)
             continue
         bad = conflicting_figures(s["summary"], profile, facts, tolerance_pp)
         if bad:

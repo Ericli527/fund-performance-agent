@@ -39,7 +39,7 @@ def plan(n=5, **extra):
 def summary_for(prompt_text):
     query = re.search(r"Search query: (.*)", prompt_text).group(1)
     return {"query": query, "summary": f"Sources say something about {query}.",
-            "url": f"https://example.com/{query.split()[-1]}", "date": "2026-09-15"}
+            "url": f"https://example.com/{query.split()[-1]}", "date": "2026-09-15", "date_basis": "published"}
 
 
 def test_limits_and_settings(monkeypatch):
@@ -115,7 +115,9 @@ def test_the_planned_query_is_kept_and_bad_dates_dropped():
     def answer(prompt_text):
         return summary_for(prompt_text) | {"query": "something else", "date": "September 2026"}
     out = asyncio.run(research(profile(), card(), MAX, run_planner=FakeRun(plan(1)), run_search=FakeRunBy(answer)))
-    assert out.summaries[0]["query"] == "Sample World Index Fund question A" and out.summaries[0]["date"] is None
+    first = out.summaries[0]
+    assert first["query"] == "Sample World Index Fund question A" and first["topic"] == "fund_news"
+    assert first["date"] is None and first["date_basis"] is None
 
 
 def test_planner_failure_means_no_research_but_the_review_goes_on():
@@ -184,8 +186,8 @@ def test_a_market_query_that_names_the_fund_is_dropped():
     assert len(log) == 2 and all("names the fund" in line for line in log)
 
 
-def _s(summary, date="2026-06-30", url="https://news.example/a"):
-    return {"query": "q", "summary": summary, "url": url, "date": date}
+def _s(summary, date="2026-06-30", url="https://news.example/a", topic="fund_news", basis="published"):
+    return {"query": "q", "topic": topic, "summary": summary, "url": url, "date": date, "date_basis": basis}
 
 
 VET_FACTS = {"fund": {"as_of_date": "2026-09-30"},
@@ -196,16 +198,16 @@ VET_FACTS = {"fund": {"as_of_date": "2026-09-30"},
                          {"name": "index.ann.5y", "value": 13.9, "unit": "%"}]}
 
 
-@pytest.mark.parametrize("summary,kept", [
-    ("Sample World Index Fund returned 11.99% over 1 year.", False),        # e.g. a USD data page
-    ("Sample World Index Fund returned 17.3% over 1 year.", True),          # within 0.5 pp of 17.5
-    ("Sample World Index Fund gained 9.4% in 2025.", True),
-    ("Sample World Index Fund gained 12.0% in 2025.", False),
-    ("The Sample World market rose 13.9% a year over 5 years.", True),
-    ("Shares rose, and one sector gained 40% in the year.", True),          # not the fund or its index
+@pytest.mark.parametrize("summary,topic,kept", [
+    ("Sample World Index Fund returned 11.99% over 1 year.", "fund_news", False),     # e.g. a USD data page
+    ("Sample World Index Fund returned 17.3% over 1 year.", "fund_news", True),       # within 0.5 pp of 17.5
+    ("Sample World Index Fund gained 9.4% in 2025.", "fund_news", True),
+    ("Sample World Index Fund gained 12.0% in 2025.", "fund_news", False),
+    ("The Sample World market rose 13.9% a year over 5 years.", "market_drivers", True),
+    ("The Sample World market rose; one sector gained 40% in the year.", "market_drivers", True),  # a sector, not the index
 ])
-def test_returns_that_differ_from_the_factsheet_exclude_the_summary(summary, kept):
-    out, flags, _ = vet_summaries([_s(summary)], profile(), VET_FACTS)
+def test_returns_that_differ_from_the_factsheet_exclude_the_summary(summary, topic, kept):
+    out, flags, _ = vet_summaries([_s(summary, topic=topic)], profile(), VET_FACTS)
     assert bool(out) == kept
     if not kept:
         assert flags[0].level == "info" and flags[0].message.startswith(FIGURES_DIFFER)
@@ -225,7 +227,7 @@ def test_test1_morningstar_usd_figure_is_excluded():
     prof = read_json(TEST1_PROFILE)
     morningstar = _s("Fidelity Index US P Acc returned 11.99% over 1 year in USD.", "2026-09-30",
                      "https://www.morningstar.com/funds/x")
-    index = _s("The S&P 500 returned 17.1% over 1 year in sterling terms.", "2026-09-30")
+    index = _s("The S&P 500 returned 17.1% over 1 year in sterling terms.", "2026-09-30", topic="market_drivers")
     out, flags, _ = vet_summaries([morningstar, index], prof, _test1_facts())
     assert out == [index] and "11.99% (fund, 1y)" in flags[0].message
 
@@ -274,3 +276,49 @@ def test_live_test1_research_and_analyst():
     assert 1 <= len(found.plan) <= MAX and found.summaries
     assert all(s["url"].startswith("http") for s in found.summaries)
     assert problems(narrative.output, facts, len(vetted)) == []
+
+
+# Part 1 fixes: "as at" dates, relevance, whole-period market queries
+def test_an_as_at_date_counts_and_only_no_date_at_all_is_excluded():
+    kept, _, _ = vet_summaries([_s("Sample World Index Fund page.", date="2026-09-30", basis="as_at")], profile(), VET_FACTS)
+    assert len(kept) == 1
+    out, flags, _ = vet_summaries([_s("Sample World Index Fund page.", date=None, basis=None)], profile(), VET_FACTS)
+    assert out == [] and "no date (published or as at)" in flags[0].message
+
+
+def test_search_instructions_ask_for_as_at_dates():
+    assert '"as_at"' in search_agent().instructions and '"updated" date' in search_agent().instructions
+
+
+@pytest.mark.parametrize("summary,url,kept", [
+    ("Sample World Index Fund cut its fee.", "https://news.example/a", True),
+    ("XX0000000001 changed its index.", "https://news.example/a", True),                   # by ISIN
+    ("Sample A Acc share class closed.", "https://news.example/a", True),                   # brand + share class
+    ("Another Index Fund changed its manager.", "https://news.example/a", False),            # a different fund
+    ("Sample World Index Fund annual report filed.", "https://www.sec.gov/Archives/x", False),  # US filing, non-US fund
+])
+def test_fund_news_must_be_about_this_fund_and_jurisdiction(summary, url, kept):
+    out, flags, _ = vet_summaries([_s(summary, url=url)], profile(), VET_FACTS)
+    assert bool(out) == kept
+    if not kept:
+        assert flags[0].message.startswith("web source about a different fund or jurisdiction: excluded")
+
+
+def test_market_news_must_be_about_the_market():
+    out, flags, _ = vet_summaries([_s("Bond yields rose in Japan.", topic="market_drivers")], profile(), VET_FACTS)
+    assert out == [] and flags[0].message.startswith("web source not about the fund's market")
+
+
+def test_market_queries_ask_for_the_whole_period_when_it_is_longer_than_3_months():
+    text = planner_input(profile(), card())
+    assert 'Market-driver queries must ask for a review of the whole period, e.g. "Sample World review Oct 2025 to Sep 2026"' in text
+
+
+@requires_test1
+def test_test1_sec_filing_is_excluded():
+    from test_agent_analyst import _test1_facts
+    from fund_performance.io import read_json
+    sec = _s("Fidelity 500 Index Fund filed its annual report on Form N-CSR.", "2026-04-30",
+             "https://www.sec.gov/Archives/edgar/data/x.htm")
+    out, flags, _ = vet_summaries([sec], read_json(TEST1_PROFILE), _test1_facts())
+    assert out == [] and flags[0].level == "info" and "different fund or jurisdiction" in flags[0].message

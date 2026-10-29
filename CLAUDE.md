@@ -67,7 +67,9 @@ Instructions for Claude Code in this project. The build specification is
 - Oversight Analyst (gpt-5.4, low reasoning): 3 key findings, 2-3 actions, market context only from
   search summaries (else null). Number guard: same unit (% vs pp), 1 or 2 d.p. rounding; years,
   periods, counts and dates not checked. Rating guard rejects a changed rating or verdict. One
-  rewrite with the problem list, then template narrative + flag "AI text failed number check".
+  rewrite with the problem list, then template narrative + flag "AI text failed checks: number /
+  rating / wording / insights" (listing those that failed). Every data note's key figure must appear in
+  the findings (insights check). Periods in words ("5 years", not "5y").
 - Analyst style: plain meaning first, term in brackets; terms explained once (<10 words) from the
   shared glossary (`glossary.py`, also printed at the end of the report in step 9); sentences under
   20 words; "Draft verdict"; one "below the surface" finding from the data notes (written by code);
@@ -77,7 +79,8 @@ Instructions for Claude Code in this project. The build specification is
   queries never name the fund (code drops them). Summaries with no date, outside the review period,
   or with fund/index returns >0.5 pp from the factsheet are excluded with an info flag. Market
   context cites [1], [2]; URLs only in the report's sources list. No minus sign after "behind"/
-  "below" (code check). v2: MCP Fetch with an approved source list.
+  "below" (code check). "As at" dates count; fund news must match name/ISIN/share class (no sec.gov for
+  non-US funds), market news must name the market. v2: MCP Fetch with an approved source list.
 - Risk-free rate: 0 for v1, with a flag. Prefer the factsheet Sharpe ratios where supplied.
 - Charts are built in step 9 with the report.
 - Emailing the report is a plain code function (not an AI agent), off by default, set up in
