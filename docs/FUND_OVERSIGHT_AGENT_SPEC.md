@@ -1,0 +1,339 @@
+# Fund Oversight Agent: Build Specification
+
+Purpose: one question in, a 3-page oversight report out.
+**Code does the maths and the decisions. AI reads and writes. A person makes the final call.**
+
+This spec follows the design diagram (7 steps, 6 AI agents, 4 oversight questions, max 5 web searches, 3-page report, 1 person signs off). Build in the order given in Section 11.
+
+---
+
+## 1. Core principles (non-negotiable)
+
+1. **Same data, same answer.** Every number and every rating comes from deterministic Python. The AI never calculates figures or sets ratings.
+2. **Official figures first.** Returns published by the fund manager (factsheet) take priority over anything calculated from prices. Price-based calculations are used for extra metrics and as a cross-check.
+3. **Flag doubtful data, never guess.** If data fails a check, output `CHECK DATA` for the affected item instead of a rating.
+4. **Every number has a source.** Each figure carries a `source` field: `factsheet`, `calculated`, `ai_extracted` (must be labelled "please verify"), or `web`.
+5. **The AI explains but cannot change.** The Oversight Analyst may only quote numbers present in the facts JSON it is given (enforced by a validator, Section 8.3).
+6. **A person decides.** The verdict is a draft until the reviewer signs Retain / Monitor / Review.
+7. **Kept in bounds.** At most 5 web searches per run; no retries on failed emails; no confidential client data uploaded; email recipients come from settings, never from the AI.
+8. **All thresholds live in `config/thresholds.yaml`**, are printed in the report, and are clearly labelled as illustrative until agreed with the oversight team.
+
+---
+
+## 2. Inputs (Step 1)
+
+| Input | Required | Format |
+|---|---|---|
+| Question | Yes | Free text, e.g. "Is this index fund meeting its mandate, and is its fee justified?" |
+| Factsheet | Yes (preferred) | PDF, or a structured file of its figures |
+| Fund profile | Yes | `fund_profile.json` (schema below); can be created by the Extractor Agent from factsheet + KID, then confirmed by the user |
+| Price history | Recommended | CSV/XLSX: `date, nav` (+ optional `index_level`) |
+| Peer fund | Recommended | `peer.json` (name, OCF, 1/3/5y returns, currency, share class) or its factsheet |
+| Optional evidence | No | Manager commentary, attribution data, fund code for price download |
+
+### 2.1 `fund_profile.json` schema
+```json
+{
+  "fund_name": "Fidelity Index US Fund P Accumulation",
+  "isin": "GB00BJS8SH10",
+  "share_class": "P Acc",
+  "currency": "GBP",
+  "distribution": "accumulation",
+  "hedged": false,
+  "launch_date": "2014-03-03",
+  "objective_text": "Track the performance of the S&P 500 (NUK) index ... over 5 years or more.",
+  "objective_type": "index_tracker",
+  "benchmark_name": "S&P 500 Index NUK",
+  "benchmark_role": "target",
+  "time_horizon_years": 5,
+  "secondary_objective": null,
+  "ocf_pct": 0.06,
+  "transaction_cost_pct": -0.01,
+  "performance_fee": false,
+  "fund_size_gbp_m": 11006,
+  "risk_indicator": 5,
+  "pricing_point": "midday",
+  "as_of_date": "2026-09-30"
+}
+```
+`objective_type` is one of: `index_tracker`, `active_target`, `active_comparator`, `active_constraint`, `income_target`, `absolute_return`.
+`benchmark_role` is one of: `target`, `comparator`, `constraint`, `none`.
+
+### 2.2 `factsheet_performance.json` schema (from file or Extractor Agent)
+```json
+{
+  "as_of_date": "2026-09-30",
+  "currency": "GBP",
+  "series": {
+    "fund_nav":  {"1y": 17.5, "3y": 69.0, "5y": 88.3, "basis": "cumulative", "pricing": "midday"},
+    "fund_pnav": {"1y": 17.0, "3y": 69.0, "5y": 90.9, "basis": "cumulative", "pricing": "market_close"},
+    "index":     {"1y": 17.1, "3y": 69.5, "5y": 91.6, "basis": "cumulative", "pricing": "market_close"}
+  },
+  "calendar_years": {"index": {"2021": 29.6, "2022": -8.0, "2023": 18.9, "2024": 27.0, "2025": 9.6}},
+  "risk_3y": {"fund_vol": 12.14, "index_vol": 12.15, "tracking_error": 0.02, "beta": 1.00, "r2": 1.00,
+              "sharpe_fund": 1.57, "sharpe_index": 1.58, "info_ratio": -5.27},
+  "source": "factsheet"
+}
+```
+
+---
+
+## 3. Read the data (Step 2)
+
+### 3.1 File reader (code)
+- Detect file type by name and content: performance table, fund facts, peer, prices, documents.
+- Parse dates explicitly (detect `MM/DD/YYYY` vs `DD/MM/YYYY`; never guess silently; log the format used).
+- Strip trailing empty columns (e.g. rows ending with a comma).
+- Convert `-` and blanks to missing values.
+- Sort ascending by date.
+
+### 3.2 Extractor Agent (AI)
+- Only runs if no structured file contains the needed numbers.
+- Reads factsheet/KID PDFs and returns `factsheet_performance.json` and draft `fund_profile.json`.
+- Every extracted value gets `source: "ai_extracted"` and is shown in the report as "please verify".
+
+### 3.3 Price download fallback (code)
+- Only when there is no factsheet. Any results that look wrong are flagged `CHECK DATA`.
+
+### 3.4 Data quality checks (code): each produces a flag in `data_flags[]`
+
+| Check | Rule | Action |
+|---|---|---|
+| Currency match | Fund and benchmark series must be in the same currency | If not: `CHECK DATA: currency mismatch` (do not compare) |
+| End-date alignment | Fund and benchmark end dates must be equal | Truncate to the common end date; log it |
+| Pricing point | If fund is priced `midday` and index is `market_close`, use fund PNAV (market-close) for the fund-vs-index comparison when available | If PNAV unavailable: note "timing difference" and widen tolerance |
+| Missing values | Any missing NAV/index value | List the dates; exclude from return-based risk stats; never interpolate silently |
+| Gaps | Gap between observations > 35 days (monthly) or > 5 business days (daily) | Flag |
+| Repeated prices | Same NAV on two different dates (consecutive or within 3 periods) for an equity fund | Flag as "suspicious repeated price" with dates |
+| History length | Months of data < `time_horizon_years * 12` | Set `short_history = true` |
+| Cross-check | Calculated 1/3/5y return vs factsheet NAV return | If abs diff > 0.3 percentage points: flag; factsheet wins |
+| Implausible tracker gap | Index fund, price data only, abs(fund - index) annualised gap > 1.0% | Output `CHECK DATA` instead of Red |
+
+Known traps (must be handled):
+- Index level supplied in a different currency to the share class (e.g. EUR share class with USD index).
+- Midday NAV vs market-close index: the midday 5y return (88.3%) vs index (91.6%) looks 3.3 points behind; the fair PNAV comparison (90.9% vs 91.6%) is only 0.7 points.
+
+---
+
+## 4. Calculator formulas (Step 3, code)
+
+Notation: `P_t` = price at month-end t; monthly return `r_t = P_t / P_{t-1} - 1`. Use monthly data unless stated. All outputs in % to 2 d.p. internally, displayed to 1 d.p.
+
+### 4.1 Returns
+- **Cumulative return over n years:** `R_cum = P_end / P_start - 1`, where `P_start` is the last price on or before `end_date - n years`.
+- **Annualised return:** `R_ann = (1 + R_cum)^(1/n) - 1`.
+- **Discrete 12-month returns:** cumulative return for each 12-month window ending on `as_of_date`, `as_of_date - 1y`, ... (last 5 windows).
+- **Calendar-year returns:** `P_Dec31(y) / P_Dec31(y-1) - 1`; current year labelled "YTD".
+- **Since launch (annualised):** use the first available price; required when `short_history = true`.
+
+### 4.2 Relative performance
+- **Excess return (cumulative):** `R_cum_fund - R_cum_bench` (percentage points).
+- **Annualised excess / tracking difference:** `TD = R_ann_fund - R_ann_bench`.
+- **Cost-adjusted tracking difference (index funds):** `TD_ex_cost = TD + OCF`. Values near 0 mean the gap is explained by charges.
+
+### 4.3 Risk (monthly data, annualised)
+- **Volatility:** `sigma = stdev(r_t) * sqrt(12)` (sample stdev). For daily data use `sqrt(252)`.
+- **Maximum drawdown:** `MDD = min_t (P_t / max_{s<=t} P_s - 1)` over the window.
+- **Sharpe ratio:** `(R_ann - rf_ann) / sigma`; `rf` from config (e.g. UK Bank Rate or SONIA average for the window). If no rf is supplied, use 0 and flag it.
+- **Tracking error:** `TE = stdev(r_fund_t - r_bench_t) * sqrt(12)`.
+- **Information ratio:** `IR = (R_ann_fund - R_ann_bench) / TE`.
+- **Beta:** `cov(r_fund, r_bench) / var(r_bench)`.
+- **R-squared:** `corr(r_fund, r_bench)^2`.
+- **Alpha (annualised, simple):** `R_ann_fund - [rf + beta * (R_ann_bench - rf)]`.
+- **Relative volatility:** `sigma_fund / sigma_bench`.
+- Prefer factsheet risk figures when supplied; show calculated ones as a cross-check.
+
+### 4.4 Consistency
+- **Hit rate:** number of the last 5 discrete 12-month periods where the fund met its objective test (index fund: abs(TD for that year) <= tolerance; active: fund >= target).
+
+### 4.5 Attribution by sector (optional, when weights and sector returns are supplied)
+- Brinson: allocation `= (w_f - w_b) * (R_b,sector - R_b,total)`; selection `= w_b * (R_f,sector - R_b,sector)`; interaction `= (w_f - w_b) * (R_f,sector - R_b,sector)`. Sum across sectors.
+
+### 4.6 Peer comparison
+- **Peer return gap (annualised):** `R_ann_peer - R_ann_fund` for 1/3/5y (same currency and share class basis, both net of fees).
+- **Fee gap:** `OCF_fund - OCF_peer` (percentage points).
+
+### 4.7 Charts
+1. Cumulative growth of 100: fund vs benchmark (and peer) over 5 years.
+2. Discrete 12-month returns bar chart: fund vs benchmark.
+3. Drawdown chart.
+
+---
+
+## 5. Mandate Agent (Step 3, AI) and the decision tree
+
+The Mandate Agent reads `objective_text` and returns JSON only:
+```json
+{"objective_type": "index_tracker", "benchmark_role": "target", "time_horizon_years": 5,
+ "secondary_objective": null, "promises": ["Track the S&P 500 (NUK) index", "Grow investment over 5+ years"]}
+```
+Code validates the JSON against the allowed values; if the user-supplied profile disagrees, the profile wins and a flag is raised.
+
+### 5.1 Decision tree (code)
+```
+1. What is objective_type?
+   index_tracker      -> judge tracking (TD, TD_ex_cost, TE, R2) vs benchmark
+   active_target      -> judge annualised excess return vs the target over the horizon
+   active_comparator  -> judge peer/sector ranking (quartile) and excess vs comparator
+   active_constraint  -> judge excess vs benchmark + check stays within constraints
+   income_target      -> judge yield/income vs target AND capital preservation
+   absolute_return    -> judge return vs stated target (e.g. cash + x%) and drawdown
+2. Is there a secondary_objective (dual objective)?
+   yes -> rate each objective separately; Performance rating = the worse of the two
+3. Is history shorter than the horizon (short_history)?
+   yes -> use since-launch annualised figures; Performance = AMBER with reason
+          "track record shorter than the fund's time horizon"; never RED on history alone
+4. Main test period = time_horizon_years (default 5); 1y and 3y shown as trend context
+5. Apply the Section 3.4 data checks before rating; any blocking flag -> CHECK DATA
+```
+
+---
+
+## 6. Oversight scorecard (Step 4, code)
+
+Four questions, each `GREEN`, `AMBER`, `RED` or `CHECK DATA`. Thresholds below are defaults in `config/thresholds.yaml` (illustrative; to be agreed with the oversight team).
+
+### 6.1 Mandate: is the fund doing what it promised?
+- GREEN: invests in line with its objective/policy (index fund: R2 >= 0.98 and beta 0.95 to 1.05; active: style and holdings consistent with policy).
+- AMBER: minor drift (index fund: R2 0.95 to 0.98, or beta outside 0.95 to 1.05 but within 0.90 to 1.10).
+- RED: clear drift from mandate.
+
+### 6.2 Performance vs benchmark (main period = horizon)
+Index funds (use cost-adjusted tracking difference and TE):
+- GREEN: `abs(TD) <= OCF + 0.10` and `TE <= 0.30`
+- AMBER: `abs(TD) <= OCF + 0.30` or `TE <= 1.00`
+- RED: otherwise (but `CHECK DATA` if based on price data only and gap > 1.0%)
+
+Active funds with a target:
+- GREEN: annualised excess over horizon >= 0
+- AMBER: between -1.0 and 0, or >= 0 but hit rate < 3 of 5
+- RED: < -1.0
+Comparator funds: GREEN = quartile 1 to 2, AMBER = quartile 3, RED = quartile 4 (over horizon).
+
+### 6.3 Value for investors: compared with an alternative, did investors get a fair outcome?
+Uses the peer return gap over the main period (annualised, net of fees):
+- GREEN: peer outperforms by <= 0.10% a year (or fund outperforms peer)
+- AMBER: peer outperforms by 0.10% to 0.50% a year
+- RED: peer outperforms by > 0.50% a year
+- No peer supplied: AMBER with reason "no comparison available".
+
+### 6.4 Is the fee justified?
+- Index funds: GREEN if `OCF_fund <= OCF_peer + 0.05`; AMBER if `<= OCF_peer + 0.20`; RED otherwise.
+- Active funds: GREEN if OCF <= peer median OCF and Performance is not RED; AMBER if OCF above peer median but Performance GREEN; RED if OCF above peer median and Performance RED.
+- Any performance fee: add a note; AMBER minimum unless justified in the profile.
+
+### 6.5 Verdict
+- Any RED -> **Review**
+- Else any AMBER -> **Monitor**
+- Else -> **Retain**
+- Any `CHECK DATA` on Performance or Mandate -> verdict "Pending data check" (no verdict until resolved).
+
+Expected example (from the design): Mandate GREEN, Performance GREEN, Value AMBER, Fees AMBER -> **Monitor** ("tracks the index exactly, but a cheaper peer returned 0.18% a year more").
+
+---
+
+## 7. FCA Assessment of Value mapping (shown on report page 3)
+
+The FCA rule (COLL 6.6.20R) requires an annual assessment of whether charges are justified by overall value, across 7 factors. The report maps the scorecard to them:
+
+| AoV factor | Source in this agent | If no data |
+|---|---|---|
+| 1. Quality of service | Not public | "Requires internal data" |
+| 2. Performance | Scorecard 6.1 + 6.2 | n/a |
+| 3. AFM costs | OCF, transaction costs, performance fee | Flag missing |
+| 4. Economies of scale | Fund size; OCF history if supplied | "Requires OCF history" |
+| 5. Comparable market rates | Scorecard 6.4 (peer OCF) | "No peer supplied" |
+| 6. Comparable services | Other share classes/mandates of same manager, if supplied | "Requires internal data" |
+| 7. Classes of units | Share class list and fees, if supplied | "Requires share class data" |
+
+The report must state clearly: "This is an indicative assessment from public data. It does not replace the AFM's formal Assessment of Value."
+
+---
+
+## 8. AI agents (Steps 5 to 7)
+
+All agents return structured JSON validated with Pydantic. Use the OpenAI Agents SDK (or LangGraph). Temperature low (0 to 0.3).
+
+| Agent | Input | Output | Limits |
+|---|---|---|---|
+| Extractor | Factsheet/KID text | `factsheet_performance.json`, draft `fund_profile.json` | Labels all values `ai_extracted` |
+| Mandate | `objective_text` | Mandate JSON (Section 5) | Allowed values only |
+| Planner | Fund profile + scorecard | Up to 5 search queries (fund news, manager changes, market drivers for the period) | Max 5 queries |
+| Search (parallel) | One query each | `{query, summary, url, date}` | One search each, no retries |
+| Oversight Analyst | facts JSON + scorecard + search summaries | Findings, actions, market context | Cannot change ratings; may only quote given numbers |
+| Notify | Final PDF path + settings | Email + phone alert | Recipients from settings only; no retries |
+
+### 8.1 Oversight Analyst system prompt (core rules)
+- You explain ratings that have already been decided by code. Never change, soften or override a rating.
+- Only use numbers that appear in the provided facts. Do not calculate new numbers.
+- If a figure is labelled `ai_extracted`, write "(please verify)" next to it.
+- If any item is `CHECK DATA`, explain what needs checking instead of drawing a conclusion.
+- Plain English, short sentences, no jargon without a one-line explanation.
+- Structure: 3 key findings, 2 to 3 recommended actions, short market context with sources.
+
+### 8.2 Planner/Search rules
+- Queries must be about the fund, its manager, or market drivers in the review period.
+- Never send client data or uploaded documents to search.
+- Each summary must cite its URL; the report lists all sources.
+
+### 8.3 Number-guard validator (code)
+After the Analyst responds: extract all numbers from its text (regex for decimals and %). Every number must match a value in the facts JSON (allowing rounding to 1 d.p.). If not, reject and re-prompt once; if it fails again, use a template-only narrative and flag it.
+
+---
+
+## 9. Report (Step 7): 3-page PDF
+
+1. **Summary and scorecard:** fund, question, as-of date, draft verdict (Retain/Monitor/Review), 4 ratings with one-line reasons, data flags, approval box (reviewer name, date, Retain/Monitor/Review, signature).
+2. **Mandate and performance:** objective and promises, decision-tree path taken, 1/3/5y table (fund, benchmark, gap; cumulative and annualised), discrete 12-month table, risk table, charts.
+3. **Value, fees and sources:** peer comparison, fee comparison, AoV 7-factor table, thresholds used, list of every file and web source, AI-extracted figures marked "please verify", disclaimer.
+
+Target runtime: about 1 to 2 minutes end to end.
+
+---
+
+## 10. Test cases and expected results
+
+### Test 1: Fidelity Index US Fund P Acc (GB00BJS8SH10), as of 30 Sep 2026
+Inputs: monthly NAV CSV (Nov 2012 to Sep 2026), UK factsheet, KID.
+Expected:
+- Calculated NAV cumulative returns match factsheet: **1y 17.5%, 3y 69.0%, 5y 88.3%** (5y annualised 13.5%).
+- Fair comparison uses PNAV vs index: **1y 17.0 vs 17.1, 3y 69.0 vs 69.5, 5y 90.9 vs 91.6**; 5y annualised 13.8% vs about 13.9%.
+- OCF 0.06%; TE (3y) 0.02; beta 1.00; R2 1.00 (factsheet).
+- Mandate GREEN; Performance GREEN.
+- Data flags raised: repeated prices on 2013-06-30/2013-08-31, 2013-12-31/2014-02-28, **2024-07-31/2024-09-30**; trailing comma handled.
+- Must NOT rate Performance RED from midday NAV 88.3% vs index 91.6%.
+
+### Test 2: Fidelity S&P 500 Index Fund P EUR Acc (IE00BYX5MX67): currency trap
+Inputs: daily NAV XLSX with `Index Level` column (index in USD, fund in EUR), factsheet.
+Expected:
+- Fund 12-month return to 30 Sep 2026 = 19.3% (matches factsheet).
+- Detect that the price-file index does not match the factsheet EUR index (e.g. 2022: file index -18.5% vs factsheet -13.2%) -> `CHECK DATA: currency mismatch`; use factsheet index figures instead.
+- Flag 2 missing index values (2024-06-28, 2025-08-29).
+
+### Test 3: A Marlborough fund (dual objective, e.g. income and growth)
+- Mandate Agent detects a secondary objective; Performance = worse of the two ratings.
+
+### Test 4: A fund with less than 5 years of history
+- `short_history = true`; since-launch figures used; Performance AMBER with the history reason; never RED on history alone.
+
+### Answer key
+Keep the manager's published Value Assessment Report out of the agent's inputs. Compare the agent's conclusion with it afterwards.
+
+---
+
+## 11. Build order for Claude Code
+
+1. **Project setup:** `src/` modules: `io.py` (file reader), `checks.py` (Section 3.4), `calc.py` (Section 4), `mandate.py` (decision tree), `scorecard.py` (Section 6), `agents/` (Section 8), `report.py` (Section 9); `config/thresholds.yaml`; `tests/`.
+2. **File reader + data checks** with unit tests for Tests 1 and 2 (dates, trailing comma, `-` values, repeated prices, currency mismatch).
+3. **Calculator** with unit tests reproducing the Test 1 figures exactly.
+4. **Factsheet precedence and cross-check** (0.3 pp tolerance).
+5. **Decision tree + scorecard** driven by `thresholds.yaml`; unit tests for each branch (index, active, dual, short history, CHECK DATA).
+6. **Extractor and Mandate agents** with Pydantic schemas.
+7. **Oversight Analyst + number-guard validator.**
+8. **Planner + parallel Search agents** (max 5, no retries).
+9. **3-page PDF report** with charts and approval box.
+10. **Notify agent** (recipients from settings).
+11. **Gradio front end** (upload files, ask the question, download the PDF); deploy as with the existing project.
+12. **Run all 4 test cases**, compare Test 1 with the published Value Assessment Report, and record results in `tests/RESULTS.md`.
+
+Definition of done: all unit tests pass; Test 1 and Test 2 expected values reproduced; no rating can be changed by the AI; every figure in the PDF has a source.
