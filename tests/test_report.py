@@ -119,6 +119,24 @@ def test_test1_page2_figures_and_sources(test1_pdf):
 
 
 @requires_test1
+def test_test1_page2_review_fixes(test1_pdf):
+    p2 = " ".join(page_texts(test1_pdf)[1].split())
+    # 1. Decision path in plain words
+    assert "Index fund, so it is judged on how closely it tracks its index" in p2
+    assert not any(code in p2 for code in ("TD_ex_cost", "(TD", "TE,", "index_tracker", "R2"))
+    # 2. Risk rows under source, period and basis subheadings; the calculated Sharpe ratio is not on page 2
+    for heading in ("Factsheet · 3 years, market-close price (PNAV)", "Factsheet · 3 years, noon price (NAV)",
+                    "Calculated · 5 years, noon price (NAV)"):
+        assert heading in p2, heading
+    assert "risk-free rate 0" not in p2 and "Period, basis" not in p2
+    # 3. Below the surface: plain sentences, then one short source line
+    assert "The fair comparison uses the fund's market-close price (PNAV). 5 years: Fund noon price 88.3%" in p2
+    assert "Fair gap −0.7 pp. Source: factsheet; gaps calculated." in p2
+    # 4. Returns table note
+    assert "Cumulative gaps to 1 d.p., yearly gaps to 2 d.p." in p2
+
+
+@requires_test1
 def test_test1_page3_value_fees_and_aov(test1_pdf):
     p3 = " ".join(page_texts(test1_pdf)[2].split())          # table cells wrap lines
     for text in ("Add peer", "Not disclosed in the documents provided", "Partly", "Quality of service",
@@ -134,3 +152,29 @@ def test_test1_appendix(test1_pdf):
                  "illustrative, to be agreed with the oversight team", "Glossary", "tracking difference",
                  "Known limitations", "Public data only", "checked against factsheet: consistent"):
         assert text in p4, text
+    flat = " ".join(p4.split())
+    assert "Calculated Sharpe ratio Fund 0.98 (5 years, noon price (NAV), calculated from prices with a risk-free rate" in flat
+    assert "not comparable with the factsheet Sharpe ratio" in flat
+    # 5. Glossary: the terms used, including the new ones
+    glossary = flat.split("Glossary (terms used in this report)")[1].split("Known limitations")[0]
+    for term in ("NAV:", "Sharpe ratio:", "information ratio:", "alpha:", "largest fall:", "Assessment of Value (AoV):",
+                 "AFM:"):
+        assert term in glossary, term
+
+
+def test_glossary_lists_only_terms_the_report_uses(tmp_path):
+    texts = page_texts(build_report(made_up_inputs(), tmp_path))
+    glossary = " ".join(texts[-1].split()).split("Glossary (terms used in this report)")[1].split("Known limitations")[0]
+    assert "tracking difference:" in glossary and "Assessment of Value (AoV):" in glossary
+    assert ("AFM:" in glossary) == ("AFM" in " ".join(texts))
+
+
+def test_plain_decision_path_for_each_objective_type():
+    from fund_performance.models import DataFlag as Flag
+    from fund_performance.report import OBJECTIVE_WORDS, plain_path
+    prof = FundProfile.model_validate(json.loads((FIXTURES / "fund_profile_sample.json").read_text()))
+    for kind in OBJECTIVE_WORDS:
+        steps = plain_path(decision_path(prof.model_copy(update={"objective_type": kind}), False, []))
+        assert len(steps) == 5 and "_" not in " ".join(steps)
+    blocked = plain_path(decision_path(prof, True, [Flag(check="x", level="blocking", message="Currency mismatch")]))
+    assert "since-launch figures are used" in blocked[2] and blocked[4].endswith("so the ratings wait for a data check.")

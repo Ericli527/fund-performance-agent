@@ -424,15 +424,21 @@ over is an error (`ReportLayoutError`), never a silent overflow. Code checks thi
    with one-line plain-English reasons and Green/Amber/Red colours; key findings and actions;
    approval box (reviewer name, date, Retain / Monitor / Review, signature) with a tick box for each
    Manual check item.
-2. **Mandate and performance:** objective, promises and the decision-tree path; 1/3/5-year table
-   (fund, index, gap; cumulative and annualised); calendar years; risk table with sources; data
-   notes; charts: growth of 100 and yearly returns, fund vs index.
+2. **Mandate and performance:** objective, promises and the decision-tree path in plain words (no code
+   names); 1/3/5-year table (fund, index, gap; cumulative and annualised) with the note "Cumulative
+   gaps to 1 d.p., yearly gaps to 2 d.p."; calendar years; risk table grouped under small subheadings
+   by source, period and price basis (e.g. "Factsheet · 3 years, market-close price (PNAV)"), so no
+   measure appears without its context; "Below the surface": the data notes' plain sentences, each
+   followed by one short source line in small text with its figures; charts: growth of 100 and yearly
+   returns, fund vs index.
 3. **Value, fees and Assessment of Value:** peer and fee comparison ("Add peer" callout when there
    is no peer); the AoV 7-factor table (Covered / Partly / Not assessed) with its disclaimer; market
    context with [n] citations ("No market context" when there is none).
 4. **Appendix:** flags by level (blocking, warning, info); excluded web sources with reasons;
-   numbered sources with dates ("published" or "as at") and every input file; thresholds
-   ("illustrative, to be agreed with the oversight team"); glossary (`glossary.py`); known
+   numbered sources with dates ("published" or "as at") and every input file; the calculated Sharpe
+   ratio (risk-free rate 0), noted as not comparable with the factsheet figure; thresholds
+   ("illustrative, to be agreed with the oversight team"); glossary of the terms the report actually
+   uses (`glossary.py`, each definition under 10 words); known
    limitations (Section 12); the "public data only" note and the disclaimer.
 
 Display rules:

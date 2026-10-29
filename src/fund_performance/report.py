@@ -5,6 +5,7 @@ Value, then the appendix. Every figure shows its source; AI-extracted figures sa
 report runs over 5 pages, the appendix is shortened first; a main page that overflows is an error.
 """
 import base64
+import re
 from dataclasses import dataclass, field
 import shutil
 from datetime import date
@@ -18,7 +19,8 @@ from fund_performance import charts
 from fund_performance.agents.analyst import Narrative
 from fund_performance.config import Thresholds
 from fund_performance.facts import TWO_DP
-from fund_performance.glossary import GLOSSARY
+from fund_performance.glossary import used_in
+from fund_performance.mandate import DecisionPath
 from fund_performance.models import DataFlag, Figure, FundProfile, Peer
 from fund_performance.precedence import ReportedFigures
 from fund_performance.scorecard import AMBER, CHECK_DATA, GREEN, MANUAL_CHECK, RED, Scorecard
@@ -201,8 +203,8 @@ def _returns_table(inp: ReportInputs) -> str:
                  + "".join(f"<td>{fmt('comparison.td' if i >= 3 else 'comparison.excess_cum', g)}</td>"
                            for i, g in enumerate(gap)) + "<td class='src'>Calculated from the factsheet</td></tr>")
     head = "".join(f"<th>{c}</th>" for c, _ in cols)
-    return (f"<table class='grid num'><tr><th class='l' width='27%'>Return</th>{head}<th width='14%'>Source</th></tr>"
-            f"{rows}</table>")
+    return (f"<table class='grid num'><tr><th class='l' width='31%'>Return</th>{head}<th width='14%'>Source</th></tr>"
+            f"{rows}</table><p class='small'>Cumulative gaps to 1 d.p., yearly gaps to 2 d.p.</p>")
 
 
 def _calendar_table(inp: ReportInputs) -> str:
@@ -215,37 +217,53 @@ def _calendar_table(inp: ReportInputs) -> str:
         if any(figs):
             rows += (f"<tr><td class='l'>{label}</td>" + "".join(f"<td>{fmt(series, f)}</td>" for f in figs)
                      + f"<td class='src'>{source_of(*figs)}</td></tr>")
-    return ("<table class='grid num tiny'><tr><th class='l'>Calendar year</th>"
+    return ("<table class='grid num tiny'><tr><th class='l' width='13%'>Calendar year</th>"
             + "".join(f"<th>{y}</th>" for y in years) + f"<th>Source</th></tr>{rows}</table>")
 
 
-def _risk_table(inp: ReportInputs) -> str:
+PRICE_WORDS = {"pnav": "market-close price (PNAV)", "nav": "noon price (NAV)"}
+
+
+def _risk_groups(inp: ReportInputs) -> list[tuple[str, list[tuple[str, str, str | None]]]]:
+    """ Risk rows grouped by period and price basis; each group's source is read from its figures """
     n = _years(inp)
-    lines = [
-        ("Volatility, a year", "risk.pnav.fund_vol.3y", "risk.pnav.index_vol.3y", "3 years, PNAV"),
-        ("Tracking error", "risk.pnav.tracking_error.3y", None, "3 years, PNAV"),
-        ("Beta", "risk.pnav.beta.3y", None, "3 years, PNAV"),
-        ("R²", "risk.pnav.r2.3y", None, "3 years, PNAV"),
-        ("Sharpe ratio", "risk.pnav.sharpe_fund.3y", "risk.pnav.sharpe_index.3y", "3 years, PNAV"),
-        ("Information ratio", "risk.pnav.info_ratio.3y", None, "3 years, PNAV"),
-        ("Alpha, a year", "risk.pnav.alpha.3y", None, "3 years, PNAV"),
-        ("Volatility, a year", "risk.nav.fund_vol.3y", None, "3 years, NAV"),
-        ("Sharpe ratio", "risk.nav.sharpe_fund.3y", None, "3 years, NAV"),
-        ("Tracking error", f"relative.tracking_error.{n}y", None, f"{n} years, prices"),
-        ("Volatility, a year", f"fund_nav.vol.{n}y", f"index.vol.{n}y", f"{n} years, NAV prices"),
-        ("Largest fall from a peak", f"fund_nav.mdd.{n}y", f"index.mdd.{n}y", f"{n} years, NAV prices"),
-        ("Sharpe ratio (risk-free rate 0)", f"fund_nav.sharpe.{n}y", f"index.sharpe.{n}y", f"{n} years, NAV prices"),
-    ]
-    rows = ""
-    for label, fund_name, index_name, basis in lines:
-        fund, index = _f(inp, fund_name), _f(inp, index_name) if index_name else None
-        if fund is None:
-            continue
-        rows += (f"<tr><td class='l'>{label}</td><td>{fmt(fund_name, fund)}</td>"
-                 f"<td>{fmt(index_name or '', index) if index else '–'}</td><td class='l'>{basis}</td>"
-                 f"<td class='src'>{source_of(fund, index)}</td></tr>")
-    return (f"<table class='grid num tiny'><tr><th class='l' width='34%'>Risk measure</th><th>Fund</th><th>Index</th>"
-            f"<th class='l'>Period, basis</th><th>Source</th></tr>{rows}</table>")
+    groups = [(f"3 years, {PRICE_WORDS[b]}", [
+        ("Volatility, a year", f"risk.{b}.fund_vol.3y", f"risk.{b}.index_vol.3y"),
+        ("Tracking error", f"risk.{b}.tracking_error.3y", None),
+        ("Beta", f"risk.{b}.beta.3y", None),
+        ("R²", f"risk.{b}.r2.3y", None),
+        ("Sharpe ratio", f"risk.{b}.sharpe_fund.3y", f"risk.{b}.sharpe_index.3y"),
+        ("Information ratio", f"risk.{b}.info_ratio.3y", None),
+        ("Alpha, a year", f"risk.{b}.alpha.3y", None),
+    ]) for b in ("pnav", "nav")]
+    groups.append((f"{n} years, {PRICE_WORDS['nav']}", [
+        ("Tracking error", f"relative.tracking_error.{n}y", None),
+        ("Volatility, a year", f"fund_nav.vol.{n}y", f"index.vol.{n}y"),
+        ("Largest fall from a peak", f"fund_nav.mdd.{n}y", f"index.mdd.{n}y"),
+    ]))
+    return [(title, [r for r in rows if _f(inp, r[1]) is not None]) for title, rows in groups]
+
+
+def _risk_table(inp: ReportInputs) -> str:
+    """ One subheading per source, period and price basis, so no measure appears without its context. The
+    calculated Sharpe ratio (risk-free rate 0) is in the appendix, as it is not comparable """
+    def table(groups) -> str:
+        body = ""
+        for title, rows in groups:
+            figs = [_f(inp, name) for _, f_name, i_name in rows for name in (f_name, i_name) if name]
+            body += f"<tr><td class='sub' colspan='3'>{source_of(*figs)} · {title}</td></tr>"
+            for label, fund_name, index_name in rows:
+                index = _f(inp, index_name) if index_name else None
+                body += (f"<tr><td class='l'>{label}</td><td>{fmt(fund_name, _f(inp, fund_name))}</td>"
+                         f"<td>{fmt(index_name, index) if index else '–'}</td></tr>")
+        return ("<table class='grid num tiny'><tr><th class='l' width='54%'>Risk measure</th><th>Fund</th>"
+                f"<th>Index</th></tr>{body}</table>")
+    groups = [g for g in _risk_groups(inp) if g[1]]
+    if len(groups) < 2:
+        return table(groups) if groups else "<p class='small'>No risk figures.</p>"
+    # The first group on the left, the rest on the right, so the table takes half the height
+    return (f"<table width='100%'><tr><td width='49%' valign='top'>{table(groups[:1])}</td><td width='2%'></td>"
+            f"<td width='49%' valign='top'>{table(groups[1:])}</td></tr></table>")
 
 
 def _chart_images(inp: ReportInputs, out_dir: Path) -> tuple[Path | None, Path | None, str]:
@@ -292,18 +310,65 @@ def _img(path: Path | None) -> str:
     return f'<img src="data:image/png;base64,{base64.b64encode(path.read_bytes()).decode()}" width="245"/>'
 
 
+OBJECTIVE_WORDS = {
+    "index_tracker": ("Index fund", "how closely it tracks its index: the yearly gap (tracking difference), the gap "
+                                    "after the fee, how much the gap varies (tracking error) and how closely they move "
+                                    "together (R²)"),
+    "active_target": ("Active fund with a return target", "its yearly return above the target over the main period"),
+    "active_comparator": ("Active fund compared with similar funds",
+                          "its ranking among similar funds (quartile) and its return above the comparator"),
+    "active_constraint": ("Active fund with a benchmark limit",
+                          "its return above the benchmark and whether it stays within its limits"),
+    "income_target": ("Income fund", "its income (yield) against its target and whether it keeps its capital"),
+    "absolute_return": ("Absolute return fund", "its return against its stated target and its largest fall"),
+}
+
+
+def plain_path(path: DecisionPath) -> list[str]:
+    """ The decision path in plain words, built from its answers (no code names) """
+    kind, judged = OBJECTIVE_WORDS.get(path.objective_type, (path.objective_type, "its objective"))
+    steps = [f"{kind}, so it is judged on {judged}."]
+    if path.secondary_objective:
+        second = OBJECTIVE_WORDS.get(path.secondary_objective)
+        steps.append(f"Two objectives: the second is judged as an {second[0].lower()}. Each is rated separately; "
+                     "Performance takes the weaker rating." if second else
+                     f"Two objectives: the second ({path.secondary_objective}) is not a known type, so code cannot rate it.")
+    else:
+        steps.append("One objective only.")
+    steps.append("Track record shorter than the main test period: since-launch figures are used, and Performance "
+                 "is at least Amber, never Red on history alone." if path.short_history else
+                 "Track record long enough for the main test period.")
+    steps.append(f"Main test period: {path.main_period_years} years; 1 and 3 years are shown as the trend.")
+    steps.append("Data checks: " + ("; ".join(f.message for f in path.blocking) + ", so the ratings wait for a data check."
+                                    if path.blocking else "nothing blocks the ratings."))
+    return steps
+
+
+NOTE_SOURCES = {"fee": "Source: factsheet returns, ongoing charge from the fund profile; gaps calculated.",
+                "pricing": "Source: factsheet; gaps calculated.", "timing": "Source: factsheet; gaps calculated."}
+_PERIOD = re.compile(r"^(\d+)y$")
+
+
+def note_source_line(note: dict) -> str:
+    """ A data note's figures and source in one short line, e.g. "5 years: Fund noon price 88.3% · Index 91.6% ·
+    ... Source: factsheet; gaps calculated." (the plain-terms repeats are left out) """
+    shown = [f for f in note["figures"] if "in plain terms" not in f["label"]]
+    periods = {m.group(1) for f in shown for m in [_PERIOD.match(f["label"].rsplit(", ", 1)[-1])] if m}
+    parts = []
+    for f in shown:
+        name = re.sub(r"\s*\([^)]*\)", "", f["label"].split(", ")[0])
+        yearly = " a year" if ", a year" in f["label"] else ""
+        parts.append(f"{name} {f['display'].replace('-', '−')}{yearly}")
+    prefix = f"{periods.pop()} years: " if len(periods) == 1 else ""
+    return f"{prefix}{' · '.join(parts)}. {NOTE_SOURCES.get(note.get('kind'), 'Source: factsheet.')}"
+
+
 def _page2(inp: ReportInputs, out_dir: Path) -> str:
-    path = "".join(f"<li>{escape(s.split('. ', 1)[-1])}</li>" for s in inp.card.path.steps)
+    path = "".join(f"<li>{escape(step)}</li>" for step in plain_path(inp.card.path))
     promises = ("".join(f"<li>{escape(x)}</li>" for x in inp.promises) if inp.promises
                 else "<li>Not read: the Mandate Agent was not run.</li>")
-    def note_figures(n: dict) -> str:
-        shown = [f for f in n["figures"] if "in plain terms" not in f["label"]]
-        if not shown:
-            return ""
-        return (" <span class='small'>(" + "; ".join(f"{escape(f['label'].rsplit(', ', 1)[0])} "
-                                                     f"{f['display'].replace('-', '−')}" for f in shown)
-                + "; source: factsheet, gaps calculated)</span>")
-    notes = "".join(f"<li>{escape(n['note'])}{note_figures(n)}</li>" for n in inp.facts.get("data_notes", []))
+    notes = "".join(f"<li>{escape(n['note'])}<br/><span class='small'>{escape(note_source_line(n))}</span></li>"
+                    for n in inp.facts.get("data_notes", []))
     growth, yearly, caption = _chart_images(inp, out_dir)
     return f"""
 <h1>Mandate and performance</h1>
@@ -403,7 +468,22 @@ def _threshold_lines(t: Thresholds) -> list[str]:
     ]
 
 
-def _appendix(inp: ReportInputs, compact: bool) -> str:
+def _calculated_sharpe(inp: ReportInputs) -> str:
+    n = _years(inp)
+    fund, index = _f(inp, f"fund_nav.sharpe.{n}y"), _f(inp, f"index.sharpe.{n}y")
+    if fund is None:
+        return ""
+    index_text = f", index {fmt('x', index)}" if index else ""
+    return (f"<h3>Calculated Sharpe ratio</h3><p class='small'>Fund {fmt('x', fund)}{index_text} "
+            f"({n} years, noon price (NAV), calculated from prices with a risk-free rate of 0). It is not "
+            f"comparable with the factsheet Sharpe ratio on page 2, which uses its own risk-free rate and period.</p>")
+
+
+def plain_text(html: str) -> str:
+    return re.sub(r"<[^>]+>", " ", html)
+
+
+def _appendix(inp: ReportInputs, compact: bool, main_text: str = "") -> str:
     flags = list({(f.level, f.message): f for f in inp.flags}.values())
     excluded = [f for f in flags if f.check == "research" and "excluded" in f.message]
     checks = [f for f in flags if f not in excluded]
@@ -422,16 +502,19 @@ def _appendix(inp: ReportInputs, compact: bool) -> str:
         f"<li>[{s['number']}] {escape(s['query'])} · {'as at' if s.get('date_basis') == 'as_at' else 'published'} "
         f"{s['date']} · {escape(s['url'])}</li>" for s in inp.narrative.sources)
     excl = ("".join(f"<li>{escape(f.message)}</li>" for f in excluded) or "<li>None.</li>")
-    glossary = "".join(f"<li><b>{escape(term)}</b>: {escape(text)}</li>" for term, text in GLOSSARY.items())
     thresholds = "".join(f"<li>{escape(line)}</li>" for line in _threshold_lines(inp.thresholds)[: 4 if compact else None])
     limits = "".join(f"<li>{escape(x)}</li>" for x in KNOWN_LIMITATIONS)
+    sharpe = _calculated_sharpe(inp)
+    rest = f"{by_level}{excl}{sources}{sharpe}{thresholds}{limits}{PUBLIC_DATA_NOTE}{DISCLAIMER}"
+    glossary = "".join(f"<li><b>{escape(term)}</b>: {escape(text)}</li>"
+                       for term, text in used_in(main_text + plain_text(rest)).items())
     return f"""
 <h1>Appendix</h1>
 <h3>Data checks and flags</h3>{by_level or '<p class="small">No flags.</p>'}
 <h3>Excluded web sources</h3><ul class="tight small">{excl}</ul>
 <h3>Sources</h3><ul class="tight small">{sources}</ul>
-<h3>Thresholds used (illustrative, to be agreed with the oversight team)</h3><ul class="tight small">{thresholds}</ul>
-<h3>Glossary</h3><ul class="tight small">{glossary}</ul>
+{sharpe}<h3>Thresholds used (illustrative, to be agreed with the oversight team)</h3><ul class="tight small">{thresholds}</ul>
+<h3>Glossary (terms used in this report)</h3><ul class="tight small">{glossary}</ul>
 <h3>Known limitations</h3><ul class="tight small">{limits}</ul>
 <p class="small"><b>{PUBLIC_DATA_NOTE}</b></p>
 <p class="small">{DISCLAIMER}</p>
@@ -466,6 +549,7 @@ p {{ margin: 0 0 3px 0; }} ul, ol {{ margin: 0 0 3px 0; }} li {{ margin-bottom: 
 .ticks td {{ padding: 2px 4px; }} .box {{ border: 0.8px solid #1d2733; width: 10px; }}
 .callout td {{ background-color: #fff6e0; border-left: 3px solid {RATING_COLOURS[AMBER]}; padding: 6px 8px; }}
 .tight li {{ margin-bottom: 0; }}
+.grid td.sub {{ background-color: #e8edf3; color: {NAVY}; font-weight: bold; font-size: 6.8pt; text-align: left; }}
 #footer {{ font-size: 6.8pt; color: #4c5966; border-top: 0.5px solid #d5dbe1; padding-top: 2px; }}
 """
 
@@ -473,7 +557,8 @@ p {{ margin: 0 0 3px 0; }} ul, ol {{ margin: 0 0 3px 0; }} li {{ margin-bottom: 
 def build_html(inp: ReportInputs, out_dir: Path, compact: bool = False) -> str:
     footer = (f'<div id="footer">{escape(inp.profile.fund_name)} · Fund performance review (draft) · figures to '
               f'{inp.profile.as_of_date:%d %b %Y} · Public data only · Page <pdf:pagenumber> of <pdf:pagecount></div>')
-    pages = [_page1(inp), _page2(inp, out_dir), _page3(inp), _appendix(inp, compact)]
+    main = [_page1(inp), _page2(inp, out_dir), _page3(inp)]
+    pages = main + [_appendix(inp, compact, plain_text("".join(main)))]
     body = '<div style="page-break-before: always"></div>'.join(pages)
     return f"<html><head><meta charset='utf-8'/><style>{CSS}</style></head><body>{footer}{body}</body></html>"
 
