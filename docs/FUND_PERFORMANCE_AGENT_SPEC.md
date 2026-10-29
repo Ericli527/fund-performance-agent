@@ -1,9 +1,9 @@
-# Fund Oversight Agent: Build Specification
+# Fund Performance Agent: Build Specification
 
-Purpose: one question in, a 3-page oversight report out.
+Purpose: fund documents in, a 3-page performance review out.
 **Code does the maths and the decisions. AI reads and writes. A person makes the final call.**
 
-This spec follows the design diagram (7 steps, 6 AI agents, 4 oversight questions, max 5 web searches, 3-page report, 1 person signs off). Build in the order given in Section 11.
+This spec follows the design diagram `Fund_Performance_Agent_Overview.pdf` (workflow controller in code, 7 steps, 6 AI agents, 4 oversight questions, max 5 web searches in the demo, 3-page report, 1 person signs off). The 6 AI agents are: Extractor, Mandate, Planner, Search (several copies run in parallel), Oversight Analyst, Evaluator. Build in the order given in Section 11.
 
 ---
 
@@ -15,7 +15,8 @@ This spec follows the design diagram (7 steps, 6 AI agents, 4 oversight question
 4. **Every number has a source.** Each figure carries a `source` field: `factsheet`, `calculated`, `ai_extracted` (must be labelled "please verify"), or `web`.
 5. **The AI explains but cannot change.** The Oversight Analyst may only quote numbers present in the facts JSON it is given (enforced by a validator, Section 8.3).
 6. **A person decides.** The verdict is a draft until the reviewer signs Retain / Monitor / Review.
-7. **Kept in bounds.** At most 5 web searches per run; no retries on failed emails; no confidential client data uploaded; email recipients come from settings, never from the AI.
+7. **Kept in bounds.** At most 5 web searches per run (demo setting, in config); public data only; no confidential client data uploaded.
+9. **Code controls the flow.** A workflow controller in code runs the steps in a fixed order. No AI agent decides which step runs next.
 8. **All thresholds live in `config/thresholds.yaml`**, are printed in the report, and are clearly labelled as illustrative until agreed with the oversight team.
 
 ---
@@ -228,7 +229,7 @@ Uses the peer return gap over the main period (annualised, net of fees):
 - Else -> **Retain**
 - Any `CHECK DATA` on Performance or Mandate -> verdict "Pending data check" (no verdict until resolved).
 
-Expected example (from the design): Mandate GREEN, Performance GREEN, Value AMBER, Fees AMBER -> **Monitor** ("tracks the index exactly, but a cheaper peer returned 0.18% a year more").
+Expected example (Test 1, no peer supplied): Mandate GREEN, Performance GREEN (tracking error 0.02), Value and Fees AMBER with reason "no comparison available" (shown as "Add peer" in the summary) -> draft verdict **Monitor until a peer is added**. Never invent peer figures.
 
 ---
 
@@ -261,7 +262,7 @@ All agents return structured JSON validated with Pydantic. Use the OpenAI Agents
 | Planner | Fund profile + scorecard | Up to 5 search queries (fund news, manager changes, market drivers for the period) | Max 5 queries |
 | Search (parallel) | One query each | `{query, summary, url, date}` | One search each, no retries |
 | Oversight Analyst | facts JSON + scorecard + search summaries | Findings, actions, market context | Cannot change ratings; may only quote given numbers |
-| Notify | Final PDF path + settings | Email + phone alert | Recipients from settings only; no retries |
+| Evaluator | Analyst draft + facts JSON + scorecard + search summaries | `{pass: bool, issues: [..]}` (Section 8.4) | One rewrite only, then template fallback |
 
 ### 8.1 Oversight Analyst system prompt (core rules)
 - You explain ratings that have already been decided by code. Never change, soften or override a rating.
@@ -280,6 +281,27 @@ All agents return structured JSON validated with Pydantic. Use the OpenAI Agents
 After the Analyst responds: extract all numbers from its text (regex for decimals and %). Every number must match a value in the facts JSON (allowing rounding to 1 d.p.). If not, reject and re-prompt once; if it fails again, use a template-only narrative and flag it.
 
 ---
+
+### 8.4 Evaluator Agent (quality check)
+Runs after the number-guard validator passes. Checks the Analyst draft against a fixed rubric and returns JSON only:
+```json
+{"pass": false, "issues": [{"check": "rating_explained", "detail": "Value rating not explained"}]}
+```
+Rubric (each must pass):
+1. **rating_explained:** every one of the 4 ratings is mentioned and its reason matches the scorecard reason.
+2. **no_rating_change:** the text never suggests a different rating or verdict.
+3. **supported_claims:** every claim is supported by the facts JSON or a cited search summary.
+4. **sources_cited:** every market or news statement cites a search URL.
+5. **check_data_handled:** any `CHECK DATA` item is explained as needing a check, not as a conclusion.
+6. **plain_english:** short sentences; any technical term has a one-line explanation.
+
+Flow: if `pass = false`, send the issues back to the Analyst for **one** rewrite, then re-run the number guard and the Evaluator. If it fails again, use the template-only narrative and add a flag "AI text failed quality check" to the report. The Evaluator never edits the text itself and never changes ratings. Use a different system prompt from the Analyst (and ideally a different model) so the work does not grade itself.
+
+### 8.5 Workflow controller (code)
+A plain Python function (not an AI agent) that runs: read files -> data checks -> extractor (if needed) -> mandate -> calculator -> scorecard -> planner -> search (parallel) -> analyst -> number guard -> evaluator -> report.
+- Stops the run with a clear message if a blocking data check fails before scoring.
+- Enforces limits from config: max searches, max one rewrite, timeouts.
+- Logs each step (start, end, inputs used) to `runs/<timestamp>/log.json`; the report's sources list is built from this log.
 
 ## 9. Report (Step 7): 3-page PDF
 
@@ -332,8 +354,18 @@ Keep the manager's published Value Assessment Report out of the agent's inputs. 
 7. **Oversight Analyst + number-guard validator.**
 8. **Planner + parallel Search agents** (max 5, no retries).
 9. **3-page PDF report** with charts and approval box.
-10. **Notify agent** (recipients from settings).
+10. **Evaluator agent + workflow controller** (Sections 8.4 and 8.5); unit test that a draft with a changed rating or an unsupported claim is rejected.
 11. **Gradio front end** (upload files, ask the question, download the PDF); deploy as with the existing project.
 12. **Run all 4 test cases**, compare Test 1 with the published Value Assessment Report, and record results in `tests/RESULTS.md`.
 
-Definition of done: all unit tests pass; Test 1 and Test 2 expected values reproduced; no rating can be changed by the AI; every figure in the PDF has a source.
+Definition of done: all unit tests pass; Test 1 and Test 2 expected values reproduced; no rating can be changed by the AI; every figure in the PDF has a source; the Evaluator rejects a bad draft in tests.
+
+---
+
+## 12. Roadmap (as shared with the team)
+
+| Phase | Scope |
+|---|---|
+| **v1: next two days** | Steps 1 to 11 above on Test 1 (Fidelity Index US Fund). Value and Fees show "Add peer" when no peer is supplied. |
+| **v2: next step** | Peer comparison for value and fees (e.g. SPDR S&P 500 UCITS ETF); run Tests 2, 3 and 4 (currency trap, dual objective, short history, active fund). |
+| **v3: later** | Agree thresholds and rating rules with the oversight team; adapt inputs to the team's own data and processes. |

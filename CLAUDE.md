@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 Instructions for Claude Code in this project. The build specification is
-`docs/FUND_OVERSIGHT_AGENT_SPEC.md`.
+`docs/FUND_PERFORMANCE_AGENT_SPEC.md`.
 
 ## Rules
 
@@ -17,3 +17,19 @@ Instructions for Claude Code in this project. The build specification is
    before starting the next.
 7. **Keep API keys in `.env`.** Never write a key into code, tests, docs or commits. `.env` stays
    in `.gitignore`.
+
+## Agreed decisions
+
+- Code lives in the package `src/fund_performance/` (so `io.py` cannot hide Python's own `io`).
+- Everything in `data/` is gitignored, because the repository is public. Never commit price files,
+  factsheets, KIDs or answer keys. Unit tests use small made-up files in `tests/fixtures/`; tests
+  that need the real Test 1 files are skipped when those files are missing.
+- Factsheet figures typed by hand carry `source: "factsheet"` and `entered_by: "manual"`.
+- Fund profile: optional `asset_class`, default `equity`.
+- Ambiguous dates: use the format that gives one price per month in date order; if both formats
+  do, stop and ask the user.
+- Risk-free rate: 0 for v1, with a flag. Prefer the factsheet Sharpe ratios where supplied.
+- Charts are built in step 9 with the report.
+- Emailing the report is a plain code function (not an AI agent), off by default, set up in
+  step 10. Recipients come from settings only.
+- The old app (root-level `*.py`) keeps running until the new front end replaces it in step 11.

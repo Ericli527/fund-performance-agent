@@ -1,0 +1,12 @@
+{
+  "as_of_date": "2026-09-30",
+  "currency": "GBP",
+  "series": {
+    "fund_nav": {"1y": 10.0, "3y": 30.0, "5y": 50.0, "basis": "cumulative", "pricing": "market_close"},
+    "index":    {"1y": 10.1, "3y": 30.4, "5y": 50.8, "basis": "cumulative", "pricing": "market_close"}
+  },
+  "calendar_years": {"index": {"2024": 12.0, "2025": 8.0}},
+  "risk_3y": {"tracking_error": 0.05, "beta": 1.00, "r2": 0.99},
+  "source": "factsheet",
+  "entered_by": "manual"
+}
