@@ -335,6 +335,10 @@ All agents return structured JSON validated with Pydantic. Use the OpenAI Agents
 
 ### 8.3 Number-guard validator (code)
 After the Analyst responds: extract all numbers from its text (regex for decimals and %). Every number must match a value in the facts JSON (allowing rounding to 1 d.p.). If not, reject and re-prompt once; if it fails again, use a template-only narrative and flag it.
+- Units must match: every figure in the facts JSON carries its unit (`%` for returns, `pp` for tracking differences and gaps), and a number in the text matches only a fact with the same unit, so -0.10 pp is never confused with a 0.10% return. Rounding to 1 or 2 d.p. is allowed; a whole number with % or pp must match exactly; a written minus must match a negative fact.
+- Not figures, so not checked: years (2024), periods ("5 years", "3y", "12-month"), counts ("4 questions", "5 of 5") and dates; in practice, any whole number without % or pp.
+- Rating guard (code): the text must not give a pillar a different rating, or use a verdict word other than the decided verdict. A failing draft is re-prompted once with the list of problems (bad numbers and changed ratings); then the template narrative is used with the flag "AI text failed number check".
+- The Analyst's inputs are the facts JSON (scorecard, decision-tree path, figures with units and sources, warning and blocking flags) and, from step 8, search summaries. Without search summaries, market context is null.
 
 ---
 
@@ -405,7 +409,7 @@ Keep the manager's published Value Assessment Report out of the agent's inputs. 
 
 ## 11. Build order for Claude Code
 
-1. **Project setup:** modules in the package `src/fund_performance/`: `io.py` (file reader), `checks.py` (Section 3.4), `calc.py` (Section 4), `precedence.py` (factsheet precedence and cross-check, step 4), `mandate.py` (decision tree), `scorecard.py` (Section 6), `agents/` (Section 8), `report.py` (Section 9), `controller.py` (Section 8.5); `config/thresholds.yaml`; `tests/`.
+1. **Project setup:** modules in the package `src/fund_performance/`: `io.py` (file reader), `checks.py` (Section 3.4), `calc.py` (Section 4), `precedence.py` (factsheet precedence and cross-check, step 4), `facts.py` (the facts JSON, step 7), `number_guard.py` (Section 8.3, step 7), `mandate.py` (decision tree), `scorecard.py` (Section 6), `agents/` (Section 8), `report.py` (Section 9), `controller.py` (Section 8.5); `config/thresholds.yaml`; `tests/`.
 2. **File reader + data checks** with unit tests for Tests 1 and 2 (dates, trailing comma, `-` values, repeated prices, currency mismatch).
 3. **Calculator** with unit tests reproducing the Test 1 figures exactly.
 4. **Factsheet precedence and cross-check** (0.3 pp tolerance).

@@ -64,6 +64,10 @@ Instructions for Claude Code in this project. The build specification is
   by python-dotenv.
 - Mandate Agent: the profile wins on any disagreement (flag); it classifies a free-text secondary
   objective into the six types, or CHECK DATA if it cannot.
+- Oversight Analyst (gpt-5.4, low reasoning): 3 key findings, 2-3 actions, market context only from
+  search summaries (else null). Number guard: same unit (% vs pp), 1 or 2 d.p. rounding; years,
+  periods, counts and dates not checked. Rating guard rejects a changed rating or verdict. One
+  rewrite with the problem list, then template narrative + flag "AI text failed number check".
 - Risk-free rate: 0 for v1, with a flag. Prefer the factsheet Sharpe ratios where supplied.
 - Charts are built in step 9 with the report.
 - Emailing the report is a plain code function (not an AI agent), off by default, set up in
