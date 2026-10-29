@@ -63,7 +63,7 @@ def evaluate(*answers):
 def test_a_draft_that_passes_both_checks_is_used():
     evaluator, check = evaluate(PASS)
     result = asyncio.run(write_narrative(FACTS, run=FakeRun(draft()), quality_check=check))
-    assert result.source == "ai" and result.log[-1] == "Evaluator passed the draft" and len(evaluator.prompts) == 1
+    assert result.source == "ai" and result.log[-1] == "Evaluator passed draft 1" and len(evaluator.prompts) == 1
 
 
 def test_evaluator_issues_go_back_for_the_one_rewrite():
@@ -71,7 +71,7 @@ def test_evaluator_issues_go_back_for_the_one_rewrite():
     _, check = evaluate(FAIL, PASS)
     result = asyncio.run(write_narrative(FACTS, run=analyst, quality_check=check))
     assert result.source == "ai" and "quality (rating_explained): Mandate is not mentioned" in analyst.prompts[1]
-    assert result.log[-1] == "Evaluator passed the draft after one rewrite"
+    assert result.log[-1] == "Evaluator passed draft 2"
 
 
 def test_failing_the_evaluator_twice_uses_the_template():
@@ -82,14 +82,39 @@ def test_failing_the_evaluator_twice_uses_the_template():
                                        "template narrative used")
 
 
-def test_only_one_rewrite_in_total():
-    """ A draft that fails code's checks uses the rewrite; if the Evaluator then fails it, the template is used """
-    bad = draft(key_findings=["The fund returned 99.9% a year.", "b", "c"])
-    evaluator, check = evaluate(FAIL)
-    analyst = FakeRun(bad, draft())
+def test_code_checks_and_the_evaluator_each_have_their_own_rewrite():
+    """ A draft that used the code-check rewrite still gets the Evaluator's rewrite: 2 rewrites at most """
+    bad = draft(key_findings=["The fund returned 99.9% a year."] + GOOD["key_findings"][1:])
+    evaluator, check = evaluate(FAIL, PASS)
+    analyst = FakeRun(bad, draft(), draft())
     result = asyncio.run(write_narrative(FACTS, run=analyst, quality_check=check))
-    assert len(analyst.prompts) == 2 and len(evaluator.prompts) == 1 and result.source == "template"
-    assert QUALITY_FAILED in result.flags[0].message
+    assert result.source == "ai" and len(analyst.prompts) == 3 and len(evaluator.prompts) == 2
+    assert "number not in the facts" in analyst.prompts[1] and "quality (rating_explained)" in analyst.prompts[2]
+    assert result.log[-1] == "Evaluator passed draft 3"
+
+
+def test_the_evaluator_only_sees_drafts_that_pass_code_checks():
+    """ The Evaluator's rewrite fails code's checks; code's own rewrite is still unused, so it is used """
+    bad = draft(key_findings=["The fund returned 99.9% a year."] + GOOD["key_findings"][1:])
+    evaluator, check = evaluate(FAIL, PASS)
+    analyst = FakeRun(draft(), bad, draft())
+    result = asyncio.run(write_narrative(FACTS, run=analyst, quality_check=check))
+    assert result.source == "ai" and len(evaluator.prompts) == 2 and len(analyst.prompts) == 3
+
+
+def test_no_third_rewrite():
+    bad = draft(key_findings=["The fund returned 99.9% a year."] + GOOD["key_findings"][1:])
+    evaluator, check = evaluate(FAIL)
+    analyst = FakeRun(bad, draft(), bad)
+    result = asyncio.run(write_narrative(FACTS, run=analyst, quality_check=check))
+    assert len(analyst.prompts) == 3 and len(evaluator.prompts) == 1 and result.source == "template"
+    assert result.flags[0].message.startswith("AI text failed checks: number")
+
+
+def test_rewrite_limits_come_from_the_config():
+    from fund_performance.config import load_thresholds
+    limits = load_thresholds().limits
+    assert (limits.max_analyst_rewrites, limits.max_evaluator_rewrites) == (1, 1)
 
 
 def test_no_valid_evaluator_result_uses_the_template_and_says_so():
@@ -148,3 +173,14 @@ def test_a_draft_with_an_unsupported_claim_is_rejected():
     assert result.source == "template"
     assert result.flags[0].message == (f"{QUALITY_FAILED}: the Evaluator rejected the draft (supported_claims); "
                                        "template narrative used")
+
+
+def test_plain_english_rule_is_calibrated_to_the_glossary():
+    """ From the full run: the Evaluator asked for definitions of everyday market words """
+    from fund_performance.glossary import glossary_lines
+    text = evaluator_agent().instructions
+    for line in glossary_lines():
+        assert line in text
+    assert "Only glossary terms need a definition" in text
+    for word in ("AI", "large-cap", "Treasury yields", "volatility"):
+        assert word in text.split("Everyday market words")[1].split("Glossary")[0]

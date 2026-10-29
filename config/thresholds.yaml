@@ -71,4 +71,5 @@ fees_index:
 # Sections 1 and 8.5: run limits (demo settings)
 limits:
   max_web_searches: 3
-  max_analyst_rewrites: 1
+  max_analyst_rewrites: 1      # rewrites after code's checks (number, label, rating, wording, insights, actions)
+  max_evaluator_rewrites: 1    # rewrites after the Evaluator's quality check (owner decision: separate from the above)

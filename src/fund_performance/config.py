@@ -79,6 +79,7 @@ class FeesIndex(_Section):
 class Limits(_Section):
     max_web_searches: int
     max_analyst_rewrites: int
+    max_evaluator_rewrites: int
 
 
 class Thresholds(_Section):

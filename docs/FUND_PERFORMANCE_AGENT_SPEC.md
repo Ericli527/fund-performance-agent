@@ -334,8 +334,11 @@ All agents return structured JSON validated with Pydantic. Use the OpenAI Agents
   sources"), each with an id, a default wording with its timing, words a rewording must keep, and a `required`
   mark. They are in the facts JSON as `candidate_actions`. The Analyst returns each action as
   `{candidate, text}`: it may only choose candidates and reword them, and must choose every required one while
-  there is room. Code rejects an unknown candidate, a repeat, a left-out required candidate, missing keep-words,
-  no "when", and method or period words (PNAV, NAV, noon, pricing, method, basis, period, calculation) that the
+  there is room. Each candidate has its own fixed "when" text (add_peer and Red: "before the next quarterly
+  review"; Check data, Manual check, warnings, read sources: "before signing off this review"; Amber: "at the next
+  quarterly review"; record decision: "at this review"), which the rewording keeps word for word; code's hint
+  quotes that candidate's own timing. Code rejects an unknown candidate, a repeat, a left-out required candidate,
+  missing keep-words, a changed "when", and method or period words (PNAV, NAV, noon, pricing, method, basis, period, calculation) that the
   candidate does not use. The template uses the default wording.
 - Readable for experts and newcomers: plain meaning first, technical term second in brackets; explain each
   term once in under 10 words using the shared glossary (`glossary.py`); no unexplained abbreviations
@@ -410,9 +413,12 @@ After the Analyst responds: extract all numbers from its text (regex for decimal
 - Label guard (code): if "tracking difference", "tracking error", "ongoing charge"/"OCF" or "cost-adjusted gap"
   is within 8 words of a number (in the same sentence; the nearest label before the number with no other number
   between, else one after it in the same clause), the number must be a fact of that type, in its unit and for the
-  period named nearby. A (cost-adjusted) tracking difference is yearly: "a year" must be nearby, and a negative
-  one needs its minus sign or a word such as "behind". Test 1: "tracking difference −3.3 pp" (the 5-year noon gap)
+  period named nearby. A (cost-adjusted) tracking difference is yearly: "a year" and its period ("over 5 years")
+  must be nearby, and a negative one needs its minus sign or a word such as "behind". The hint names the main test
+  period. Punctuation on its own is not counted as a word. Test 1: "tracking difference −3.3 pp" (the 5-year noon gap)
   and "cost-adjusted gap 0.04 pp" (no sign, no "a year") are rejected. Counts as a number problem.
+- Ratings named (code): the findings must name the Mandate and Performance ratings in words, pillar and rating in
+  the same sentence, e.g. "Mandate is Green", "Performance needs a data check". Counts as a rating problem.
 - Rating guard (code): the text must not give a pillar a different rating, or use a verdict word other than the decided verdict. A failing draft is re-prompted once with the list of problems (bad numbers and changed ratings); then the template narrative is used with the flag "AI text failed number check".
 - The Analyst's inputs are the facts JSON (scorecard, decision-tree path, figures with units and sources, warning and blocking flags) and, from step 8, search summaries. Without search summaries, market context is null.
 
@@ -440,8 +446,12 @@ As built (step 10, `agents/evaluator.py`):
 - supported_claims also covers labels (a figure called a tracking difference must be one) and that each action
   keeps the task and timing of its candidate.
 - An issue with `pass: true` still counts as a fail. `pass: false` with no issues is invalid output (retried once).
-- There is one rewrite in total (`limits.max_analyst_rewrites`), shared by code's checks and the Evaluator: a
-  draft that used it on a code problem and then fails the Evaluator goes to the template.
+- Separate rewrites (config, thresholds.yaml `limits`): code's checks get `max_analyst_rewrites` (1); the
+  Evaluator sees only drafts that pass code's checks and gets its own `max_evaluator_rewrites` (1), with its issues
+  sent to the Analyst. So at most 2 rewrites; a rewrite after the Evaluator goes through code's checks again.
+- plain_english is calibrated: it applies to glossary terms and their abbreviations (pp, PNAV, NAV, OCF, R², AoV,
+  AFM, tracking difference ...) at first use in the findings. Everyday market words (AI, large-cap, Treasury
+  yields, volatility ...) need no definition, in market context or anywhere. The Evaluator gets the glossary.
 - Flags say which happened, and the template is used in both cases (the draft is never used unchecked):
   rejected: "AI text failed quality check: the Evaluator rejected the draft (<checks>); template narrative used";
   not judged: "AI text not quality-checked: the Evaluator could not be reached; template narrative used" (call
@@ -458,7 +468,8 @@ number, label, rating and wording checks -> evaluator -> report -> email (off by
   fewer than 2 prices, or a report that does not fit its pages. A blocking data check (e.g. a currency mismatch)
   does not stop the run: the affected rating is CHECK DATA and the verdict is "Pending data check" (Sections 5.1
   and 6.5), so the report says what to fix.
-- Enforces limits from config: `limits.max_web_searches` and `limits.max_analyst_rewrites` (thresholds.yaml), and a
+- Enforces limits from config: `limits.max_web_searches`, `limits.max_analyst_rewrites` (code checks) and
+  `limits.max_evaluator_rewrites` (Evaluator) in thresholds.yaml, and a
   timeout for each AI step (`config/settings.yaml`: extractor 180 s, mandate 90 s, research 240 s, narrative 300 s).
   A step that runs over is handled like a failed step: mandate -> CHECK DATA (blocking flag); research -> no market
   context (warning); narrative -> template (warning); extractor -> calculated figures only (warning).

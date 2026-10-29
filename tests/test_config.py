@@ -43,6 +43,7 @@ def test_values_match_the_spec():
     assert t.fees_index.green_max_ocf_over_peer_pp == 0.05 and t.fees_index.amber_max_ocf_over_peer_pp == 0.20
     # Sections 1 and 8.5
     assert t.limits.max_web_searches == 3 and t.limits.max_analyst_rewrites == 1
+    assert t.limits.max_evaluator_rewrites == 1
 
 
 def test_no_risk_free_rate_means_zero_with_a_flag():

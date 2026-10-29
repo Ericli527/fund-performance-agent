@@ -137,7 +137,7 @@ def test_test1_full_run_mocked(tmp_path):
     assert research["outputs"]["web_searches"] <= 3                        # the limit, fallback included
     assert any("spglobal" in i for i in research["inputs"])
     assert result.narrative.source == "ai" and len(runners.evaluator.prompts) == 1
-    assert "Evaluator passed the draft" in next(s for s in log["steps"] if s["step"] == "narrative")["notes"]
+    assert "Evaluator passed draft 1" in next(s for s in log["steps"] if s["step"] == "narrative")["notes"]
     web = log["sources"]["web"]
     assert web and web == result.narrative.sources or not result.narrative.output.market_context
     assert result.facts["scorecard"]["verdict"] == "Monitor until a peer is added"

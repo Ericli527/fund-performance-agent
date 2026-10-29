@@ -311,7 +311,8 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         log.end(step, "skipped", notes=["offline run: template narrative"])
     else:
         narrative = await _timed(write_narrative(facts, vetted, max_rewrites=t.limits.max_analyst_rewrites,
-                                                 run=r.analyst, quality_check=partial(review, run=r.evaluator)),
+                                                 run=r.analyst, quality_check=partial(review, run=r.evaluator),
+                                                 max_evaluator_rewrites=t.limits.max_evaluator_rewrites),
                                  s.timeouts_seconds.narrative)
         if narrative is None:
             narrative = Narrative(template(facts), "template", [DataFlag(

@@ -213,7 +213,7 @@ ACTIONS = [{"candidate": "record_decision", "text": "Record the decision and its
 
 
 def _context(text):
-    return AnalystOutput(key_findings=["a", "b", "c"], actions=ACTIONS, market_context=text)
+    return AnalystOutput(key_findings=["Performance is Green.", "b", "c"], actions=ACTIONS, market_context=text)
 
 
 def test_market_context_cites_numbered_sources():
@@ -235,7 +235,7 @@ def test_figures_from_sources_are_not_allowed():
 
 
 def test_the_analyst_sees_numbered_sources_without_urls_and_the_report_gets_them():
-    good = {"key_findings": ["a", "b", "c"], "actions": ACTIONS, "market_context": "US shares rose, led by technology [1]."}
+    good = {"key_findings": ["Performance is Green.", "b", "c"], "actions": ACTIONS, "market_context": "US shares rose, led by technology [1]."}
     fake = FakeRun(good)
     result = asyncio.run(write_narrative(FACTS, SUMMARIES, run=fake))
     assert result.source == "ai" and result.output.market_context.endswith("[1].")

@@ -12,11 +12,12 @@ import json
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from fund_performance.agents.base import RunFn, build_agent, run_structured
+from fund_performance.glossary import glossary_lines
 
 Check = Literal["rating_explained", "no_rating_change", "supported_claims", "sources_cited", "check_data_handled",
                 "plain_english"]
 
-INSTRUCTIONS = """
+INSTRUCTIONS = f"""
 You are a strict quality checker for a draft investment oversight review. You do not write or edit text,
 and you never suggest a different rating or verdict. You check the draft against the rubric below and
 return JSON only: "pass" (true only if every check passes) and "issues" (one entry per problem found,
@@ -34,13 +35,20 @@ Rubric (each must pass):
    (e.g. "broadly Green", "close to Review").
 3. supported_claims: every claim is supported by the facts or by a cited source. Each figure is described as
    what it is in the facts: a number called a tracking difference must be the tracking difference, a
-   cumulative gap must not be called a yearly one, periods must match. Each action keeps the task and timing
-   of the candidate action it names.
+   cumulative gap must not be called a yearly one, periods must match. Each action keeps the task of the
+   candidate action it names and its "when" text word for word.
 4. sources_cited: every statement about markets or news cites a numbered source such as [1].
 5. check_data_handled: any CHECK DATA item is explained as needing a check, not used for a conclusion.
    A MANUAL CHECK item says what the reviewer must check.
-6. plain_english: short sentences; each technical term has a short explanation in brackets the first time
-   it is used (e.g. "R² 1.00 (how closely fund and index move together)"); no unexplained abbreviations.
+6. plain_english: applies to the key findings. Sentences are short. At its first use in the findings, each
+   term in the glossary below, and each abbreviation in it (pp, PNAV, NAV, OCF, R², AoV, AFM), has its short
+   definition in brackets, e.g. "R² 1.00 (how closely fund and index move together)"; later uses need none.
+   Only glossary terms need a definition. Everyday market words need none, anywhere, and are fine in the
+   market context: e.g. AI, large-cap, technology shares, Treasury yields, interest rates, inflation,
+   volatility, earnings.
+
+Glossary (the only terms that need a definition):
+{chr(10).join("- " + line for line in glossary_lines())}
 
 Do not raise an issue about style choices the rubric does not cover.
 """

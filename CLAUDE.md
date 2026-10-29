@@ -104,9 +104,13 @@ Instructions for Claude Code in this project. The build specification is
 - Emailing the report is a plain code function (`emailer.py`, not an AI agent), off by default
   (`config/settings.yaml`). Resend over HTTPS, as in the old app (RESEND_API_KEY, EMAIL_FROM in .env).
   Recipients come from settings only.
-- Evaluator (step 10, gpt-6.1-sol): rubric of 6 checks, output {pass, issues} only; one rewrite in total,
-  shared with code's checks; then template + "AI text failed quality check: the Evaluator rejected the
-  draft (...)". Unreachable or no valid answer -> template + "AI text not quality-checked: ...".
+- Evaluator (step 10, gpt-6.1-sol): rubric of 6 checks, output {pass, issues} only; runs only on drafts that
+  pass code's checks. Separate rewrites (thresholds.yaml): code checks 1, Evaluator 1 (2 at most); then
+  template + "AI text failed quality check: the Evaluator rejected the draft (...)". Unreachable or no valid answer -> template + "AI text not quality-checked: ...". Its
+  plain-English check covers glossary terms/abbreviations at first use in findings only (it gets the glossary);
+  everyday market words are fine.
+- Findings must name the Mandate and Performance ratings ("Mandate is Green"; code check). Each candidate
+  action has a fixed "when" kept word for word; tracking differences need their period ("over 5 years").
 - Controller (step 10, `controller.py`): stops (RunStopped) only when the run cannot be scored (missing or
   invalid inputs, unreadable prices, report not fitting); blocking data checks give CHECK DATA, not a stop.
   Extractor runs before data checks. Timeouts per AI step in `config/settings.yaml`. log.json per run;

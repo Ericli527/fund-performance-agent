@@ -32,8 +32,9 @@ FACTS = {
                 {"name": "index.ann.5y", "value": 13.9, "unit": "%"},
                 {"name": "comparison.td.5y", "value": -0.1, "unit": "pp"}]}
 
-GOOD = {"key_findings": ["The fund tracked its index closely: 13.8% a year against 13.9% over 5 years.",
-                         "The tracking difference, the gap between fund and index returns, was -0.10 pp a year.",
+GOOD = {"key_findings": ["Mandate is Green and Performance is Green: 13.8% a year against 13.9% over 5 years.",
+                         "The tracking difference, the gap between fund and index returns, was -0.10 pp a year "
+                         "over 5 years.",
                          "Value and fees cannot be judged until a peer fund is added."],
         "actions": [{"candidate": "add_peer", "text": "Add a comparable peer fund before the next quarterly review."},
                     {"candidate": "record_decision",
@@ -73,11 +74,11 @@ def test_one_rewrite_with_the_list_of_bad_numbers():
     result = asyncio.run(write_narrative(FACTS, run=fake))
     assert result.source == "ai" and result.flags == [] and len(fake.prompts) == 2
     assert "number not in the facts: 14.2%" in fake.prompts[1]
-    assert "after one rewrite" in result.log[-1]
+    assert result.log[-1] == "Analyst draft 2 passed the number, rating and wording checks"
 
 
 def test_fallback_to_the_template_after_a_failed_rewrite():
-    bad = draft(key_findings=["The fund returned 14.2% a year."] + GOOD["key_findings"][1:])
+    bad = draft(key_findings=["The fund returned 14.2% a year."] + GOOD["key_findings"][1:2] + GOOD["key_findings"][:1])
     result = asyncio.run(write_narrative(FACTS, run=FakeRun(bad, bad)))
     assert result.source == "template"
     [flag] = result.flags
@@ -189,7 +190,7 @@ NOTES = [{"kind": "pricing", "note": "Noon pricing.", "figures": [
              {"label": "Fund behind its index, in plain terms (% a year), 5y", "value": -0.1, "unit": "%", "display": "-0.10%"},
              {"label": "Ongoing charge (OCF), a year", "value": 0.06, "unit": "%", "display": "0.06%", "key": True}]}]
 FACTS_NOTES = FACTS | {"data_notes": NOTES}
-COVERED = ["The fund tracks its index closely. Its noon price makes it look 3.3 pp behind over 5 years.",
+COVERED = ["Mandate is Green and Performance is Green. Its noon price makes it look 3.3 pp behind over 5 years.",
            "At market close (PNAV) the gap is 0.7 pp, and most of it is the 0.06% yearly fee.",
            "Value and fees cannot be judged until a peer fund is added."]
 
@@ -199,7 +200,7 @@ def test_findings_that_cover_every_data_note_pass():
 
 
 def test_a_missing_data_note_triggers_the_rewrite():
-    without_fee = ["The fund tracks its index closely. Its noon price makes it look 3.3 pp behind over 5 years.",
+    without_fee = ["Mandate is Green and Performance is Green. Its noon price makes it look 3.3 pp behind over 5 years.",
                    "At market close (PNAV) the gap is 0.7 pp.", "Value and fees need a peer fund."]
     issues = problems(_out(key_findings=without_fee), FACTS_NOTES)
     assert len(issues) == 1 and issues[0].startswith("insight: the findings do not cover this data note (use 0.06%)")
@@ -209,7 +210,8 @@ def test_a_missing_data_note_triggers_the_rewrite():
 
 
 def test_periods_are_written_in_words():
-    issues = problems(_out(key_findings=["The fund returned 13.8% a year over 5y.", "b", "c"]), FACTS)
+    issues = problems(_out(key_findings=["The fund returned 13.8% a year over 5y.", "Mandate is Green.",
+                                         "Performance is Green."]), FACTS)
     assert issues == ["style: write periods in words, not '5y'"]
 
 
@@ -231,7 +233,7 @@ def test_the_plain_template_covers_every_data_note_and_passes():
 def test_at_most_two_sentences_per_finding():
     four = "The fund tracks its index. It costs 0.06% a year. Its noon price differs. That explains the gap."
     issues = problems(_out(key_findings=[four, "R² 1.00 (how closely fund and index move together), e.g. a tracker.",
-                                         "One sentence. Two sentences."]), FACTS)
+                                         "Mandate is Green. Performance is Green."]), FACTS)
     assert issues == ["style: finding 1 has 4 sentences; use at most 2"]
 
 
@@ -243,8 +245,8 @@ def test_too_many_sentences_trigger_the_rewrite():
 
 
 @pytest.mark.parametrize("action", ["Note that a peer fund is needed before the next quarterly review.",
-                                    "It remains understood that a peer is needed, before signing off this review.",
-                                    "Be aware that a peer fund is needed at the next quarterly review."])
+                                    "It remains understood that a peer is needed before the next quarterly review.",
+                                    "Be aware that a peer fund is needed before the next quarterly review."])
 def test_actions_that_only_ask_people_to_notice_are_rejected(action):
     issues = problems(_out(actions=[{"candidate": "add_peer", "text": action}, GOOD["actions"][1]]), FACTS)
     assert len(issues) == 1 and issues[0].startswith("style: action 1 only asks people to")
@@ -268,3 +270,31 @@ def test_a_mislabelled_figure_triggers_the_rewrite_and_counts_as_a_number_proble
     issues = problems(_out(key_findings=bad), facts)
     assert any(i.startswith("label: '-3.3 pp' next to 'tracking difference'") for i in issues)
     assert "number" in failed_checks([i for i in issues if i.startswith("label:")])
+
+
+# Ratings named in the findings (code check)
+@pytest.mark.parametrize("findings, missing", [
+    (["The fund tracks its index.", "b", "c"], ["Mandate", "Performance"]),
+    (["Mandate is Green.", "The fund tracks its index.", "c"], ["Performance"]),
+    (["Mandate is Green and Performance is Green.", "b", "c"], []),
+    (["The Mandate rating is Green; Performance is rated Green too.", "b", "c"], []),
+])
+def test_findings_must_name_the_mandate_and_performance_ratings(findings, missing):
+    issues = [i for i in problems(_out(key_findings=findings), FACTS) if "do not name" in i]
+    assert issues == [f"rating: the findings do not name the {n} rating; write e.g. '{n} is Green'" for n in missing]
+
+
+def test_a_check_data_rating_is_named_in_words():
+    facts = FACTS | {"scorecard": FACTS["scorecard"] | {"pillars": [
+        p | {"rating": "CHECK DATA"} if p["name"] == "Performance" else p for p in FACTS["scorecard"]["pillars"]]}}
+    issues = [i for i in problems(_out(key_findings=["Mandate is Green.", "b", "c"]), facts) if "do not name" in i]
+    assert issues == ["rating: the findings do not name the Performance rating; write e.g. 'Performance needs a data check'"]
+    named = _out(key_findings=["Mandate is Green.", "Performance needs a data check.", "c"])
+    assert not [i for i in problems(named, facts) if "do not name" in i]
+
+
+def test_unnamed_ratings_trigger_the_rewrite():
+    unnamed = draft(key_findings=["The fund tracks its index."] + GOOD["key_findings"][1:])
+    fake = FakeRun(unnamed, draft())
+    result = asyncio.run(write_narrative(FACTS, run=fake))
+    assert result.source == "ai" and "do not name the Mandate rating" in fake.prompts[1]

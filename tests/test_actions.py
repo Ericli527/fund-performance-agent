@@ -56,7 +56,8 @@ def test_candidates_follow_the_ratings_and_flags_in_priority_order():
     ([("add_peer", "Add a comparable fund before the next quarterly review."),
       ("record_decision", "Record the decision at this review.")], "leaves out 'peer'"),
     ([("add_peer", "Add a comparable peer fund soon."),
-      ("record_decision", "Record the decision at this review.")], "does not say when"),
+      ("record_decision", "Record the decision at this review.")],
+     "must keep its timing word for word: 'before the next quarterly review'"),
     ([("add_peer", "Add a peer before the next quarterly review."),
       ("add_peer", "Add a peer fund before the next quarterly review.")], "the same candidate is chosen twice"),
 ])
@@ -86,3 +87,20 @@ def test_test1_facts_carry_the_candidate_actions():
     from test_agent_analyst import _test1_facts
     facts = _test1_facts()
     assert [c["id"] for c in facts["candidate_actions"]] == ["add_peer", "record_decision", "read_sources"]
+
+
+def test_each_candidate_has_its_own_fixed_timing():
+    cands = {c["id"]: c for c in candidate_actions(NO_PEER)}
+    assert cands["add_peer"]["when"] == "before the next quarterly review"
+    assert cands["record_decision"]["when"] == "at this review"
+    assert cands["read_sources"]["when"] == "before signing off this review"
+    assert all(c["when"] in c["action"] for c in cands.values())
+
+
+def test_another_candidates_timing_is_rejected_with_the_candidates_own_timing_as_the_hint():
+    """ From the full run: a generic hint ('before signing off this review') conflicted with add_peer's timing """
+    chosen = [("add_peer", "Add a comparable peer fund before signing off this review."),
+              ("record_decision", "Record the decision at this review.")]
+    found = action_problems(chosen, candidate_actions(NO_PEER), 3)
+    assert found == ["action: action 1 (add_peer) must keep its timing word for word: 'before the next quarterly review'"]
+    assert "before signing off" not in found[0]

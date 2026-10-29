@@ -45,7 +45,7 @@ Numbers:
   You may round to 1 or 2 decimal places.
 - Call a figure by what it is in the facts. A number next to "tracking difference", "tracking error" or
   "ongoing charge" must be that figure, for that period (checked by code). A tracking difference is
-  yearly: write "a year" and its sign, e.g. "tracking difference -0.10 pp a year".
+  yearly: write "a year", its sign and its period, e.g. "tracking difference -0.10 pp a year over 5 years".
 - If a figure has the note "please verify", write "(please verify)" next to it.
 
 Style:
@@ -57,6 +57,9 @@ Style:
   explain a term in a separate sentence. After that, use the term alone.
 - No unexplained abbreviations: write "ongoing charge (OCF)", not "OCF".
 - Short sentences: under 20 words each. At most 2 sentences per finding (checked by code).
+- The findings must name the Mandate and Performance ratings in words, e.g. "Mandate is Green" and
+  "Performance is Green" (checked by code). For CHECK DATA write "needs a data check"; for MANUAL CHECK,
+  "needs a manual check".
 - Every data note must be explained in the findings, using its key figure (marked "key": true). These are
   the "below the surface" points.
 - Write periods in words: "5 years", "12 months", never "5y" or "12m".
@@ -76,7 +79,7 @@ Output:
 - actions: 2 or 3 actions, chosen ONLY from "candidate_actions" in the facts (written by code from the
   ratings and data flags). Choose every candidate marked "required" first. For each, give its id as
   "candidate" and reword its "action" as "text": plain English, under 20 words if you can, keeping its
-  task, its "keep_words" and when to do it (e.g. "before signing off this review"). Never add a new
+  task and its "keep_words", and its "when" text word for word (each candidate has its own). Never add a new
   action, and never write one about the report's method, prices or periods. Never write an action that
   only asks people to notice or accept something ("note that", "remains understood", "be aware").
   Code checks all of this.
@@ -159,6 +162,29 @@ def style_problems(out: AnalystOutput, sources: int) -> list[str]:
     return found
 
 
+NAMED_RATINGS = ("Mandate", "Performance")
+RATING_IN_WORDS = {"GREEN": ("green",), "AMBER": ("amber",), "RED": ("red",),
+                   "CHECK DATA": ("data check", "check data"), "MANUAL CHECK": ("manual check",)}
+_SENTENCES = re.compile(r"(?<=[.!?;])\s+")
+
+
+def unnamed_ratings(out: AnalystOutput, facts: dict) -> list[str]:
+    """ The Mandate and Performance ratings must be named in the findings: the pillar and its rating word in
+    the same sentence (the rating guard checks that the word is the right one) """
+    ratings = {p["name"]: p["rating"] for p in facts["scorecard"]["pillars"]}
+    sentences = [s.lower() for f in out.key_findings for s in _SENTENCES.split(f)]
+    missing = []
+    for name in NAMED_RATINGS:
+        if name not in ratings:
+            continue
+        words = RATING_IN_WORDS.get(ratings[name], (ratings[name].lower(),))
+        if not any(re.search(rf"\b{name.lower()}\b", s) and any(re.search(rf"\b{w}\b", s) for w in words)
+                   for s in sentences):
+            missing.append(f"rating: the findings do not name the {name} rating; write e.g. "
+                           f"'{_rating_phrase(name, ratings[name])}'")
+    return missing
+
+
 def missing_insights(out: AnalystOutput, facts: dict) -> list[str]:
     """ Each data note must be covered in the findings: at least one of its key figures appears there """
     findings = " ".join(out.key_findings)
@@ -188,7 +214,8 @@ def problems(out: AnalystOutput, facts: dict, sources: int = 0) -> list[str]:
     text = _URL.sub("[source]", out.text())
     bad = check_numbers(text, facts)
     return ([f"number not in the facts: {n}" for n in bad] + check_labels(text, facts)
-            + check_ratings(text, facts["scorecard"]) + style_problems(out, sources) + missing_insights(out, facts)
+            + check_ratings(text, facts["scorecard"]) + unnamed_ratings(out, facts) + style_problems(out, sources)
+            + missing_insights(out, facts)
             + action_problems([(a.candidate, a.text) for a in out.actions], candidates_for(facts), MAX_ACTIONS))
 
 
@@ -275,15 +302,23 @@ def _other_ratings_sentence(pillars: dict) -> str:
     return "; ".join(parts).capitalize()[:1] + "; ".join(parts)[1:] + "."
 
 
+def _rating_phrase(name: str, rating: str) -> str:
+    """ "Mandate is Green", or "Performance needs a data check" """
+    if rating in ("GREEN", "AMBER", "RED"):
+        return f"{name} is {rating.capitalize()}"
+    return f"{name} needs a {RATING_IN_WORDS.get(rating, (rating.lower(),))[0]}"
+
+
 def template(facts: dict) -> AnalystOutput:
     """ A narrative written by code, in plain English, used when the AI text fails its checks. Its figures come
     from the data notes, so it passes the number guard and covers every required insight """
     card = facts["scorecard"]
     pillars = {p["name"]: p for p in card["pillars"]}
     years = facts.get("fund", {}).get("time_horizon_years", 5)
-    reason = ("Value and fees cannot be judged until a comparable peer fund is added."
-              if card["verdict"] == "Monitor until a peer is added" else f"{card['verdict_reason']}.")
-    findings = [f"Draft verdict: {card['verdict']}. {reason}",
+    reason = ("value and fees need a comparable peer fund" if card["verdict"] == "Monitor until a peer is added"
+              else card["verdict_reason"][:1].lower() + card["verdict_reason"][1:].rstrip("."))
+    named = " and ".join(_rating_phrase(n, pillars[n]["rating"]) for n in NAMED_RATINGS if n in pillars)
+    findings = [f"Draft verdict: {card['verdict']}. {named}; {reason}.",
                 _performance_sentence(facts, pillars["Performance"], years),
                 _insight_sentence(facts, years) or _other_ratings_sentence(pillars)]
     actions = [ChosenAction(candidate=i, text=t)
@@ -299,34 +334,40 @@ def _template(facts: dict, message: str, log: list[str]) -> Narrative:
 
 
 async def write_narrative(facts: dict, search_summaries: list[dict] | None = None, max_rewrites: int = 1,
-                          run: RunFn | None = None, quality_check: QualityFn | None = None) -> Narrative:
-    """ Draft, run code's checks (spec 8.3), then the Evaluator's quality check (8.4) when one is given.
-    A draft that fails either is sent back with the problems; there is at most max_rewrites in total. If the
-    last draft still fails, the template narrative is used with a flag naming what failed """
+                          run: RunFn | None = None, quality_check: QualityFn | None = None,
+                          max_evaluator_rewrites: int = 1) -> Narrative:
+    """ Draft, run code's checks (spec 8.3), then the Evaluator's quality check (8.4) when one is given. Each has
+    its own rewrites (config): a draft that fails code's checks goes back with code's problems (max_rewrites);
+    the Evaluator sees only drafts that pass code's checks, and a draft it rejects goes back with its issues
+    (max_evaluator_rewrites). When a draft fails and no rewrite of that kind is left, the template narrative is
+    used with a flag naming what failed """
     agent = analyst_agent()
     first = prompt(facts, search_summaries)
-    request, log, rewrites = first, [], 0
+    request, log = first, []
+    check_rewrites = evaluator_rewrites = 0
+    draft_no = 0
     while True:
         result = await run_structured(agent, request, AnalystOutput, convert=_check_shape, run=run)
         if not result.ok:
             log.append(f"Analyst gave no valid output: {'; '.join(result.errors)}")
             return _template(facts, f"{AI_TEXT_UNAVAILABLE}: template narrative used", log)
+        draft_no += 1
         draft = result.output
         if not search_summaries and draft.market_context:
             # Market context must come from cited search summaries (spec 8.2); without them it is dropped
             draft.market_context = None
             log.append("Market context dropped: no search summaries were given")
-        after = " after one rewrite" if rewrites else ""
         sources = numbered_sources(search_summaries)
         issues = problems(draft, facts, len(search_summaries or []))
         if issues:
-            log.append(f"Analyst draft {rewrites + 1} rejected ({' / '.join(failed_checks(issues))}): " + "; ".join(issues))
-            if rewrites < max_rewrites:
-                rewrites += 1
+            log.append(f"Analyst draft {draft_no} rejected by code's checks ({' / '.join(failed_checks(issues))}): "
+                       + "; ".join(issues))
+            if check_rewrites < max_rewrites:
+                check_rewrites += 1
                 request = rewrite_prompt(first, draft, issues)
                 continue
             return _template(facts, f"{CHECKS_FAILED}: {' / '.join(failed_checks(issues))}; template narrative used", log)
-        log.append(f"Analyst draft passed the number, rating and wording checks{after}")
+        log.append(f"Analyst draft {draft_no} passed the number, rating and wording checks")
         if quality_check is not None:
             verdict = await quality_check(facts, sources, draft.model_dump())
             if verdict.error:
@@ -334,12 +375,12 @@ async def write_narrative(facts: dict, search_summaries: list[dict] | None = Non
                 why = "could not be reached" if verdict.unreachable else "gave no valid answer after one retry"
                 return _template(facts, f"{QUALITY_NOT_DONE}: the Evaluator {why}; template narrative used", log)
             if not verdict.passed:
-                log.append(f"Evaluator rejected draft {rewrites + 1}: " + "; ".join(verdict.problems()))
-                if rewrites < max_rewrites:
-                    rewrites += 1
+                log.append(f"Evaluator rejected draft {draft_no}: " + "; ".join(verdict.problems()))
+                if evaluator_rewrites < max_evaluator_rewrites:
+                    evaluator_rewrites += 1
                     request = rewrite_prompt(first, draft, verdict.problems())
                     continue
                 return _template(facts, f"{QUALITY_FAILED}: the Evaluator rejected the draft "
                                         f"({', '.join(verdict.failed_checks)}); template narrative used", log)
-            log.append(f"Evaluator passed the draft{after}")
+            log.append(f"Evaluator passed draft {draft_no}")
         return Narrative(draft, "ai", [], log, sources if draft.market_context else [])

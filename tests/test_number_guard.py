@@ -92,9 +92,10 @@ def test_a_cost_adjusted_gap_needs_its_sign_and_a_year():
     # From the full Test 1 run: "cost-adjusted gap 0.04 pp" leaves out the sign and "a year"
     issues = check_labels("The cost-adjusted gap 0.04 pp is small.", LABEL_FACTS)
     assert issues == ["label: '0.04 pp' next to 'cost-adjusted gap' is a yearly figure; add 'a year'",
+                      "label: '0.04 pp' next to 'cost-adjusted gap' needs its period; add 'over 5 years'",
                       "label: '0.04 pp' next to 'cost-adjusted gap' is negative; write the minus sign or say 'behind'"]
-    assert check_labels("The cost-adjusted gap is -0.04 pp a year.", LABEL_FACTS) == []
-    assert check_labels("Without the fee, the cost-adjusted gap is 0.04 pp a year behind.", LABEL_FACTS) == []
+    assert check_labels("The cost-adjusted gap is -0.04 pp a year over 5 years.", LABEL_FACTS) == []
+    assert check_labels("Over 5 years, the cost-adjusted gap is 0.04 pp a year behind.", LABEL_FACTS) == []
 
 
 @pytest.mark.parametrize("text", [
@@ -111,9 +112,26 @@ def test_correctly_labelled_figures_pass(text):
 @pytest.mark.parametrize("text, problem", [
     ("Tracking error 0.02% over 5 years is low.", "is not a tracking error for 5 years"),
     ("The ongoing charge is 0.10%.", "is not an ongoing charge"),
-    ("The tracking difference is -0.10% a year.", None),                 # the plain-terms % figure is allowed
+    ("The tracking difference is -0.10% a year over 5 years.", None),    # the plain-terms % figure is allowed
     ("The tracking error is 0.02 pp.", "is not a tracking error"),       # wrong unit
 ])
 def test_wrong_type_period_or_unit_is_rejected(text, problem):
     issues = check_labels(text, LABEL_FACTS)
     assert (issues == []) if problem is None else (len(issues) == 1 and problem in issues[0])
+
+
+def test_a_tracking_difference_must_state_its_period():
+    issues = check_labels("The tracking difference is -0.10 pp a year.", LABEL_FACTS)
+    assert issues == ["label: '-0.10 pp' next to 'tracking difference' needs its period; add 'over 5 years'"]
+    assert check_labels("The tracking difference is -0.10 pp a year over 5 years.", LABEL_FACTS) == []
+    # The hint names the main test period when the same figure is given for several periods
+    facts = LABEL_FACTS | {"fund": {"ocf_pct": 0.06, "time_horizon_years": 3},
+                           "figures": LABEL_FACTS["figures"] + [{"name": "comparison.td.3y", "value": -0.1, "unit": "pp"}]}
+    assert check_labels("The tracking difference is -0.10 pp a year.", facts)[0].endswith("add 'over 3 years'")
+
+
+def test_punctuation_is_not_counted_as_a_word():
+    """ ", the gap between fund and index returns, was" is 8 words, so the label still applies """
+    issues = check_labels("The tracking difference, the gap between fund and index returns, was -0.10 pp a year.",
+                          LABEL_FACTS)
+    assert issues == ["label: '-0.10 pp' next to 'tracking difference' needs its period; add 'over 5 years'"]

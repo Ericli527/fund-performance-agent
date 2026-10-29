@@ -148,8 +148,8 @@ def check_ratings(text: str, scorecard: dict) -> list[str]:
 # --- Label guard -------------------------------------------------------------------------------------------
 # A figure named "tracking difference", "tracking error" or "ongoing charge" must be a fact of that type, for
 # the period named nearby and in its unit. E.g. "tracking difference -3.3 pp" is wrong when -3.3 pp is the
-# 5-year noon-price gap. Tracking differences are yearly and signed: "a year" and the sign (a minus, or a
-# word such as "behind") must be there.
+# 5-year noon-price gap. Tracking differences are yearly, signed and for a period: "a year", the sign (a minus,
+# or a word such as "behind") and the period ("over 5 years") must be there.
 
 LABEL_WINDOW_WORDS = 8
 LABELS = (("cost_adjusted", re.compile(r"cost[- ]adjusted (?:tracking difference|gap)", re.I)),
@@ -230,7 +230,8 @@ def _label_spans(sentence: str) -> list[tuple[int, int, str]]:
 
 
 def _word_count(text: str) -> int:
-    return len(text.split())
+    """ Words only: a comma or bracket on its own is not a word """
+    return sum(1 for w in text.split() if any(c.isalnum() for c in w))
 
 
 def check_labels(text: str, facts: dict) -> list[str]:
@@ -263,6 +264,8 @@ def check_labels(text: str, facts: dict) -> list[str]:
             if kind in YEARLY_LABELS:
                 if not _YEARLY.search(window):
                     problems.append(f"label: {where} is a yearly figure; add 'a year'")
+                if period is None:
+                    problems.append(f"label: {where} needs its period; add '{_period_hint(candidates, match, facts)}'")
                 if match.value < 0 and n.value >= 0 and not _DIRECTION.search(window):
                     problems.append(f"label: {where} is negative; write the minus sign or say 'behind'")
     return problems
@@ -292,6 +295,17 @@ def _window(sentence: str, start: int, end: int) -> str:
     before = sentence[:start].split()[-LABEL_WINDOW_WORDS:]
     after = sentence[end:].split()[:LABEL_WINDOW_WORDS]
     return " ".join(before + [sentence[start:end]] + after)
+
+
+def _period_hint(candidates: list[TypedFact], match: TypedFact, facts: dict) -> str:
+    """ The period to name, from the facts: the main test period if this figure is given for it, else the
+    figure's own period """
+    same = [f for f in candidates if f.period and abs(abs(f.value) - abs(match.value)) < 1e-9]
+    periods = [f.period for f in same]
+    main = f"{facts.get('fund', {}).get('time_horizon_years', '')}y"
+    period = main if main in periods else (match.period or (periods[0] if periods else main))
+    years = period[:-1]
+    return f"over {years} year{'' if years == '1' else 's'}"
 
 
 def _period_in(window: str) -> str | None:
