@@ -327,6 +327,16 @@ All agents return structured JSON validated with Pydantic. Use the OpenAI Agents
 - If any item is `CHECK DATA`, explain what needs checking instead of drawing a conclusion.
 - Plain English, short sentences, no jargon without a one-line explanation.
 - Structure: 3 key findings, 2 to 3 recommended actions, short market context with sources.
+- Readable for experts and newcomers: plain meaning first, technical term second in brackets; explain each
+  term once in under 10 words using the shared glossary (`glossary.py`); no unexplained abbreviations
+  ("ongoing charge (OCF)"); sentences under 20 words, at most 2 per finding; say "Draft verdict"; at least one
+  finding explains a "below the surface" point from the data notes when there is one; no point repeated in
+  findings and actions; each action says what to do and when.
+- Data notes (facts JSON, written by code): short notes with their figures for info flags that change how the
+  results read, e.g. noon NAV vs market-close index (Test 1: 88.3% vs 91.6%, -3.3 pp; PNAV 90.9%, -0.7 pp) and
+  how much of the tracking difference the fee explains (-0.10 pp a year, OCF 0.06%, cost-adjusted -0.04 pp).
+- Market context uses no figures from search summaries (only numbers from the facts may be quoted); it describes
+  direction and cites the URLs.
 
 ### 8.2 Planner/Search rules
 - Queries must be about the fund, its manager, or market drivers in the review period.
@@ -367,7 +377,7 @@ A plain Python function (not an AI agent) that runs: read files -> data checks -
 
 1. **Summary and scorecard:** fund, question, as-of date, draft verdict (Retain/Monitor/Review), 4 ratings with one-line reasons, data flags, approval box (reviewer name, date, Retain/Monitor/Review, signature).
 2. **Mandate and performance:** objective and promises, decision-tree path taken, 1/3/5y table (fund, benchmark, gap; cumulative and annualised), discrete 12-month table, risk table, charts.
-3. **Value, fees and sources:** peer comparison, fee comparison, AoV 7-factor table, thresholds used, list of every file and web source, AI-extracted figures marked "please verify", disclaimer.
+3. **Value, fees and sources:** peer comparison, fee comparison, AoV 7-factor table, thresholds used, list of every file and web source, AI-extracted figures marked "please verify", disclaimer. A short glossary at the end, one line each for the terms used (tracking difference, tracking error, PNAV, OCF, R², beta, pp), with the same definitions as the Analyst prompt (`glossary.py`).
 
 Target runtime: about 1 to 2 minutes end to end.
 

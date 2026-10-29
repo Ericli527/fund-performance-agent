@@ -50,6 +50,13 @@ def test_agent_settings(monkeypatch):
     assert agent.model_settings.temperature is None
 
 
+def test_prompt_carries_the_style_rules_and_glossary():
+    from fund_performance.agents.analyst import INSTRUCTIONS, STYLE_EXAMPLE
+    for rule in ("Draft verdict", "Plain meaning first", "under 20 words", "ongoing charge (OCF)",
+                 "below the surface", "what to do and when", STYLE_EXAMPLE):
+        assert rule in INSTRUCTIONS
+
+
 def test_a_good_draft_passes_first_time_without_search_summaries():
     fake = FakeRun(draft())
     result = asyncio.run(write_narrative(FACTS, run=fake))

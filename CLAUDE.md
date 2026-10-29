@@ -68,6 +68,10 @@ Instructions for Claude Code in this project. The build specification is
   search summaries (else null). Number guard: same unit (% vs pp), 1 or 2 d.p. rounding; years,
   periods, counts and dates not checked. Rating guard rejects a changed rating or verdict. One
   rewrite with the problem list, then template narrative + flag "AI text failed number check".
+- Analyst style: plain meaning first, term in brackets; terms explained once (<10 words) from the
+  shared glossary (`glossary.py`, also printed at the end of the report in step 9); sentences under
+  20 words; "Draft verdict"; one "below the surface" finding from the data notes (written by code);
+  actions say what and when; market context uses no figures from search summaries.
 - Risk-free rate: 0 for v1, with a flag. Prefer the factsheet Sharpe ratios where supplied.
 - Charts are built in step 9 with the report.
 - Emailing the report is a plain code function (not an AI agent), off by default, set up in
