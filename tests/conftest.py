@@ -12,3 +12,45 @@ TEST1_PROFILE = TEST1 / "fund_profile.json"
 requires_test1 = pytest.mark.skipif(
     not all(p.exists() for p in (TEST1_CSV, TEST1_FACTSHEET, TEST1_PROFILE)),
     reason="Test 1 files are not in data/test1 (they are kept out of the public repo)")
+
+
+# Live AI tests: skipped unless run with --run-live (and OPENAI_API_KEY set in the environment or .env)
+def pytest_addoption(parser):
+    parser.addoption("--run-live", action="store_true", default=False, help="run tests that call the OpenAI API")
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "live: calls the OpenAI API; run with --run-live")
+
+
+def pytest_collection_modifyitems(config, items):
+    import os
+    if config.getoption("--run-live"):
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(ROOT / ".env")          # puts the key into the environment; code reads it from there only
+        except ImportError:
+            pass
+        if os.getenv("OPENAI_API_KEY"):
+            return
+        reason = "OPENAI_API_KEY is not set"
+    else:
+        reason = "live AI test: run with --run-live"
+    for item in items:
+        if "live" in item.keywords:
+            item.add_marker(pytest.mark.skip(reason=reason))
+
+
+class FakeRun:
+    """ Stands in for the model call in unit tests: returns the given outputs (or raises the given errors) in order """
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.prompts = []
+
+    async def __call__(self, agent, prompt):
+        from types import SimpleNamespace
+        self.prompts.append(prompt)
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return SimpleNamespace(final_output=response)

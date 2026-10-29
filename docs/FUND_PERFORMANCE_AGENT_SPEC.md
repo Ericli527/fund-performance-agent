@@ -199,7 +199,7 @@ The Mandate Agent reads `objective_text` and returns JSON only:
 {"objective_type": "index_tracker", "benchmark_role": "target", "time_horizon_years": 5,
  "secondary_objective": null, "promises": ["Track the S&P 500 (NUK) index", "Grow investment over 5+ years"]}
 ```
-Code validates the JSON against the allowed values; if the user-supplied profile disagrees, the profile wins and a flag is raised.
+Code validates the JSON against the allowed values; if the user-supplied profile disagrees, the profile wins and a flag is raised. A free-text `secondary_objective` in the profile is classified by the Mandate Agent into one of the six types; if it cannot be classified, it is not rated (CHECK DATA).
 
 ### 5.1 Decision tree (code)
 ```
@@ -229,6 +229,8 @@ Four questions, each `GREEN`, `AMBER`, `RED` or `CHECK DATA`. Thresholds below a
 - GREEN: invests in line with its objective/policy (index fund: R2 >= 0.98 and beta 0.95 to 1.05; active: style and holdings consistent with policy).
 - AMBER: minor drift (index fund: R2 0.95 to 0.98, or beta outside 0.95 to 1.05 but within 0.90 to 1.10).
 - RED: clear drift from mandate.
+- Active funds (v1): status **Manual check**, reason "Style and holdings need a reviewer check", with a tick box in the
+  approval section. It does not block the verdict. Measurable rules come in v2.
 
 ### 6.2 Performance vs benchmark (main period = horizon)
 Index funds: tracking difference and tracking error are rated separately, and Performance is the weaker of
@@ -258,13 +260,18 @@ Uses the peer return gap over the main period (annualised, net of fees):
 ### 6.4 Is the fee justified?
 - Index funds: GREEN if `OCF_fund <= OCF_peer + 0.05`; AMBER if `<= OCF_peer + 0.20`; RED otherwise.
 - Active funds: GREEN if OCF <= peer median OCF and Performance is not RED; AMBER if OCF above peer median but Performance GREEN; RED if OCF above peer median and Performance RED.
-- Any performance fee: add a note; AMBER minimum unless justified in the profile.
+- Active funds, cases not listed above (fee above the peer median with Amber performance; fee at or below it with Red
+  performance): AMBER.
+- Any performance fee: add a note; AMBER minimum unless justified in the profile (`performance_fee_justification`, an
+  optional text field filled in by a person only; an AI agent never writes it).
 
 ### 6.5 Verdict
 - Any RED -> **Review**
 - Else any AMBER -> **Monitor**
 - Else -> **Retain**
 - Any `CHECK DATA` on Performance or Mandate -> verdict "Pending data check" (no verdict until resolved).
+- `CHECK DATA` on Value or Fees -> "Monitor (data check needed: Value)" (naming the items).
+- A **Manual check** does not change the verdict; it is named in the verdict reason and ticked by the reviewer.
 
 Expected example (Test 1, no peer supplied): Mandate GREEN (R2 1.00, beta 1.00, 3y factsheet), Performance GREEN (TD -0.10 pp a year over 5 years, PNAV vs index, within OCF + 0.10 = 0.16; TE 0.02, 3y (factsheet); note that the periods differ), Value and Fees AMBER with reason "no comparison available" (shown as "Add peer" in the summary) -> draft verdict **Monitor until a peer is added**. Never invent peer figures.
 
@@ -291,6 +298,14 @@ The report must state clearly: "This is an indicative assessment from public dat
 ## 8. AI agents (Steps 5 to 7)
 
 All agents return structured JSON validated with Pydantic. Use the OpenAI Agents SDK (or LangGraph). Temperature low (0 to 0.3).
+- v1 settings: a low-cost model (`gpt-4.1-mini` by default, changed with the `FUND_AGENT_MODEL` environment variable) at
+  temperature 0; the API key is read from the `OPENAI_API_KEY` environment variable only.
+- Invalid output (fails validation) is retried once, then the affected item is `CHECK DATA`. A failed call (network,
+  key) is not retried.
+- Unit tests mock the AI calls; one live test per agent runs only with `pytest --run-live`.
+- The Extractor's answer is checked by code: every extracted number must appear in the document text, otherwise a
+  warning lists it. The Extractor never sets `objective_type`, `benchmark_role`, the horizon, the secondary objective
+  or `performance_fee_justification`.
 
 | Agent | Input | Output | Limits |
 |---|---|---|---|

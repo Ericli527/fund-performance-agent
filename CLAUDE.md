@@ -51,6 +51,15 @@ Instructions for Claude Code in this project. The build specification is
   note when periods differ.
 - Ratings compare values at the stored 2 d.p. (a value on a limit counts as within it).
 - `precedence.py` is part of the module list (spec Section 11).
+- Active fund Mandate: "Manual check" ("Style and holdings need a reviewer check"), tick box in the
+  approval section, does not block the verdict.
+- CHECK DATA on Value or Fees: verdict "Monitor (data check needed: Value)".
+- `performance_fee_justification`: optional, written by a person only; an AI agent must never write it.
+- Agents: structured output validated with Pydantic; retry once on invalid output, then CHECK DATA.
+  Unit tests mock AI calls; live tests only with `pytest --run-live`. Model from `FUND_AGENT_MODEL`
+  (default gpt-4.1-mini), temperature 0, key from the `OPENAI_API_KEY` environment variable only.
+- Mandate Agent: the profile wins on any disagreement (flag); it classifies a free-text secondary
+  objective into the six types, or CHECK DATA if it cannot.
 - Risk-free rate: 0 for v1, with a flag. Prefer the factsheet Sharpe ratios where supplied.
 - Charts are built in step 9 with the report.
 - Emailing the report is a plain code function (not an AI agent), off by default, set up in

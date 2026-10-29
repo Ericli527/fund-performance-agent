@@ -9,9 +9,12 @@ from fund_performance.models import FundProfile, ObjectiveType, Peer
 from fund_performance.precedence import PRICE_SERIES, ReportedFigures
 
 GREEN, AMBER, RED, CHECK_DATA = "GREEN", "AMBER", "RED", "CHECK DATA"
+MANUAL_CHECK = "MANUAL CHECK"       # a reviewer must check it; it does not block the verdict (owner decision)
 _SEVERITY = {GREEN: 0, AMBER: 1, RED: 2}
 NO_PEER = "no comparison available"
 ADD_PEER = "Add peer"
+MANUAL_MANDATE_REASON = "Style and holdings need a reviewer check"
+SHORT_NAMES = {"Value for investors": "Value", "Fees": "Fees", "Mandate": "Mandate", "Performance": "Performance"}
 
 
 @dataclass
@@ -37,6 +40,11 @@ class Scorecard:
     verdict: str
     verdict_reason: str
     path: DecisionPath
+
+    @property
+    def manual_checks(self) -> list[Pillar]:
+        """ Items the reviewer must tick in the approval section """
+        return [p for p in self.pillars.values() if p.rating == MANUAL_CHECK]
 
 
 def weakest(ratings: list[str]) -> str:
@@ -72,8 +80,9 @@ def _tracking_stats(reported: ReportedFigures, n: int) -> tuple[float | None, fl
 
 def mandate_rating(reported: ReportedFigures, profile: FundProfile, t: Thresholds) -> Pillar:
     if profile.objective_type != "index_tracker":
-        # Spec 6.1 has no measurable rule for active funds ("style and holdings consistent with policy")
-        return Pillar("Mandate", CHECK_DATA, "Style and holdings must be checked against the policy; no rule in code yet")
+        # Spec 6.1 has no measurable rule for active funds ("style and holdings consistent with policy"):
+        # a reviewer checks it (owner decision; measurable rules in v2)
+        return Pillar("Mandate", MANUAL_CHECK, MANUAL_MANDATE_REASON, summary="Manual check")
     m = t.mandate_index
     r2, beta, label = _tracking_stats(reported, profile.time_horizon_years)
     if r2 is None or beta is None:
@@ -223,18 +232,20 @@ def fees_rating(profile: FundProfile, t: Thresholds, peer: Peer | None, performa
         rating = _band(gap, f.green_max_ocf_over_peer_pp, f.amber_max_ocf_over_peer_pp)
     elif gap <= 0 and performance != RED:
         rating = GREEN
-    elif gap > 0 and performance == GREEN:
-        rating = AMBER
     elif gap > 0 and performance == RED:
         rating = RED
     else:
-        # Spec 6.4 has no rule for these cases (e.g. fee above the peer with Amber performance)
+        # Fee above the peer with Green performance (spec 6.4), and the two cases the spec leaves open
+        # (fee above the peer with Amber performance; fee at or below the peer with Red performance): Amber
         rating = AMBER
-        notes.append("Provisional: spec 6.4 has no rule for this combination of fee and performance")
     if profile.performance_fee:
-        notes.append("The fund charges a performance fee")
-        if rating == GREEN:
-            rating = AMBER
+        justification = (profile.performance_fee_justification or "").strip()
+        if justification:
+            notes.append(f"The fund charges a performance fee; justified in the profile: {justification}")
+        else:
+            notes.append("The fund charges a performance fee, not justified in the profile, so at least Amber")
+            if rating == GREEN:
+                rating = AMBER
     return Pillar("Fees", rating, f"OCF {profile.ocf_pct:.2f}% vs {peer.name} {peer.ocf_pct:.2f}% "
                                   f"(gap {_fmt(gap, ' pp')})", notes=notes)
 
@@ -246,14 +257,21 @@ def verdict(pillars: dict[str, Pillar]) -> tuple[str, str]:
     checks = [n for n in ("Mandate", "Performance") if ratings[n] == CHECK_DATA]
     if checks:
         return "Pending data check", f"{' and '.join(checks)} need a data check before a verdict"
+    # A manual check does not block the verdict; it is named in the reason and ticked by the reviewer
+    manual = [n for n, r in ratings.items() if r == MANUAL_CHECK]
+    also = f"; {', '.join(manual)} need a reviewer check" if manual else ""
     if RED in ratings.values():
-        return "Review", "Red on " + ", ".join(n for n, r in ratings.items() if r == RED)
-    flagged = [n for n, r in ratings.items() if r in (AMBER, CHECK_DATA)]
-    if not flagged:
-        return "Retain", "All four questions Green"
-    if all(pillars[n].reason == NO_PEER for n in flagged):
-        return "Monitor until a peer is added", "Value and fees cannot be judged without a peer"
-    return "Monitor", "Amber or data check on " + ", ".join(flagged)
+        return "Review", "Red on " + ", ".join(n for n, r in ratings.items() if r == RED) + also
+    data = [SHORT_NAMES[n] for n, r in ratings.items() if r == CHECK_DATA]
+    amber = [n for n, r in ratings.items() if r == AMBER]
+    if data:
+        return f"Monitor (data check needed: {', '.join(data)})", \
+               "Data check needed on " + ", ".join(data) + (f"; Amber on {', '.join(amber)}" if amber else "") + also
+    if not amber:
+        return "Retain", ("All four questions Green" if not manual else "No Amber or Red") + also
+    if all(pillars[n].reason == NO_PEER for n in amber):
+        return "Monitor until a peer is added", "Value and fees cannot be judged without a peer" + also
+    return "Monitor", "Amber on " + ", ".join(amber) + also
 
 
 def score(reported: ReportedFigures, profile: FundProfile, thresholds: Thresholds, path: DecisionPath,

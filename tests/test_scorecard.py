@@ -9,7 +9,7 @@ from fund_performance.mandate import decision_path
 from fund_performance.models import DataFlag, Figure, FundProfile, Peer
 from fund_performance.precedence import ReportedFigures, apply_precedence
 from fund_performance import scorecard as sc
-from fund_performance.scorecard import AMBER, CHECK_DATA, GREEN, RED
+from fund_performance.scorecard import AMBER, CHECK_DATA, GREEN, MANUAL_CHECK, RED
 from conftest import FIXTURES, TEST1_CSV, TEST1_FACTSHEET, TEST1_PROFILE, requires_test1
 
 T = load_thresholds()
@@ -64,8 +64,9 @@ def test_mandate_without_r2_or_beta_is_check_data():
     assert sc.mandate_rating(figures(), profile(), T).rating == CHECK_DATA
 
 
-def test_active_mandate_has_no_rule_yet():
-    assert sc.mandate_rating(index_fund(), profile(objective_type="active_target"), T).rating == CHECK_DATA
+def test_active_mandate_is_a_manual_check():
+    pillar = sc.mandate_rating(index_fund(), profile(objective_type="active_target"), T)
+    assert (pillar.rating, pillar.reason) == (MANUAL_CHECK, "Style and holdings need a reviewer check")
 
 
 # 6.2 Performance, index funds: TD and TE rated separately, the weaker one wins
@@ -209,17 +210,23 @@ def test_index_fee_bands(ocf, expected):
     assert sc.fees_rating(profile(ocf_pct=ocf), T, peer(ocf=0.03), GREEN).rating == expected
 
 
-@pytest.mark.parametrize("ocf,performance,expected,provisional", [
-    (0.50, GREEN, GREEN, False), (0.80, GREEN, AMBER, False), (0.80, RED, RED, False),
-    (0.80, AMBER, AMBER, True), (0.50, RED, AMBER, True)])
-def test_active_fee_rules(ocf, performance, expected, provisional):
+@pytest.mark.parametrize("ocf,performance,expected", [
+    (0.50, GREEN, GREEN), (0.80, GREEN, AMBER), (0.80, RED, RED),
+    (0.80, AMBER, AMBER), (0.50, RED, AMBER)])          # the last two are the cases the spec leaves open
+def test_active_fee_rules(ocf, performance, expected):
     pillar = sc.fees_rating(profile(objective_type="active_target", ocf_pct=ocf), T, peer(ocf=0.60), performance)
-    assert pillar.rating == expected and any("Provisional" in n for n in pillar.notes) == provisional
+    assert pillar.rating == expected and pillar.notes == []
 
 
-def test_performance_fee_is_at_least_amber():
+def test_performance_fee_without_justification_is_at_least_amber():
     pillar = sc.fees_rating(profile(performance_fee=True), T, peer(ocf=0.06), GREEN)
-    assert pillar.rating == AMBER and "performance fee" in pillar.notes[0]
+    assert pillar.rating == AMBER and "not justified in the profile" in pillar.notes[0]
+
+
+def test_performance_fee_justified_by_a_person_keeps_the_rating():
+    prof = profile(performance_fee=True, performance_fee_justification="Hurdle and high-water mark; agreed by the board")
+    pillar = sc.fees_rating(prof, T, peer(ocf=0.06), GREEN)
+    assert pillar.rating == GREEN and "justified in the profile: Hurdle" in pillar.notes[0]
 
 
 # 6.5 Verdict
@@ -236,7 +243,12 @@ def _pillars(**ratings):
     ((GREEN, AMBER, AMBER, AMBER), "Monitor"),
     ((CHECK_DATA, GREEN, GREEN, GREEN), "Pending data check"),
     ((GREEN, CHECK_DATA, RED, RED), "Pending data check"),
-    ((GREEN, GREEN, CHECK_DATA, GREEN), "Monitor"),
+    ((GREEN, GREEN, CHECK_DATA, GREEN), "Monitor (data check needed: Value)"),
+    ((GREEN, AMBER, CHECK_DATA, CHECK_DATA), "Monitor (data check needed: Value, Fees)"),
+    ((GREEN, RED, CHECK_DATA, GREEN), "Review"),
+    ((MANUAL_CHECK, GREEN, GREEN, GREEN), "Retain"),
+    ((MANUAL_CHECK, AMBER, GREEN, GREEN), "Monitor"),
+    ((MANUAL_CHECK, GREEN, AMBER, AMBER), "Monitor until a peer is added"),
 ])
 def test_verdicts(ratings, expected):
     names = ("Mandate", "Performance", "Value for investors", "Fees")
@@ -270,3 +282,12 @@ def test_test1_end_to_end():
     assert "Periods differ: tracking difference is 5y, tracking error is 3y (factsheet)" in card.pillars["Performance"].notes
     # Must NOT be judged on midday NAV 88.3% vs index 91.6%
     assert "fund_nav" not in td.reason
+
+
+def test_manual_check_is_named_in_the_reason_and_listed_for_the_approval_box():
+    prof = profile(objective_type="active_target")
+    rep = _active(0.5, [(11.0, 10.0)] * 5)
+    card = sc.score(rep, prof, T, path(prof), peer(ocf=0.06, y5=10.4))
+    assert card.pillars["Mandate"].rating == MANUAL_CHECK
+    assert card.verdict == "Retain" and card.verdict_reason.endswith("Mandate need a reviewer check")
+    assert [p.name for p in card.manual_checks] == ["Mandate"]

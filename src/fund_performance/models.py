@@ -35,6 +35,7 @@ class FundProfile(_Strict):
     ocf_pct: float
     transaction_cost_pct: float | None = None
     performance_fee: bool
+    performance_fee_justification: str | None = None   # written by a person only, never by an AI agent
     fund_size_gbp_m: float | None = None
     risk_indicator: int | None = Field(default=None, ge=1, le=7)
     pricing_point: PricingPoint
