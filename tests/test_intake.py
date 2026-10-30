@@ -62,7 +62,8 @@ def test_the_table_shows_what_the_agents_read_and_where(tmp_path):
     assert rows["series.index.5y"]["value"] == "50.8"
     assert rows["series.fund_pnav.5y"]["status"] == "Not found (optional)"           # PNAV is optional
     assert rows["hedged"]["value"] == "no" and rows["hedged"]["status"] == CODE       # no hedging mentioned
-    assert rows["peer.ocf_pct"]["value"] == "0.05" and rows["peer.5y"]["value"] == "48"
+    assert rows["peer1.ocf_pct"]["value"] == "0.05" and rows["peer1.5y"]["value"] == "8.16"     # 48% over 5 years
+    assert rows["peer1.5y"]["status"] == CODE and "annualised by code" in rows["peer1.5y"]["source"]
 
 
 def test_a_missing_required_value_is_highlighted_and_blocks_the_run(tmp_path):
@@ -88,7 +89,7 @@ def test_corrected_values_are_marked_entered_by_user(tmp_path):
     fs = FactsheetPerformance.model_validate(built.factsheet)
     assert fs.user_entered == ["index.5y"] and fs.series["index"].y5 == 51.0 and fs.source == "ai_extracted"
     assert {r["key"]: r["status"] for r in built.rows}["ocf_pct"] == USER
-    assert Peer.model_validate(built.peer).returns.y5 == 48.0
+    assert Peer.model_validate(built.peers[0]).returns_annualised.y5 == 8.16
 
 
 def test_a_value_that_is_not_valid_is_reported(tmp_path):
@@ -164,8 +165,7 @@ def test_the_controller_uses_the_confirmation_and_reports_progress(tmp_path):
     assert steps["mandate"]["notes"] == ["Mandate Agent read the objective before the run; its answer was confirmed on the page"]
     assert steps["extractor"]["status"] == "skipped"
     assert "factsheet.txt (read by the Extractor Agent; values confirmed on the page)" in log["sources"]["input_files"]
-    assert messages[:3] == ["Checking the files…", "Reading the documents…", "Checking the data…"]
-    assert "Scoring…" in messages and messages[-1] == "Writing the report…"
+    assert messages == ["Checking the data…", "Scoring…", "Researching…", "Writing the report…"]   # read before
 
 
 # The documents route from the command line, and the live check that it matches the JSON route

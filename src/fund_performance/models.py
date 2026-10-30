@@ -121,12 +121,22 @@ class FactsheetPerformance(_Strict):
 
 
 class Peer(_Strict):
-    """ peer.json (spec Section 2): name, OCF, 1/3/5y returns, currency, share class """
+    """ peer.json (spec Section 2): name, OCF, 1/3/5y returns, currency, share class. The optional fields are for
+    the peer checks (B2): pricing time, share class type and minimum investment, income or accumulation, and the
+    official annualised returns (preferred over annualising the cumulative ones) """
     name: str
     ocf_pct: float
     returns: SeriesReturns
     currency: str = Field(min_length=3, max_length=3)
     share_class: str
+    isin: str | None = None
+    returns_annualised: SeriesReturns | None = None
+    pricing_point: PricingPoint | None = None
+    distribution: Literal["accumulation", "income"] | None = None
+    investor_type: Literal["retail", "institutional"] | None = None
+    minimum_investment: str | None = None
+    vol_3y: float | None = None             # 3-year volatility from the peer's factsheet, for the dashboard
+    origin: Literal["typed", "uploaded", "approved"] = "typed"   # peer.json, an uploaded factsheet, config/peers.yaml
 
 
 class Figure(BaseModel):

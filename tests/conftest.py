@@ -68,3 +68,11 @@ class FakeRunBy:
         if isinstance(response, Exception):
             raise response
         return SimpleNamespace(final_output=response)
+
+
+@pytest.fixture(autouse=True)
+def _no_approved_peer_files(request, tmp_path_factory, monkeypatch):
+    """ Unit tests never read the real approved peers in data/peers/ (that would call the Extractor); tests that
+    want approved peers point FUND_PEER_FOLDER at their own folder. Live tests use the real folder """
+    if "live" not in request.keywords:
+        monkeypatch.setenv("FUND_PEER_FOLDER", str(tmp_path_factory.mktemp("no_peers")))

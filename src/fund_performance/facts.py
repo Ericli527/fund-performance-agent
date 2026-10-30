@@ -2,6 +2,7 @@
 explain and for the number guard to check against. The Analyst may quote only numbers that appear here.
 """
 from fund_performance.actions import candidate_actions
+from fund_performance.conclusion import HEADING, judgement_points, manager_questions, suggested_conclusion
 from fund_performance.models import DataFlag, Figure, FundProfile
 from fund_performance.precedence import ReportedFigures
 from fund_performance.scorecard import Scorecard
@@ -98,15 +99,30 @@ def data_notes(profile: FundProfile, reported: ReportedFigures, flags: list[Data
     return notes
 
 
+def peer_rows(comparison) -> list[dict]:
+    """ Each peer as compared (B2): what was used and on which basis """
+    if comparison is None:
+        return []
+    return [{"name": r.peer.name, "isin": r.peer.isin, "share_class": r.peer.share_class, "currency": r.peer.currency,
+             "ocf_pct": r.peer.ocf_pct, "investor_type": r.peer.investor_type,
+             "minimum_investment": r.peer.minimum_investment, "distribution": r.peer.distribution,
+             "pricing_point": r.peer.pricing_point, "origin": r.peer.origin, "basis": r.basis,
+             "used_for_returns": r.used_for_returns, "excluded": r.excluded or "", "notes": r.notes,
+             "returns_pct_a_year": {f"{n}y": None if v is None else round(v, 2) for n, v in r.returns.items()}}
+            for r in comparison.rows]
+
+
 def build_facts(profile: FundProfile, reported: ReportedFigures, card: Scorecard, flags: list[DataFlag],
-                promises: list[str] | None = None) -> dict:
-    """ The facts JSON. Numbers keep their units so the number guard can tell 0.10 pp from 0.10% """
+                promises: list[str] | None = None, peer_comparison=None, evidence=None) -> dict:
+    """ The facts JSON. Numbers keep their units so the number guard can tell 0.10 pp from 0.10%. The suggested
+    conclusion, points for judgement and questions for the manager are written by code from the rest """
     facts = {
         "fund": {"fund_name": profile.fund_name, "isin": profile.isin, "share_class": profile.share_class,
                  "currency": profile.currency, "benchmark_name": profile.benchmark_name,
                  "objective_text": profile.objective_text, "objective_type": profile.objective_type,
                  "time_horizon_years": profile.time_horizon_years, "ocf_pct": profile.ocf_pct,
-                 "performance_fee": profile.performance_fee, "as_of_date": profile.as_of_date.isoformat(),
+                 "performance_fee": profile.performance_fee, "transaction_cost_pct": profile.transaction_cost_pct,
+                 "as_of_date": profile.as_of_date.isoformat(),
                  "promises": promises or []},
         "scorecard": {
             "verdict": card.verdict, "verdict_reason": card.verdict_reason,
@@ -119,5 +135,11 @@ def build_facts(profile: FundProfile, reported: ReportedFigures, card: Scorecard
                        if f.level in ("warning", "blocking")],
         "figures": [_figure(name, f) for name, f in reported.figures.items()],
     }
+    facts["peers"] = peer_rows(peer_comparison)
+    facts["evidence"] = evidence.to_dict() if evidence is not None else None
     facts["candidate_actions"] = candidate_actions(facts)     # the only actions the Analyst may choose (code)
+    conclusion, left_out = suggested_conclusion(facts)
+    facts["suggested_conclusion"] = {"heading": HEADING, "text": conclusion, "left_out": left_out}
+    facts["judgement_points"] = judgement_points(facts)
+    facts["manager_questions"] = manager_questions(facts)
     return facts

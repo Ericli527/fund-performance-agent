@@ -1,6 +1,7 @@
 """ Workflow controller (spec Section 8.5): a plain Python function, not an AI agent, that runs one review
 
-read files -> extractor (only if there is no factsheet_performance.json) -> data checks -> mandate -> calculator
+read files -> extractor (only if there is no factsheet_performance.json) -> approved peers (only if there is no
+peer.json: the Extractor reads their factsheets) -> data checks -> mandate -> calculator
 -> scorecard -> approved sources, planner and searches (parallel) -> analyst -> number, label, rating and wording
 checks -> evaluator -> report -> email (off by default).
 
@@ -33,11 +34,15 @@ from fund_performance.calc import calculate
 from fund_performance.checks import check_prices
 from fund_performance.config import RunSettings, Thresholds, load_settings, load_sources, load_thresholds
 from fund_performance.emailer import PostFn, send_report
+from fund_performance.evidence import build_evidence
 from fund_performance.facts import build_facts
 from fund_performance.fetch import GetFn, fetch_pages, http_get
-from fund_performance.io import detect_file_type, read_document, read_json, read_prices
+from fund_performance.config import load_peers
+from fund_performance.intake import peer_record, read_peer
+from fund_performance.io import detect_file_type, read_document, read_json, read_peers, read_prices
 from fund_performance.mandate import decision_path
 from fund_performance.models import DataFlag, FactsheetPerformance, FundProfile, Peer
+from fund_performance.peers import approved_peers, compare_peers
 from fund_performance.precedence import apply_precedence
 from fund_performance.report import ReportInputs, ReportLayoutError, build_report, plain_reason
 from fund_performance.scorecard import score
@@ -66,10 +71,8 @@ class Runners:
 
 
 ProgressFn = Callable[[str], None]
-PROGRESS = {"read_files": "Checking the files…", "extractor": "Reading the documents…",
-            "data_checks": "Checking the data…", "mandate": "Reading the objective…",
-            "calculator": "Measuring performance…", "scorecard": "Scoring…", "research": "Researching…",
-            "narrative": "Writing the market context…", "report": "Writing the report…"}
+PROGRESS = {"extractor": "Reading the documents…", "data_checks": "Checking the data…", "scorecard": "Scoring…",
+            "research": "Researching…", "report": "Writing the report…"}
 
 
 @dataclass
@@ -94,8 +97,8 @@ class RunLog:
         self._clock: dict[str, float] = {}
         self.on_step = on_step                   # gets a short progress message as each step starts
 
-    def start(self, step: str, inputs: list[str] | None = None) -> StepRecord:
-        if self.on_step and step in PROGRESS:
+    def start(self, step: str, inputs: list[str] | None = None, announce: bool = True) -> StepRecord:
+        if self.on_step and announce and step in PROGRESS:
             self.on_step(PROGRESS[step])
         record = StepRecord(step, _now(), inputs=list(inputs or []))
         self._clock[step] = time.monotonic()
@@ -191,6 +194,37 @@ async def run_review(folder: Path, question: str = DEFAULT_QUESTION, out_root: P
             (run_dir / "run_log.txt").write_text("\n".join(text_log), encoding="utf-8")
 
 
+async def _read_approved(paths: list[Path], r: Runners, s: RunSettings,
+                         flags: list[DataFlag]) -> tuple[list[Peer], list[str]]:
+    """ Read the approved peers' factsheets with the Extractor Agent (in parallel); a peer that cannot be read or
+    does not validate is left out with a warning """
+    async def one(path: Path):
+        return await _timed(read_peer(path, r.extractor), s.timeouts_seconds.extractor)
+    results = await asyncio.gather(*(one(p) for p in paths))
+    peers, notes = [], []
+    for path, result in zip(paths, results):
+        if result is None:
+            flags.append(DataFlag(check="peers", level="warning", message=(
+                f"Approved peer factsheet {path.name}: the Extractor Agent did not finish in time, so it is left out")))
+            continue
+        values, extracted, _ = result
+        flags += [DataFlag(check="peers", level="warning" if f.level == "blocking" else f.level,
+                           message=f"Approved peer factsheet {path.name}: {f.message}") for f in extracted.flags]
+        try:
+            peers.append(Peer.model_validate(peer_record(values, "approved")))
+            notes.append(f"read {path.name}")
+        except ValueError as e:
+            flags.append(DataFlag(check="peers", level="warning", message=(
+                f"Approved peer factsheet {path.name}: the values read do not fit a peer ({str(e)[:150]}), so it is "
+                "left out")))
+    return peers, notes
+
+
+def _sector_ocf(profile: FundProfile) -> dict | None:
+    group = load_peers().for_benchmark(profile.benchmark_name)
+    return group.sector_average_ocf.model_dump() if group and group.sector_average_ocf else None
+
+
 def _stop(log: RunLog, record: StepRecord, message: str):
     log.end(record, "stopped", notes=[message])
     raise RunStopped(message)
@@ -220,7 +254,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         profile: FundProfile = read_json(files["fund_profile"])
         factsheet: FactsheetPerformance | None = (read_json(files["factsheet_performance"])
                                                   if "factsheet_performance" in files else None)
-        peer: Peer | None = read_json(files["peer"]) if "peer" in files else None
+        peers: list[Peer] = read_peers(files["peer"]) if "peer" in files else []
     except ValueError as e:
         _stop(log, step, f"Run stopped: an input file does not match its schema ({str(e)[:300]})")
     structured = [p.name for k, p in files.items() if k != "documents"]
@@ -232,7 +266,8 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     log.end(step, outputs={"input_files": input_files})
 
     # 2. Extractor (only when no factsheet_performance.json was supplied)
-    step = log.start("extractor", [p.name for p in files["documents"]])
+    step = log.start("extractor", [p.name for p in files["documents"]],
+                     announce=not intake and factsheet is None and not offline and bool(files["documents"]))
     if intake:
         log.end(step, "skipped", notes=["documents read before the run; values confirmed on the page"])
     elif factsheet is not None:
@@ -255,6 +290,28 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
             factsheet = extracted.factsheet
             flags += extracted.flags
             log.end(step, "ok" if factsheet else "failed", {"figures": "ai_extracted" if factsheet else None})
+
+    # 2b. Approved peers (config/peers.yaml), when no peer was given: the Extractor reads their factsheets
+    step = log.start("peers", ["peer.json"] if peers else ["config/peers.yaml"])
+    if peers:
+        log.end(step, "skipped", outputs={"peers": [p.name for p in peers]}, notes=["peer.json supplied"])
+    else:
+        approved = approved_peers(load_peers(), profile.benchmark_name, profile.isin)
+        flags += approved.flags
+        if not approved.files:
+            log.end(step, "skipped", notes=["no approved peer for this benchmark" if approved.group is None
+                                            else "no approved peer factsheet found in data/peers/"])
+        elif offline:
+            flags.append(DataFlag(check="peers", level="info", message=(
+                "Approved peers not read: offline run (the Extractor Agent reads their factsheets)")))
+            log.end(step, "skipped", notes=["offline run"])
+        else:
+            peers, notes = await _read_approved([path for _, path in approved.files], r, s, flags)
+            step.inputs = [f"data/peers/{path.name}" for _, path in approved.files]
+            log.end(step, outputs={"peers": [p.name for p in peers]}, notes=notes)
+            input_files += [f"{path.name} (approved peer, read by the Extractor Agent)" for _, path in approved.files
+                            if any(n.endswith(path.name) for n in notes)]
+            log.step("read_files").outputs["input_files"] = input_files
 
     # 3. Data checks
     step = log.start("data_checks", [files["prices"].name] + (["factsheet figures"] if factsheet else []))
@@ -299,12 +356,16 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     log.end(step, outputs={"figures": len(reported.figures)})
 
     # 6. Decision tree and scorecard
-    step = log.start("scorecard", ["config/thresholds.yaml"] + (["peer.json"] if peer else []))
+    step = log.start("scorecard", ["config/thresholds.yaml"] + (["peers"] if peers else []))
+    peer_comparison = compare_peers(peers, profile, reported)
+    flags += peer_comparison.flags
     path = decision_path(profile, checked.short_history, flags)
     comparison = checked.comparison
-    card = score(reported, profile, t, path, peer, comparison.fund_series if comparison else "fund_nav",
+    card = score(reported, profile, t, path, peers, comparison.fund_series if comparison else "fund_nav",
                  comparison.extra_tolerance_pp if comparison else 0.0)
-    facts = build_facts(profile, reported, card, flags, promises)
+    evidence = build_evidence(reported, profile, t, s.statistics, peer_comparison)
+    facts = build_facts(profile, reported, card, flags, promises, peer_comparison, evidence)
+    text_log += [f"Suggested conclusion: {x}" for x in facts["suggested_conclusion"]["left_out"]]
     log.end(step, outputs={"ratings": {p.name: p.rating for p in card.pillars.values()}, "verdict": card.verdict})
 
     # 7. Research: approved sources, planner and web searches, then vetting
@@ -362,7 +423,8 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     step = log.start("report")
     input_files, web_sources = log.report_sources()
     inputs = ReportInputs(profile=profile, question=question, reported=reported, card=card, facts=facts,
-                          narrative=narrative, thresholds=t, flags=flags, promises=promises, peer=peer,
+                          narrative=narrative, thresholds=t, flags=flags, promises=promises, peers=peers,
+                          peer_comparison=peer_comparison, evidence=evidence, sector_ocf=_sector_ocf(profile),
                           prices=checked.prices, run_note=OFFLINE_NOTE if offline else None,
                           input_files=input_files, web_sources=web_sources,
                           entered_by_user=[r["label"] for r in (intake or {}).get("rows", [])

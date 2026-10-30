@@ -93,7 +93,7 @@ def test1_pdf(tmp_path_factory):
 @requires_test1
 def test_test1_layout_and_run_files(test1_pdf):
     texts = page_texts(test1_pdf)
-    assert len(texts) == 4
+    assert len(texts) == 5
     for i, title in enumerate(PAGE_TITLES):
         assert title in texts[i]
     assert (test1_pdf.parent / "facts.json").exists() and (test1_pdf.parent / "run_log.txt").exists()
@@ -103,17 +103,31 @@ def test_test1_layout_and_run_files(test1_pdf):
 def test_test1_page1_summary_stands_on_its_own(test1_pdf):
     p1 = page_texts(test1_pdf)[0]
     for text in ("Fidelity Index US Fund P Accumulation", "Is this index fund meeting its mandate",
-                 "Figures to 30 September 2026", "Monitor until a peer is added", "Mandate", "Performance",
+                 "Figures to 30 Sep 2026", "Monitor until a peer is added", "Mandate", "Performance",
                  "Value for investors", "Fees", "Green", "Amber", "Key findings", "Recommended actions",
-                 "Reviewer name", "Signature", "Retain", "Review",
+                 "Reviewer name", "Signature", "Satisfied", "Action needed", "Analyst's comments",
+                 "If you disagree with", "Suggested conclusion (draft for the analyst)", "Points for your judgement",
+                 "Questions to ask the manager",
                  "Moves in line with its index (R² 1.00, beta 1.00; 3 years, factsheet)"):
         assert text in p1, text
     assert "3.3 pp behind its index over 5 years" in p1 and "0.06% yearly ongoing charge" in p1
 
 
 @requires_test1
+def test_test1_evidence_dashboard(test1_pdf):
+    dash = " ".join(page_texts(test1_pdf)[1].split())
+    for text in ("Evidence dashboard", "Each rated figure (◆) against its Green, Amber and Red zones",
+                 "Fund market-close price (PNAV) minus index, each calendar year 2016–2025. Source: factsheet",
+                 "Hit rate, calendar years", "Average yearly gap", "Best year", "Worst year",
+                 "Significance test (one-sample t-test against zero, 5% level)",
+                 "Not reliable: the data is rounded and too short for a significance test",
+                 "Fund vs peers chart left out: no peer with returns in GBP"):
+        assert text in dash, text
+
+
+@requires_test1
 def test_test1_page2_figures_and_sources(test1_pdf):
-    p2 = page_texts(test1_pdf)[1]
+    p2 = page_texts(test1_pdf)[2]
     for text in ("88.3%", "90.9%", "91.6%", "13.8%", "13.9%", "0.10 pp", "0.02%", "1.00", "Factsheet", "Calculated",
                  "Calendar-year returns", "Below the surface", "noon", "Growth of 100"):
         assert text in p2, text
@@ -121,7 +135,7 @@ def test_test1_page2_figures_and_sources(test1_pdf):
 
 @requires_test1
 def test_test1_page2_review_fixes(test1_pdf):
-    p2 = " ".join(page_texts(test1_pdf)[1].split())
+    p2 = " ".join(page_texts(test1_pdf)[2].split())
     # 1. Decision path in plain words
     assert "Index fund, so it is judged on how closely it tracks its index" in p2
     assert not any(code in p2 for code in ("TD_ex_cost", "(TD", "TE,", "index_tracker", "R2"))
@@ -141,7 +155,7 @@ def test_test1_page2_review_fixes(test1_pdf):
 
 @requires_test1
 def test_test1_page3_value_fees_and_aov(test1_pdf):
-    p3 = " ".join(page_texts(test1_pdf)[2].split())          # table cells wrap lines
+    p3 = " ".join(page_texts(test1_pdf)[3].split())          # table cells wrap lines
     for text in ("Add peer", "Not disclosed in the documents provided", "Partly", "Quality of service",
                  "Classes of units", "It does not replace the AFM's formal Assessment of Value",
                  "No market context"):
@@ -150,7 +164,7 @@ def test_test1_page3_value_fees_and_aov(test1_pdf):
 
 @requires_test1
 def test_test1_appendix(test1_pdf):
-    p4 = page_texts(test1_pdf)[3]
+    p4 = page_texts(test1_pdf)[4]
     for text in ("Data checks and flags", "Excluded web sources", "Sources", "fund_profile.json",
                  "illustrative, to be agreed with the oversight team", "Glossary", "tracking difference",
                  "Known limitations", "Public data only", "checked against factsheet: consistent"):

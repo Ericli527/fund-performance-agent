@@ -193,7 +193,8 @@ def test_the_page_has_the_instructions_files_table_and_how_it_works():
     ui = build_ui()
     texts = " ".join(str(getattr(c, "value", "") or "") for c in ui.blocks.values())
     assert PUBLIC_DATA in texts and INSTRUCTIONS in texts and FILES_TABLE in texts and HOW_END in texts
-    for step in ("Try the demo", "Upload a real fund", "Check what the agent read", "Read the result", "Decide"):
+    for step in ("Try the demo", "Upload a real fund", "Check what the agent read", "Read the evidence",
+                 "Make the judgement"):
         assert step in INSTRUCTIONS
     accordions = {c.label: c.open for c in ui.blocks.values() if isinstance(c, gr.Accordion)}
     assert accordions == {"How the agent works": True, "Advanced: JSON files (skip the AI reading step)": False}

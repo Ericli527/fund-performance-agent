@@ -1,5 +1,6 @@
 """ Loads config/thresholds.yaml (every threshold the spec needs), config/models.yaml (the model
-for each AI agent) and config/sources.yaml (approved pages fetched by code), and checks them """
+for each AI agent), config/sources.yaml (approved pages fetched by code), config/settings.yaml (run settings)
+and config/peers.yaml (approved peer funds), and checks them """
 from pathlib import Path
 import os
 from typing import Literal, get_args
@@ -227,12 +228,59 @@ class WebSettings(_Section):
     max_ai_runs_at_once: int = Field(gt=0)
 
 
+class StatisticsSettings(_Section):
+    """ The evidence dashboard's significance test (a one-sample t-test) """
+    significance_level: float = Field(gt=0, lt=1)
+    min_points: int = Field(ge=3)
+
+
 class RunSettings(_Section):
     timeouts_seconds: Timeouts
     web: WebSettings
+    statistics: StatisticsSettings
     email: EmailSettings
 
 
 def load_settings(path: str | Path = SETTINGS_PATH) -> RunSettings:
     with open(path, encoding="utf-8") as f:
         return RunSettings.model_validate(yaml.safe_load(f))
+
+
+# --- config/peers.yaml: approved peer funds per benchmark (B1) -----------------------------------------------
+
+PEERS_PATH = Path(__file__).resolve().parents[2] / "config" / "peers.yaml"
+PEER_FOLDER = Path(__file__).resolve().parents[2] / "data" / "peers"
+
+
+class ApprovedPeer(_Section):
+    name: str
+    isin: str
+    factsheet: str | None = None          # file name in data/peers/; else found by the ISIN
+
+
+class SectorOcf(_Section):
+    value_pct: float
+    source: str
+    date: str
+
+
+class BenchmarkPeers(_Section):
+    benchmark: str
+    match: list[str]                      # the fund's benchmark name contains one of these (any case)
+    peers: list[ApprovedPeer]
+    sector_average_ocf: SectorOcf | None = None
+
+
+class PeersConfig(_Section):
+    benchmarks: list[BenchmarkPeers] = Field(default_factory=list)
+
+    def for_benchmark(self, benchmark_name: str | None) -> BenchmarkPeers | None:
+        name = " ".join((benchmark_name or "").lower().split())
+        return next((b for b in self.benchmarks if any(m.lower() in name for m in b.match)), None)
+
+
+def load_peers(path: str | Path = PEERS_PATH) -> PeersConfig:
+    if not Path(path).exists():
+        return PeersConfig()
+    with open(path, encoding="utf-8") as f:
+        return PeersConfig.model_validate(yaml.safe_load(f) or {})

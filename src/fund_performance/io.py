@@ -196,7 +196,11 @@ def detect_file_type(path: str | Path) -> FileType:
     path = Path(path)
     suffix = path.suffix.lower()
     if suffix == ".json":
-        keys = set(json.loads(path.read_text(encoding="utf-8")))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, list):           # peer.json may hold several peers
+            ok = data and all(isinstance(d, dict) and {"ocf_pct", "returns"} <= set(d) for d in data)
+            return "peer" if ok else "unknown"
+        keys = set(data)
         if "series" in keys:
             return "factsheet_performance"
         if {"objective_type", "objective_text"} & keys:
@@ -219,6 +223,12 @@ def read_json(path: str | Path) -> FactsheetPerformance | FundProfile | Peer:
     if kind not in models:
         raise ValueError(f"{Path(path).name}: not a fund profile, factsheet performance or peer file")
     return models[kind].model_validate_json(Path(path).read_text(encoding="utf-8"))
+
+
+def read_peers(path: str | Path) -> list[Peer]:
+    """ peer.json: one peer, or a list of peers """
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    return [Peer.model_validate(d) for d in (data if isinstance(data, list) else [data])]
 
 
 def read_document(path: str | Path) -> str:

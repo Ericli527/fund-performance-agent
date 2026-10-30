@@ -57,7 +57,7 @@ def candidate_actions(facts: dict) -> list[dict]:
                              SIGN_OFF, False))
     found.append(_action("record_decision", f"Record the decision and its reasons in the approval box {THIS_REVIEW}.",
                          THIS_REVIEW, False))
-    found.append(_action("read_sources", f"Read the figures and their sources on pages 2 and 3 {SIGN_OFF}.",
+    found.append(_action("read_sources", f"Read the evidence and its sources on pages 2 to 4 {SIGN_OFF}.",
                          SIGN_OFF, False))
     return found
 

@@ -2,7 +2,10 @@
 #
 # timeouts_seconds: the longest each AI step may take. A step that runs over is stopped and handled like a
 #   failed step (flagged in the report), so one slow call cannot hold up the review.
-# web: the page has no login, so these limits protect the API key on a public link. Offline runs are not limited.
+# web: limits that protect the API key, as well as the page's login (APP_USERNAME and APP_PASSWORD in .env or
+#   Render's settings). Offline runs are not limited.
+# statistics: the evidence dashboard's significance test (one-sample t-test, two-sided). It runs only with at least
+#   min_points yearly values, and not when rounding makes most values identical.
 # email: sending the report is plain code (not an AI agent) and is OFF by default. It goes through Resend over
 #   HTTPS (as in the old app; Render's free plan blocks SMTP ports). The key is RESEND_API_KEY in .env, never in
 #   this file. Recipients come only from EMAIL_TO in .env (or Render's environment), comma-separated, so they are
@@ -18,6 +21,10 @@ timeouts_seconds:
 web:
   max_ai_runs_per_day: 20          # reviews that use AI (reading documents, or a JSON run with AI), counted per day
   max_ai_runs_at_once: 1           # another AI review that starts meanwhile is asked to try again in 2 minutes
+
+statistics:
+  significance_level: 0.05         # 5%: "statistically significant" when p is below this
+  min_points: 8                    # fewer yearly values than this: no test
 
 email:
   enabled: false

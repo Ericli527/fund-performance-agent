@@ -1,11 +1,11 @@
 """ Documents in, inputs out (step 11 update): the main route on the page
 
-The user uploads a price file and the fund's factsheet (and, optionally, the KID or prospectus and a peer fund's
-factsheet). The Extractor Agent reads the documents, the Mandate Agent reads the objective, and code turns their
+The user uploads a price file and the fund's factsheet (and, optionally, the KID or prospectus and peer funds'
+factsheets; without them, the approved peers for the fund's benchmark in config/peers.yaml are read). The Extractor Agent reads the documents, the Mandate Agent reads the objective, and code turns their
 answers into a table of values for a person to check. Each value shows where it was found (document and page,
 found by code) and is marked "AI-extracted (please verify)". The person corrects anything wrong and confirms;
-code then writes fund_profile.json, factsheet_performance.json and peer.json, marking corrected values "entered by
-user". A required value that is missing blocks the run until it is filled in.
+code then writes fund_profile.json, factsheet_performance.json and peer.json (a list of peers), marking corrected
+values "entered by user". A required value that is missing blocks the run until it is filled in.
 
 AI agents read; code decides where each value was found, what is missing, and what was changed.
 """
@@ -17,8 +17,11 @@ import re
 from fund_performance.agents.base import RunFn, run_structured
 from fund_performance.agents.extractor import ExtractionResult, extract
 from fund_performance.agents.mandate import MandateOutput, mandate_agent
+from fund_performance.calc import annualise
+from fund_performance.config import PeersConfig, load_peers
 from fund_performance.io import read_document_pages
 from fund_performance.models import FactsheetPerformance, FundProfile, Peer
+from fund_performance.peers import approved_peers, investor_type, peer_folder
 
 AI = "AI-extracted (please verify)"
 CODE = "Derived by code (please verify)"
@@ -60,14 +63,20 @@ PROFILE_FIELDS = (
 SERIES = (("fund_nav", "Fund (NAV)", True), ("fund_pnav", "Fund (PNAV, market close)", False), ("index", "Index", True))
 RETURN_FIELDS = tuple(FieldSpec(f"series.{name}.{p}", f"{label}: {p[:-1]}-year return, cumulative %", "number", required)
                       for name, label, required in SERIES for p in ("1y", "3y", "5y"))
-PEER_FIELDS = (
-    FieldSpec("peer.name", "Peer fund name", "text"),
-    FieldSpec("peer.share_class", "Peer share class", "text"),
-    FieldSpec("peer.currency", "Peer currency", "text"),
-    FieldSpec("peer.ocf_pct", "Peer ongoing charge (OCF), % a year", "number"),
-    FieldSpec("peer.1y", "Peer 1-year return, cumulative %", "number", False),
-    FieldSpec("peer.3y", "Peer 3-year return, cumulative %", "number", False),
-    FieldSpec("peer.5y", "Peer 5-year return, cumulative %", "number"),
+PEER_FIELDS = (                # one set per peer; the key "peer.<field>" becomes "peer1.<field>", "peer2.<field>", ...
+    FieldSpec("peer.name", "fund name", "text"),
+    FieldSpec("peer.isin", "ISIN", "text", False),
+    FieldSpec("peer.share_class", "share class", "text"),
+    FieldSpec("peer.currency", "currency", "text"),
+    FieldSpec("peer.ocf_pct", "ongoing charge (OCF), % a year", "number"),
+    FieldSpec("peer.pricing_point", "pricing point", "choice", False, ("midday", "market_close")),
+    FieldSpec("peer.distribution", "distribution", "choice", False, ("accumulation", "income")),
+    FieldSpec("peer.investor_type", "share class type", "choice", False, ("retail", "institutional")),
+    FieldSpec("peer.minimum_investment", "minimum investment", "text", False),
+    FieldSpec("peer.1y", "1-year return, %", "number", False),
+    FieldSpec("peer.3y", "3-year return, % a year", "number", False),
+    FieldSpec("peer.5y", "5-year return, % a year", "number", False),
+    FieldSpec("peer.vol_3y", "3-year volatility, %", "number", False),
 )
 COLUMNS = ["Field", "Value", "Status", "Source"]
 
@@ -78,7 +87,7 @@ class Built:
     problems: list[str] = field(default_factory=list)
     profile: dict | None = None
     factsheet: dict | None = None
-    peer: dict | None = None
+    peers: list[dict] = field(default_factory=list)
     user_entered: list[str] = field(default_factory=list)
     rows: list[dict] = field(default_factory=list)       # the confirmed table, with final statuses (for the log)
 
@@ -130,11 +139,59 @@ def _row(spec: FieldSpec, value, status: str, source: str) -> dict:
             "required": spec.required, "kind": spec.kind, "choices": list(spec.choices)}
 
 
-async def read_documents(factsheet: Path, kid: Path | None = None, peer_factsheet: Path | None = None,
+def peer_values(extracted: ExtractionResult) -> dict:
+    """ A peer's values from the Extractor's answer on its factsheet, keyed by field ("name", "5y", ...), with the
+    ones code derived (annualised returns, share class type) listed under "_derived" """
+    draft, fs = extracted.profile_draft, extracted.factsheet
+    values: dict = {"name": draft.get("fund_name"), "isin": draft.get("isin"), "share_class": draft.get("share_class"),
+                    "currency": draft.get("currency") or (fs.currency if fs else None), "ocf_pct": draft.get("ocf_pct"),
+                    "pricing_point": draft.get("pricing_point"), "distribution": draft.get("distribution"),
+                    "minimum_investment": draft.get("minimum_investment"), "_derived": {}}
+    if fs and values["pricing_point"] is None:
+        values["pricing_point"] = next((s.pricing for s in fs.series.values() if s.pricing), None)
+    annual = fs.series_annualised.get("fund_nav") if fs else None
+    cumulative = fs.series.get("fund_nav") if fs else None
+    for n in (1, 3, 5):
+        value = getattr(annual, f"y{n}") if annual else None
+        if value is None and cumulative is not None and getattr(cumulative, f"y{n}") is not None:
+            cum = getattr(cumulative, f"y{n}")
+            value = cum if n == 1 else round(annualise(cum, n), 2)
+            if n > 1:
+                values["_derived"][f"{n}y"] = f"annualised by code from the {n}-year cumulative {cum:g}%"
+        values[f"{n}y"] = value
+    risk = fs.risk_3y if fs else None
+    values["vol_3y"] = risk.fund_vol if risk else None
+    values["investor_type"] = investor_type(values["share_class"], values["minimum_investment"])
+    if values["investor_type"]:
+        values["_derived"]["investor_type"] = "from the share class name and minimum investment"
+    return values
+
+
+def peer_record(values: dict, origin: str) -> dict:
+    """ peer.json for one peer, from its values keyed by field """
+    return {"name": values.get("name"), "isin": values.get("isin"), "ocf_pct": values.get("ocf_pct"),
+            "currency": values.get("currency"), "share_class": values.get("share_class"),
+            "pricing_point": values.get("pricing_point"), "distribution": values.get("distribution"),
+            "investor_type": values.get("investor_type"), "minimum_investment": values.get("minimum_investment"),
+            "vol_3y": values.get("vol_3y"), "origin": origin,
+            "returns": {"1y": values.get("1y"), "3y": None, "5y": None, "basis": "cumulative"},
+            "returns_annualised": {"1y": values.get("1y"), "3y": values.get("3y"), "5y": values.get("5y"),
+                                   "basis": "annualised"}}
+
+
+async def read_peer(path: Path, run: RunFn | None = None) -> tuple[dict, ExtractionResult, list[str]]:
+    """ One peer factsheet read by the Extractor Agent: its values, the raw result and the pages """
+    pages = read_document_pages(path)
+    extracted = await extract("\n".join(pages), run)
+    return peer_values(extracted), extracted, pages
+
+
+async def read_documents(factsheet: Path, kid: Path | None = None, peer_factsheets: list[Path] | Path | None = None,
                          run_extractor: RunFn | None = None, run_mandate: RunFn | None = None,
-                         run_peer: RunFn | None = None) -> dict:
+                         run_peer: RunFn | None = None, peers_config: PeersConfig | None = None) -> dict:
     """ Read the documents with the Extractor and Mandate agents; return the table to confirm and what else the run
-    needs (a plain dict, so the page can keep it between the two clicks) """
+    needs (a plain dict, so the page can keep it between the two clicks). Without peer factsheets, the approved
+    peers for the fund's benchmark (config/peers.yaml) are read """
     docs = {p.name: read_document_pages(p) for p in (factsheet, kid) if p}
     text = "\n\n".join(f"=== Document: {name} ===\n" + "\n".join(pages) for name, pages in docs.items())
     extracted: ExtractionResult = await extract(text, run_extractor)
@@ -181,28 +238,39 @@ async def read_documents(factsheet: Path, kid: Path | None = None, peer_factshee
         value = getattr(series, f"y{period[0]}") if series else None
         rows.append(_row(spec, value, AI, locate(value, docs)))
 
-    peer_extra: dict = {}
-    if peer_factsheet:
-        peer_pages = {peer_factsheet.name: read_document_pages(peer_factsheet)}
-        peer = await extract("\n".join(peer_pages[peer_factsheet.name]), run_peer)
-        peer_draft, peer_fs = peer.profile_draft, peer.factsheet
-        cumulative = peer_fs.series.get("fund_nav") if peer_fs else None
-        peer_values = {"peer.name": peer_draft.get("fund_name"), "peer.share_class": peer_draft.get("share_class"),
-                       "peer.currency": peer_draft.get("currency") or (peer_fs.currency if peer_fs else None),
-                       "peer.ocf_pct": peer_draft.get("ocf_pct")}
-        for p in ("1y", "3y", "5y"):
-            peer_values[f"peer.{p}"] = getattr(cumulative, f"y{p[0]}") if cumulative else None
+    flags = [f.model_dump() for f in extracted.flags]
+    uploaded = [peer_factsheets] if isinstance(peer_factsheets, Path) else list(peer_factsheets or [])
+    peer_docs = [(p, "uploaded", "") for p in uploaded]
+    if not peer_docs:
+        approved = approved_peers(peers_config or load_peers(), draft.get("benchmark_name"), draft.get("isin"),
+                                  peer_folder())
+        peer_docs = [(path, "approved", f"approved peer ({approved.group.benchmark}, config/peers.yaml): ")
+                     for _, path in approved.files]
+        flags += [f.model_dump() for f in approved.flags]
+        if approved.files:
+            log.append(f"Approved peers for {approved.group.benchmark}: " + ", ".join(p.name for p, _ in approved.files))
+    origins = []
+    for i, (path, origin, where) in enumerate(peer_docs, start=1):
+        values, peer_result, pages = await read_peer(path, run_peer)
+        doc = {path.name: pages}
         for spec in PEER_FIELDS:
-            rows.append(_row(spec, peer_values[spec.key], AI, locate(peer_values[spec.key], peer_pages)))
-        peer_extra = {"flags": [f.model_dump() for f in peer.flags]}
-        log.append(f"Extractor Agent read the peer factsheet: {peer_factsheet.name}")
+            name = spec.key.removeprefix("peer.")
+            numbered = FieldSpec(f"peer{i}.{name}", f"Peer {i}: {spec.label}", spec.kind, spec.required, spec.choices)
+            value = values.get(name)
+            derived = values["_derived"].get(name)
+            status, source = (CODE, where + derived) if derived and value is not None else (AI, where + locate(value, doc))
+            rows.append(_row(numbered, value, status, source))
+        origins.append(origin)
+        # A peer that cannot be read does not block the fund's review: its flags are warnings, named by file
+        flags += [f.model_dump() | {"level": "warning" if f.level == "blocking" else f.level,
+                                    "message": f"Peer factsheet {path.name}: {f.message}"} for f in peer_result.flags]
+        log.append(f"Extractor Agent read the {'approved ' if origin == 'approved' else ''}peer factsheet: {path.name}")
 
-    return {"rows": rows, "documents": list(docs) + ([peer_factsheet.name] if peer_factsheet else []),
+    return {"rows": rows, "documents": list(docs) + [p.name for p, _, _ in peer_docs],
             "factsheet": fs.model_dump(mode="json", by_alias=True) if fs else None,
             "promises": mandate.promises if mandate else [],
             "secondary_objective": mandate.secondary_objective if mandate else None,
-            "flags": [f.model_dump() for f in extracted.flags] + peer_extra.get("flags", []),
-            "log": log}
+            "peer_origins": origins, "flags": flags, "log": log}
 
 
 def table(intake: dict) -> list[list[str]]:
@@ -287,28 +355,29 @@ def build_inputs(intake: dict, values: list[str]) -> Built:
                  "series": series, "series_annualised": annualised, "source": "ai_extracted", "entered_by": "extractor",
                  "user_entered": [k.removeprefix("series.") for k in out.user_entered if k.startswith("series.")]}
 
-    peer = None
-    if any(r["key"].startswith("peer.") for r in intake["rows"]):
-        peer = {"name": parsed.get("peer.name"), "ocf_pct": parsed.get("peer.ocf_pct"),
-                "currency": parsed.get("peer.currency"), "share_class": parsed.get("peer.share_class"),
-                "returns": {"1y": parsed.get("peer.1y"), "3y": parsed.get("peer.3y"), "5y": parsed.get("peer.5y"),
-                            "basis": "cumulative"}}
+    peers = []
+    for i, origin in enumerate(intake.get("peer_origins", []), start=1):
+        values = {k.split(".", 1)[1]: v for k, v in parsed.items() if k.startswith(f"peer{i}.")}
+        if values.get("currency"):
+            values["currency"] = values["currency"].upper()
+        peers.append(peer_record(values, origin))
     try:
         FundProfile.model_validate(profile)
         FactsheetPerformance.model_validate(factsheet)
-        if peer:
+        for peer in peers:
             Peer.model_validate(peer)
     except ValueError as e:
         out.problems.append(f"The values do not fit together: {str(e)[:300]}")
         return out
-    out.profile, out.factsheet, out.peer = profile, factsheet, peer
+    out.profile, out.factsheet, out.peers = profile, factsheet, peers
     return out
 
 
 def write_inputs(built: Built, folder: Path) -> list[str]:
     """ Write the confirmed inputs as the JSON files the controller reads """
     folder.mkdir(parents=True, exist_ok=True)
-    files = {"fund_profile.json": built.profile, "factsheet_performance.json": built.factsheet, "peer.json": built.peer}
+    files = {"fund_profile.json": built.profile, "factsheet_performance.json": built.factsheet,
+             "peer.json": built.peers or None}
     written = []
     for name, data in files.items():
         if data is not None:
@@ -340,7 +409,7 @@ def differences(intake: dict, profile: dict, factsheet: dict) -> list[tuple[str,
         if key.startswith("series."):
             _, name, period = key.split(".")
             typed = (factsheet.get("series", {}).get(name) or {}).get(period)
-        elif key.startswith("peer."):
+        elif key.startswith("peer"):
             continue
         else:
             typed = profile.get(key)

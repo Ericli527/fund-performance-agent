@@ -1,13 +1,16 @@
 """ The Gradio front end (step 11): upload the fund's documents, check what the agent read, download the PDF
 
 Plain code around the intake (intake.py) and the workflow controller. The main route: a price file and the
-factsheet (optionally the KID or prospectus and a peer fund's factsheet). The Extractor and Mandate agents read the
+factsheet (optionally the KID or prospectus and peer funds' factsheets; without them the approved peers in
+config/peers.yaml are used). The Extractor and Mandate agents read the
 documents, the page shows what they read in an editable table, and the person confirms it before anything is
 scored. JSON files are an optional "Advanced" route that skips the reading step. Public data only: the page says
 so first.
 
-There is no login. Limits in config/settings.yaml protect the API key on a public link: a daily number of AI
-reviews, and at most one AI review at a time. Offline runs (no AI) are not limited.
+The login: when APP_USERNAME and APP_PASSWORD are set, the page asks for them before it opens (Gradio's own
+login). On a server with no login set up (PORT is set but no credentials), AI runs are switched off and only the
+offline demo works; on your own computer no login is needed. Limits in config/settings.yaml also protect the API
+key: a daily number of AI reviews, and at most one AI review at a time. Offline runs (no AI) are not limited.
 """
 import asyncio
 from dataclasses import dataclass, field
@@ -37,6 +40,8 @@ RATING_WORDS = {"GREEN": "🟢 Green", "AMBER": "🟠 Amber", "RED": "🔴 Red",
 
 LIMIT_REACHED = "Today’s AI run limit is reached. You can still run the offline demo."
 BUSY = "A review is already running, please try again in 2 minutes."
+AI_OFF = ("AI runs are switched off on this server, because no login is set up (APP_USERNAME and APP_PASSWORD). "
+          "You can still run the offline demo.")
 NEEDS_AI = ("Reading the documents uses AI: untick **Offline**, or use the demo files (or JSON files under "
             "Advanced) for an offline run.")
 NEED_FILES = "Please add the price file and the factsheet (both required), or click **Use the demo files**."
@@ -44,37 +49,35 @@ NEED_FILES = "Please add the price file and the factsheet (both required), or cl
 PUBLIC_DATA = ("**Public data only.** Files and figures may be sent to OpenAI, which has data sharing on for this "
                "service. Never upload confidential or client data.")
 INSTRUCTIONS = """### How to use it
-1. **Try the demo:** click **Use the demo files**, then **Run the review**. It's free and takes a few seconds.
-2. **Upload a real fund:** add the price file and the factsheet. The KID and a peer fund's factsheet are optional. \
-Untick **Offline**.
-3. **Check what the agent read:** review the table, correct anything wrong, and click **Confirm and run**. The \
-review takes 1–2 minutes.
-4. **Read the result:** check the draft verdict and the four ratings on the page, then download the PDF report.
-5. **Decide:** the verdict is a draft. A person signs the approval box in the PDF."""
+1. **Try the demo:** click **Use the demo files**, then **Run the review**. Free, takes seconds.
+2. **Upload a real fund:** the price file and factsheet (KID and peer factsheets optional). Untick **Offline**.
+3. **Check what the agent read:** review the table, correct anything, click **Confirm and run**. Takes 1–2 minutes.
+4. **Read the evidence:** the suggested verdict, conclusion, ratings and charts; download the PDF.
+5. **Make the judgement:** the verdict is a suggestion. The analyst decides and signs the approval box."""
 FILES_TABLE = """### Which files do I need?
 | File | Needed? | What it's used for |
 |---|---|---|
-| Price file (CSV or Excel) | Required | Monthly fund prices (date, price): risk and cross-checks |
+| Price file (CSV or Excel) | Required | Monthly fund prices: risk and cross-checks |
 | Factsheet (PDF or Word) | Required | Official returns vs the index, fees, benchmark |
-| KID or prospectus (PDF or Word) | Optional | Objective, time horizon and risk details |
-| Peer fund factsheet (PDF or Word) | Optional | Needed to judge value for investors and fees |
-| JSON files | Advanced, optional | Pre-typed data that skips the AI reading step |"""
+| KID or prospectus (PDF or Word) | Optional | Objective, time horizon, risk |
+| Peer fund factsheets (PDF or Word) | Optional (approved peers are built in) | Value for investors and fees |
+| JSON files | Advanced, optional | Pre-typed data that skips AI reading |"""
 TAGS = {"Code": "#1f3a5f", "AI": "#6d4c9f", "Person": "#2e7d32"}
 HOW_STEPS = [
-    (["Person"], "You provide the fund's public documents and price file."),
-    (["AI", "Person", "Code"], "<b>Read and check the data:</b> the Extractor Agent (AI) reads the documents and you "
-                               "confirm the values; code checks the currency, the pricing time (noon vs market close), "
-                               "gaps and repeated prices, and that calculated returns match the factsheet."),
-    (["AI", "Code"], "<b>Understand the fund:</b> the Mandate Agent (AI) reads the objective, and a decision tree "
-                     "(code) chooses how to judge it."),
-    (["Code"], "<b>Measure performance:</b> returns over 1, 3 and 5 years, risk, and gaps to the index."),
-    (["Code"], "<b>Score it:</b> four questions rated Green, Amber or Red with fixed rules → Retain, Monitor or Review."),
-    (["AI", "Code"], "<b>Research and explain:</b> approved Fidelity pages plus up to 3 web searches; the AI writes the "
-                     "market context only, checked by code and a separate Evaluator agent."),
-    (["Person"], "<b>Deliver and decide:</b> a 4-page PDF report; a person makes the final call."),
+    (["Person"], "You provide public documents and a price file."),
+    (["AI", "Person", "Code"], "<b>Read and check:</b> the Extractor reads the documents and you confirm the values; "
+                               "code checks currency, pricing time (noon vs close), gaps, repeated prices and "
+                               "factsheet cross-checks."),
+    (["AI", "Code"], "<b>Understand the fund:</b> the Mandate Agent reads the objective; a decision tree chooses how "
+                     "to judge it."),
+    (["Code"], "<b>Measure:</b> returns, risk, gaps to the index and peers, and statistical tests."),
+    (["Code"], "<b>Score:</b> four questions rated Green, Amber or Red → suggested verdict."),
+    (["AI"], "<b>Research and explain:</b> approved pages plus up to 3 web searches; the AI writes the market context "
+             "only, checked by code and a separate Evaluator."),
+    (["Person"], "<b>Judge and decide:</b> the analyst reviews the evidence, adds comments and signs."),
 ]
-HOW_END = ("Code decides every number and rating. AI reads the documents and writes the market context, and "
-           "everything it writes is checked twice. You confirm what the AI read before anything is scored.")
+HOW_END = ("Code decides every number and rating. AI reads documents and writes the market context, and everything "
+           "it writes is checked twice. The analyst makes the final judgement.")
 
 
 def how_it_works_html() -> str:
@@ -85,7 +88,23 @@ def how_it_works_html() -> str:
     return f"<ol>{items}</ol><p><b>{HOW_END}</b></p>"
 
 
-# --- Limits on AI runs (config/settings.yaml, web) ----------------------------------------------------------------
+# --- Login and limits on AI runs (config/settings.yaml, web) -----------------------------------------------------
+
+def login() -> tuple[str, str] | None:
+    """ The page's username and password from the environment (.env locally, Render's settings online) """
+    username, password = os.getenv("APP_USERNAME"), os.getenv("APP_PASSWORD")
+    return (username, password) if username and password else None
+
+
+def on_server() -> bool:
+    """ Hosts such as Render set PORT """
+    return "PORT" in os.environ
+
+
+def ai_switched_off() -> bool:
+    """ On a server, AI runs need the login to be set up; on your own computer they never do """
+    return on_server() and login() is None
+
 
 class AiLimits:
     """ A daily count of AI reviews (kept in a small file, so a restart does not reset it) and how many run now """
@@ -102,6 +121,8 @@ class AiLimits:
 
     def start(self, count: bool = True) -> str | None:
         """ Why an AI review cannot start now, or None (and it is counted and marked running) """
+        if ai_switched_off():
+            return AI_OFF
         if count and self.used_today() >= self.settings.max_ai_runs_per_day:
             return LIMIT_REACHED
         if self.active >= self.settings.max_ai_runs_at_once:
@@ -145,6 +166,12 @@ def _one(value) -> str | None:
     if isinstance(value, list):
         return value[0] if value else None
     return value or None
+
+
+def _many(value) -> list[str]:
+    if not value:
+        return []
+    return [v for v in (value if isinstance(value, list) else [value]) if v]
 
 
 def _wrong_type(path: str | None, allowed: list[str], what: str) -> str | None:
@@ -204,14 +231,16 @@ async def _run_controller(folder: Path, question: str, offline: bool, on_step: P
     return Outcome(summary_markdown(result), str(result.pdf), str(log) if log.exists() else None)
 
 
-async def start_review(question: str, price, factsheet, kid, peer_factsheet, json_files, offline: bool,
+async def start_review(question: str, price, factsheet, kid, peer_factsheets, json_files, offline: bool,
                        limits: AiLimits, on_step: Progress | None = None, out_root: Path = RUNS,
                        runner=run_review, reader=read_documents) -> Outcome:
     """ "Run the review": JSON files run straight away; documents are read first and shown for confirmation """
-    price, factsheet, kid, peer_factsheet = map(_one, (price, factsheet, kid, peer_factsheet))
+    price, factsheet, kid = map(_one, (price, factsheet, kid))
+    peers = _many(peer_factsheets)
     json_files = [p for p in (json_files or []) if p]
     for path, allowed, what in ((price, PRICE_TYPES, "price file"), (factsheet, DOC_TYPES, "factsheet"),
-                                (kid, DOC_TYPES, "KID or prospectus"), (peer_factsheet, DOC_TYPES, "peer factsheet")):
+                                (kid, DOC_TYPES, "KID or prospectus"),
+                                *((p, DOC_TYPES, "peer factsheet") for p in peers)):
         if (wrong := _wrong_type(path, allowed, what)):
             return Outcome(wrong)
 
@@ -241,8 +270,7 @@ async def start_review(question: str, price, factsheet, kid, peer_factsheet, jso
     try:
         if on_step:
             on_step("Reading the documents…")
-        intake = await reader(Path(factsheet), Path(kid) if kid else None,
-                              Path(peer_factsheet) if peer_factsheet else None)
+        intake = await reader(Path(factsheet), Path(kid) if kid else None, [Path(p) for p in peers])
     except Exception as e:                       # noqa: BLE001
         traceback.print_exc()
         return Outcome(f"**The documents could not be read** ({type(e).__name__}). Check they are PDF or Word files.")
@@ -343,7 +371,8 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             factsheet = gr.File(label="Factsheet (PDF or Word), required", file_types=DOC_TYPES, type="filepath")
         with gr.Row():
             kid = gr.File(label="KID or prospectus (PDF or Word), optional", file_types=DOC_TYPES, type="filepath")
-            peer = gr.File(label="Peer fund factsheet (PDF or Word), optional", file_types=DOC_TYPES, type="filepath")
+            peer = gr.File(label="Peer fund factsheets (PDF or Word), optional: approved peers are built in",
+                           file_count="multiple", file_types=DOC_TYPES, type="filepath")
         with gr.Accordion("Advanced: JSON files (skip the AI reading step)", open=False) as advanced:
             json_files = gr.File(label="fund_profile.json, factsheet_performance.json, peer.json", file_count="multiple",
                                  file_types=[".json"], type="filepath")
@@ -397,7 +426,7 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
 
         def on_demo():
             d = demo_files()
-            return d["price"], d["factsheet"], None, d["peer"], d["json"], True, gr.update(open=True)
+            return d["price"], d["factsheet"], None, [d["peer"]], d["json"], True, gr.update(open=True)
 
         private = {"api_visibility": "private"}         # the page is the only way in, with its limits
         use_demo.click(on_demo, outputs=[price, factsheet, kid, peer, json_files, offline, advanced], **private)
@@ -410,9 +439,11 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
 
 
 def launch(ui: gr.Blocks | None = None) -> None:
-    """ Hosts such as Render set PORT and need the app to listen on all interfaces """
+    """ Hosts such as Render set PORT and need the app to listen on all interfaces. With APP_USERNAME and
+    APP_PASSWORD set, the page asks for them before it opens """
     ui = ui or build_ui()
-    on_host = "PORT" in os.environ
+    on_host = on_server()
     ui.queue(default_concurrency_limit=int(os.getenv("MAX_CONCURRENT_RUNS", "2")))
     ui.launch(css=CSS, theme=gr.themes.Soft(), server_name="0.0.0.0" if on_host else None,
-              server_port=int(os.environ["PORT"]) if on_host else None, max_file_size="20mb")
+              server_port=int(os.environ["PORT"]) if on_host else None, auth=login(),
+              auth_message="Fund performance review: please log in.", max_file_size="20mb")

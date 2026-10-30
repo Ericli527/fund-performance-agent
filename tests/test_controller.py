@@ -65,11 +65,12 @@ def test_test1_offline_run_logs_every_step(tmp_path):
     result = asyncio.run(run_review(TEST1, out_root=tmp_path, offline=True))
     log = json.loads((result.run_dir / "log.json").read_text())
     assert [(s["step"], s["status"]) for s in log["steps"]] == [
-        ("read_files", "ok"), ("extractor", "skipped"), ("data_checks", "ok"), ("mandate", "skipped"),
+        ("read_files", "ok"), ("extractor", "skipped"), ("peers", "skipped"), ("data_checks", "ok"),
+        ("mandate", "skipped"),
         ("calculator", "ok"), ("scorecard", "ok"), ("research", "skipped"), ("narrative", "skipped"),
         ("report", "ok"), ("email", "skipped")]
     assert log["run"]["status"] == "ok" and all(s["ended"] for s in log["steps"])
-    assert log["steps"][5]["outputs"]["verdict"] == "Monitor until a peer is added"
+    assert log["steps"][6]["outputs"]["verdict"] == "Monitor until a peer is added"
     assert "fund_profile.json" in log["sources"]["input_files"] and log["sources"]["web"] == []
     appendix = page_texts(result.pdf)[-1]
     assert all(name.split(" (")[0] in appendix for name in log["sources"]["input_files"])
@@ -127,7 +128,7 @@ def test_test1_full_run_mocked(tmp_path):
     result = asyncio.run(run_review(TEST1, out_root=tmp_path, runners=runners))
     log = json.loads((result.run_dir / "log.json").read_text())
     status = {s["step"]: s["status"] for s in log["steps"]}
-    assert status == {"read_files": "ok", "extractor": "skipped", "data_checks": "ok", "mandate": "ok",
+    assert status == {"read_files": "ok", "extractor": "skipped", "peers": "skipped", "data_checks": "ok", "mandate": "ok",
                       "calculator": "ok", "scorecard": "ok", "research": "ok", "narrative": "ok",
                       "report": "ok", "email": "skipped"}
     research = next(s for s in log["steps"] if s["step"] == "research")
@@ -138,7 +139,7 @@ def test_test1_full_run_mocked(tmp_path):
     web = log["sources"]["web"]
     assert web and web == result.narrative.sources or not result.narrative.output.market_context
     assert result.facts["scorecard"]["verdict"] == "Monitor until a peer is added"
-    assert len(page_texts(result.pdf)) == 4
+    assert len(page_texts(result.pdf)) == 5
 
 
 @requires_test1
@@ -179,7 +180,7 @@ def test_without_factsheet_figures_the_extractor_reads_the_documents(tmp_path):
     extractor = next(s for s in log["steps"] if s["step"] == "extractor")
     assert extractor["status"] == "ok" and "Monthly_FactSheet.pdf" in extractor["inputs"]
     assert "Key_Investor_Info.pdf" in log["sources"]["input_files"]                 # read, so listed plainly
-    assert "please verify" in page_texts(result.pdf)[1]                             # ai_extracted figures
+    assert "please verify" in page_texts(result.pdf)[2]                             # ai_extracted figures
     assert len(runners.extractor.prompts) == 1
 
 

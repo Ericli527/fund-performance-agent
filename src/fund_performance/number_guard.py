@@ -113,7 +113,10 @@ RATING_WORDS = {"green": "GREEN", "amber": "AMBER", "red": "RED", "check data": 
                 "manual check": "MANUAL CHECK"}
 PILLAR_WORDS = {"Mandate": ("mandate",), "Performance": ("performance",),
                 "Value for investors": ("value for investors", "value"), "Fees": ("fees", "fee")}
-VERDICT_WORDS = ("Retain", "Monitor", "Review", "Pending data check")
+# Verdict words and the verdict code each stands for (the report shows "Satisfied" for Retain, "Action needed" for
+# Review)
+VERDICT_WORDS = {"Retain": "Retain", "Satisfied": "Retain", "Monitor": "Monitor", "Review": "Review",
+                 "Action needed": "Review", "Pending data check": "Pending data check"}
 
 
 def _positions(lower: str, words: dict) -> list[tuple[int, str]]:
@@ -138,9 +141,9 @@ def check_ratings(text: str, scorecard: dict) -> list[str]:
             pillar = before[-1] if before else (after[0] if after else None)
             if pillar and ratings[pillar] != code:
                 problems.append(f"rating: '{sentence.strip()}' calls {pillar} {code}; the scorecard says {ratings[pillar]}")
-        for word in VERDICT_WORDS:
+        for word, code in VERDICT_WORDS.items():
             # Verdict words are capitalised in the report; a verdict other than the decided one is a change
-            if re.search(rf"\b{word}\b", sentence) and word.lower() not in verdict.lower():
+            if re.search(rf"\b{word}\b", sentence) and not verdict.lower().startswith(code.lower()):
                 problems.append(f"verdict: '{sentence.strip()}' uses '{word}'; the draft verdict is '{verdict}'")
     return problems
 
