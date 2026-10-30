@@ -10,7 +10,8 @@ import pytest
 from fund_performance.config import WebSettings
 from fund_performance.controller import RunStopped
 from fund_performance.web import (AI_OFF, BUSY, FILES_TABLE, HOW_END, INSTRUCTIONS, LIMIT_REACHED, NEED_FILES, NEEDS_AI,
-                                  PUBLIC_DATA, AiLimits, build_ui, demo_files, example_zip,
+                                  PUBLIC_DATA_HTML, AUDIENCE_HELP, REVIEW_TYPES, UI_QUESTION, AiLimits,
+                                  build_ui, demo_files, example_zip, file_status, question_for, run_offline,
                                   prepare_inputs, start_review, summary_markdown, with_progress)
 from test_intake import extractor_answer, MANDATE, peer_answer
 
@@ -209,13 +210,89 @@ def test_progress_messages_come_before_the_result():
 def test_the_page_has_the_instructions_files_table_and_how_it_works():
     ui = build_ui()
     texts = " ".join(str(getattr(c, "value", "") or "") for c in ui.blocks.values())
-    assert PUBLIC_DATA in texts and INSTRUCTIONS in texts and FILES_TABLE in texts and HOW_END in texts
+    assert PUBLIC_DATA_HTML in texts and INSTRUCTIONS in texts and FILES_TABLE in texts and HOW_END in texts
     for step in ("Try the demo", "Upload a real fund", "Let the agent check itself", "Read the evidence",
                  "Make the judgement"):
         assert step in INSTRUCTIONS
     accordions = {c.label: c.open for c in ui.blocks.values() if isinstance(c, gr.Accordion)}
-    assert accordions == {"How the agent works": True, "Advanced: JSON files (skip the AI reading step)": False}
+    assert accordions == {"Additional options": False, "Help & methodology": False}       # both start closed
     assert any(isinstance(c, gr.DownloadButton) and c.label == "Download example files" for c in ui.blocks.values())
+
+
+# The redesigned input page (UX stage 1)
+def _blocks(kind):
+    return [c for c in build_ui().blocks.values() if isinstance(c, kind)]
+
+
+def test_the_page_follows_the_new_layout():
+    ui = build_ui()
+    texts = " ".join(str(getattr(c, "value", "") or "") for c in ui.blocks.values())
+    assert "<h1>Fund Performance Review</h1>" in texts and "Clear insights for better investment oversight." in texts
+    assert "What would you like to analyse?" in texts and "Fund documents" in texts
+    buttons = {c.value: c.variant for c in _blocks(gr.Button) if not isinstance(c, gr.DownloadButton)}
+    assert buttons == {"Run Fund Review": "primary", "Use Demo Files": "secondary"}
+    files = [c.label for c in _blocks(gr.File)]
+    for label in ("Fund price data · CSV or Excel · Required", "Fund factsheet · PDF or Word · Required"):
+        assert label in files
+    assert any(label.startswith("KID or prospectus") for label in files)
+    assert any(label.startswith("Peer fund factsheets") for label in files)
+    assert any(label.startswith("Advanced: JSON inputs") for label in files)
+    question = next(c for c in _blocks(gr.Textbox) if c.label == "Review question")
+    assert question.value == "Is this fund meeting its investment objective, and are its fees justified?"
+
+
+def test_there_is_no_offline_switch_on_the_page():
+    assert _blocks(gr.Checkbox) == []
+    texts = " ".join(str(getattr(c, "value", "") or "") + str(getattr(c, "label", "") or "") for c in build_ui().blocks.values())
+    assert "Offline" not in texts and "untick" not in texts.lower()
+
+
+def test_review_type_cards_fill_in_the_question_and_keep_the_users_own():
+    radio = next(c for c in _blocks(gr.Radio) if c.value == "overall")
+    assert [v for _, v in radio.choices] == ["overall", "performance", "fees_value"]
+    assert [label.split("\n")[0][3:] for label, _ in radio.choices] == ["Overall Review", "Performance", "Fees & Value"]
+    assert question_for("fees_value", UI_QUESTION) == REVIEW_TYPES["fees_value"][2]
+    assert question_for("performance", REVIEW_TYPES["fees_value"][2]) == REVIEW_TYPES["performance"][2]
+    assert question_for("performance", "My own question?") == "My own question?"
+    assert question_for("overall", "") == UI_QUESTION
+
+
+def test_the_audience_is_recorded_only_and_changes_nothing(tmp_path, limits):
+    radio = next(c for c in _blocks(gr.Radio) if c.value == "analyst")
+    assert [label for label, _ in radio.choices] == ["Investment Analyst", "Management"]
+    assert "same report, figures and ratings" in AUDIENCE_HELP
+    import inspect
+    assert "audience" not in inspect.signature(start_review).parameters         # never reaches the review
+
+
+def test_each_upload_says_what_it_got():
+    d = demo()
+    assert file_status(d["price"], [".csv", ".xlsx", ".xls"], "CSV or Excel").startswith("<span class='fp-ok'>✓ prices.csv · ")
+    bad = file_status(d["factsheet"], [".csv", ".xlsx", ".xls"], "CSV or Excel")
+    assert "✗ factsheet.pdf: not a CSV or Excel file" in bad and "fp-bad" in bad
+    assert file_status(None, [".pdf"], "PDF or Word") == ""
+    two = file_status([d["factsheet"], d["peer"]], [".pdf", ".docx"], "PDF or Word")
+    assert two.count("✓") == 2
+
+
+def test_code_decides_offline_runs_not_the_user(monkeypatch, tmp_path):
+    monkeypatch.delenv("FUND_REVIEW_OFFLINE", raising=False)
+    d = demo()
+    assert run_offline(d["price"], d["json"]) is True                    # the unchanged demo: deterministic, no AI
+    changed = tmp_path / "fund_profile.json"
+    changed.write_text(Path(d["json"][0]).read_text().replace("Sample", "Other"))
+    assert run_offline(d["price"], [str(changed)] + d["json"][1:]) is False
+    assert run_offline(d["price"], []) is False                          # documents: the AI workflow
+    monkeypatch.setenv("FUND_REVIEW_OFFLINE", "1")                       # development and testing only
+    assert run_offline(d["price"], []) is True
+
+
+def test_the_demo_button_loads_the_files_and_opens_the_options():
+    ui = build_ui()
+    demo_fn = next(f for f in ui.fns.values() if f.name == "on_demo")
+    price, factsheet, kid, peers, json_files, options = demo_fn.fn()
+    assert (price, factsheet, kid) == (demo()["price"], demo()["factsheet"], None)
+    assert peers == [demo()["peer"]] and json_files == demo()["json"] and options["open"] is True
 
 
 def test_the_page_events_are_not_in_the_public_api():

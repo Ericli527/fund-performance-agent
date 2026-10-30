@@ -684,8 +684,21 @@ Keep the manager's published Value Assessment Report out of the agent's inputs. 
     As built: `src/fund_performance/web.py` (the page) and `app.py` (starts it; Render runs `python app.py`). The
     page shows the public-data warning first; uploads go to a fresh folder for the controller; it shows the draft
     verdict, the ratings with a "Why" column (the same one-line reasons as report page 1), the findings and actions,
-    with the PDF and log.json to download; a run that cannot be scored shows the controller's message. "Use the
-    demo files" loads a made-up fund (`demo/sample_index_fund`) and ticks "Offline" (no AI calls).
+    with the PDF and log.json to download; a run that cannot be scored shows the controller's message. "Use Demo
+    Files" loads a made-up fund (`demo/sample_index_fund`).
+    Input page (UX redesign, stage 1): header "Fund Performance Review" / "Clear insights for better investment
+    oversight."; A. "What would you like to analyse?": three cards (Overall Review, default; Performance; Fees &
+    Value) that fill in the review question (a question the user wrote is kept); all four ratings are always
+    calculated, so a card never changes a calculation; B. the review question (editable); C. fund documents: fund
+    price data (CSV or Excel) and fund factsheet (PDF or Word), both required, each with a check line (name and
+    size, or why the file cannot be used); D. report audience (Investment Analyst, default; Management): recorded
+    only, both get the same report in this version; E. "Additional options" (closed): KID or prospectus, peer
+    factsheets, JSON inputs; F. "Run Fund Review" (full width) with "Use Demo Files" next to it, the public-data
+    note and a closed "Help & methodology" section. Light neutral background, navy headings, muted blue actions,
+    Inter (system sans-serif fallback), tabular figures; responsive (cards stack on small screens).
+    No Offline switch on the page: code decides. The unchanged demo files (checked byte for byte) run offline;
+    every other review uses the AI workflow; `FUND_REVIEW_OFFLINE=1` in the environment runs every review offline
+    for development and testing. The command line keeps `--offline`.
     Protecting the API key: when APP_USERNAME and APP_PASSWORD are set, the page asks for them before it opens
     (Gradio's login). On a server with no login set up, AI runs are off and only the offline demo works; on your
     own computer (no PORT) no login is needed. Limits in `config/settings.yaml` (`web`): AI reviews per day and one

@@ -118,6 +118,11 @@ Instructions for Claude Code in this project. The build specification is
   Main route = documents (price file + factsheet, optional KID and peer factsheets) read by the Extractor and
   Mandate agents, then run straight on: no confirmation table. Code checks itself (`intake.self_check`): values
   not found in the documents are warnings; a required value nobody could read stops the run. JSON = "Advanced".
+- Input page (UX stage 1): review-type cards (fill in the question only; all ratings always calculated), review
+  question, two required uploads with check lines, audience (recorded only for now), "Additional options" (KID,
+  peers, JSON), "Run Fund Review" + "Use Demo Files", public-data note, "Help & methodology". No Offline switch:
+  the unchanged demo runs offline; `FUND_REVIEW_OFFLINE=1` for development. `tests/test_golden_facts.py` guards
+  every figure and rating (baselines: tests/golden/, data/test1/golden/).
 - Peers: approved peers per benchmark in `config/peers.yaml` (factsheets in `data/peers/`, found by ISIN), used when
   no peer is given. Peer checks in `peers.py`: returns only in the fund's currency (else fees only, info flag);
   noon vs noon NAV, market close vs PNAV; share class type and minimum investment (institutional note);

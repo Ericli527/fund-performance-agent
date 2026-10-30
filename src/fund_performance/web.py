@@ -11,6 +11,15 @@ The login: when APP_USERNAME and APP_PASSWORD are set, the page asks for them be
 login). On a server with no login set up (PORT is set but no credentials), AI runs are switched off and only the
 offline demo works; on your own computer no login is needed. Limits in config/settings.yaml also protect the API
 key: a daily number of AI reviews, and at most one AI review at a time. Offline runs (no AI) are not limited.
+
+There is no Offline switch on the page. Code decides: the unchanged demo files always run offline (deterministic, no
+AI); every other review uses the AI workflow. For development and testing, FUND_REVIEW_OFFLINE=1 in the environment
+runs every review offline (the command line keeps --offline).
+
+The input page (UX redesign, stage 1): what to analyse (three cards that fill in the review question; all four
+ratings are always calculated), the review question, the two required documents with a check of each file, the
+report audience (recorded only: both audiences get the same report in this version), additional options (KID, peer
+factsheets, JSON files), one main action and the demo, the public-data note and a closed Help & methodology section.
 """
 import asyncio
 from dataclasses import dataclass
@@ -44,15 +53,17 @@ LIMIT_REACHED = "Today’s AI run limit is reached. You can still run the offlin
 BUSY = "A review is already running, please try again in 2 minutes."
 AI_OFF = ("AI runs are switched off on this server, because no login is set up (APP_USERNAME and APP_PASSWORD). "
           "You can still run the offline demo.")
-NEEDS_AI = ("Reading the documents uses AI: untick **Offline**, or use the demo files (or JSON files under "
-            "Advanced) for an offline run.")
-NEED_FILES = "Please add the price file and the factsheet (both required), or click **Use the demo files**."
+NEEDS_AI = ("Reading the documents uses AI, which is switched off in this setup. Click **Use Demo Files**, or add "
+            "JSON files under **Additional options**.")
+NEED_FILES = "Please add the fund price data and the fund factsheet (both required), or click **Use Demo Files**."
+OFFLINE_ENV = "FUND_REVIEW_OFFLINE"         # development and testing only: every review runs without AI
 
 PUBLIC_DATA = ("**Public data only.** Files and figures may be sent to OpenAI, which has data sharing on for this "
                "service. Never upload confidential or client data.")
+PUBLIC_DATA_HTML = PUBLIC_DATA.replace("**Public data only.**", "<b>Public data only.</b>")
 INSTRUCTIONS = """### How to use it
-1. **Try the demo:** click **Use the demo files**, then **Run the review**. Free, takes seconds.
-2. **Upload a real fund:** the price file and factsheet (KID and peer factsheets optional). Untick **Offline**.
+1. **Try the demo:** click **Use Demo Files**, then **Run Fund Review**. Free, takes seconds, no AI.
+2. **Upload a real fund:** the fund price data and the factsheet. The KID and peer factsheets are optional, under **Additional options**.
 3. **Let the agent check itself:** code checks every value the AI read against the documents and the prices, and flags anything it cannot confirm. Takes 1–2 minutes.
 4. **Read the evidence:** the suggested verdict, conclusion, ratings and charts; download the PDF.
 5. **Make the judgement:** the verdict is a suggestion. The analyst decides and signs the approval box."""
@@ -92,6 +103,76 @@ def how_it_works_html() -> str:
                 f"font-size:0.8em;margin-right:4px'>{name}</span>")
     items = "".join(f"<li style='margin-bottom:6px'>{''.join(tag(t) for t in tags)} {text}</li>" for tags, text in HOW_STEPS)
     return f"<ol>{items}</ol><p><b>{HOW_END}</b></p>"
+
+
+# --- What to analyse, the audience and offline runs ----------------------------------------------------------------
+
+REVIEW_TYPES = {      # value: (title, subtitle, the review question it fills in)
+    "overall": ("Overall Review", "Complete fund analysis",
+                "Is this fund meeting its investment objective, and are its fees justified?"),
+    "performance": ("Performance", "Returns and benchmark tracking",
+                    "How has this fund performed against its benchmark, and does it track it closely enough?"),
+    "fees_value": ("Fees & Value", "Costs and peer comparison",
+                   "Are this fund's fees justified, and does it give investors value compared with similar funds?"),
+}
+DEFAULT_REVIEW = "overall"
+UI_QUESTION = REVIEW_TYPES[DEFAULT_REVIEW][2]
+REVIEW_HELP = ("Fills in the review question below, which tells the agents what to focus on. All four ratings "
+               "(mandate, performance, value and fees) are always calculated the same way.")
+AUDIENCES = {"analyst": "Investment Analyst", "management": "Management"}
+AUDIENCE_HELP = ("Recorded with your choices only: in this version both audiences get the same report, figures and "
+                 "ratings.")
+
+
+def question_for(review_type: str, current: str) -> str:
+    """ The question a review-type card fills in. A question the user has written themselves is kept """
+    current = (current or "").strip()
+    if current and current not in {q for _, _, q in REVIEW_TYPES.values()}:
+        return current
+    return REVIEW_TYPES.get(review_type, REVIEW_TYPES[DEFAULT_REVIEW])[2]
+
+
+def _same_bytes(path: str | None, reference: Path) -> bool:
+    try:
+        return bool(path) and Path(path).read_bytes() == reference.read_bytes()
+    except OSError:
+        return False
+
+
+def uses_demo_files(price, json_files) -> bool:
+    """ True when the price file and the JSON files are exactly the demo's (checked byte for byte) """
+    json_files = [p for p in (json_files or []) if p]
+    demo_json = [DEMO / n for n in ("fund_profile.json", "factsheet_performance.json", "peer.json")]
+    return (_same_bytes(_one(price), DEMO / "prices.csv") and len(json_files) == len(demo_json)
+            and all(any(_same_bytes(p, ref) for p in json_files) for ref in demo_json))
+
+
+def run_offline(price, json_files) -> bool:
+    """ Code decides, not the user: the demo runs offline (deterministic); FUND_REVIEW_OFFLINE=1 runs every review
+    offline, for development and testing; every other review uses the AI workflow """
+    if os.getenv(OFFLINE_ENV, "").strip().lower() in ("1", "true", "yes"):
+        return True
+    return uses_demo_files(price, json_files)
+
+
+def _size(path: Path) -> str:
+    n = path.stat().st_size
+    return f"{n / 1024:.1f} KB" if n < 1024 * 1024 else f"{n / 1024 / 1024:.1f} MB"
+
+
+def file_status(value, allowed: list[str], kinds: str) -> str:
+    """ The line under an upload area: the file's name and size, or why it cannot be used """
+    paths = _many(value)
+    if not paths:
+        return ""
+    lines = []
+    for p in paths:
+        path = Path(p)
+        if path.suffix.lower() not in allowed:
+            lines.append(f"<span class='fp-bad'>✗ {path.name}: not a {kinds} file. Please upload {kinds}.</span>")
+        else:
+            lines.append(f"<span class='fp-ok'>✓ {path.name} · {_size(path)}</span>")
+    return "<br>".join(lines)
 
 
 # --- Login and limits on AI runs (config/settings.yaml, web) -----------------------------------------------------
@@ -354,50 +435,147 @@ def example_zip() -> str:
     return str(path)
 
 
+NAVY_TEXT, BLUE, BLUE_DARK, BORDER, MUTED = NAVY, "#3d6098", "#2f4c7a", "#dde3ea", "#5b6878"
+ICONS = {"overall": "◎", "performance": "↗", "fees_value": "£"}
+
 CSS = f"""
-.fp-header h1 {{ color: {NAVY}; margin-bottom: 0; }}
-.fp-header p {{ color: #4c5966; margin-top: 4px; }}
-.fp-notice {{ background: #fff6e0; border-left: 4px solid #d18f00; padding: 8px 12px; border-radius: 4px; }}
-.fp-progress {{ font-weight: bold; color: {NAVY}; }}
+.gradio-container {{ max-width: 1040px !important; margin: 0 auto !important; font-size: 15.5px;
+  font-variant-numeric: tabular-nums; }}
+.fp-header h1 {{ color: {NAVY_TEXT}; font-size: 27px; font-weight: 600; margin: 8px 0 2px 0; }}
+.fp-header p {{ color: {MUTED}; font-size: 15px; margin: 0 0 6px 0; }}
+.fp-section-title h2, .fp-section-title {{ color: {NAVY_TEXT}; font-size: 18px; font-weight: 600; margin: 14px 0 2px 0; }}
+.fp-help, .fp-help p {{ color: {MUTED}; font-size: 13.5px; }}
+.fp-notice {{ background: #f6f8fb; border: 1px solid {BORDER}; border-radius: 10px; padding: 10px 14px;
+  font-size: 13.5px; color: #3c4857; }}
+.fp-progress {{ font-weight: 500; color: {NAVY_TEXT}; }}
+.fp-ok {{ color: #2e6b3a; font-size: 13.5px; }}
+.fp-bad {{ color: #a33a2f; font-size: 13.5px; font-weight: 500; }}
+
+/* What would you like to analyse: radio buttons drawn as cards (still radio inputs, so keyboard accessible) */
+.fp-cards .wrap {{ display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }}
+.fp-cards label {{ display: flex !important; align-items: flex-start; gap: 10px; padding: 14px 16px !important;
+  border: 1px solid {BORDER} !important; border-radius: 12px !important; background: #fff !important;
+  box-shadow: none !important; cursor: pointer; min-height: 72px; }}
+.fp-cards label span {{ white-space: pre-line; font-size: 13.5px; color: {MUTED}; line-height: 1.45; }}
+.fp-cards label span::first-line {{ font-size: 15.5px; font-weight: 600; color: {NAVY_TEXT}; }}
+.fp-cards label.selected, .fp-cards label:has(input:checked) {{ border-color: {BLUE} !important;
+  background: #eef3fa !important; box-shadow: 0 0 0 1px {BLUE} inset !important; }}
+.fp-cards label:focus-within {{ outline: 2px solid {BLUE}; outline-offset: 2px; }}
+.fp-cards input[type=radio] {{ margin-top: 3px; accent-color: {BLUE}; }}
+
+/* Report audience: a two-option segmented control */
+.fp-segmented .wrap {{ display: inline-flex !important; flex-wrap: nowrap !important; gap: 0 !important; border: 1px solid {BORDER};
+  border-radius: 10px; overflow: hidden; background: #fff; }}
+.fp-segmented label {{ border: none !important; border-radius: 0 !important; padding: 8px 18px !important;
+  background: #fff !important; box-shadow: none !important; margin: 0 !important; font-weight: 500; }}
+.fp-segmented label + label {{ border-left: 1px solid {BORDER} !important; }}
+.fp-segmented label.selected, .fp-segmented label:has(input:checked) {{ background: #eef3fa !important;
+  color: {BLUE_DARK} !important; }}
+.fp-segmented label:focus-within {{ outline: 2px solid {BLUE}; outline-offset: -2px; }}
+.fp-segmented input[type=radio] {{ accent-color: {BLUE}; }}
+
+.fp-run button, button.fp-run {{ width: 100%; font-size: 16px !important; font-weight: 600 !important;
+  padding: 12px !important; }}
+@media (max-width: 760px) {{
+  .fp-cards .wrap {{ grid-template-columns: 1fr; }}
+  .fp-header h1 {{ font-size: 24px; }}
+}}
 """
+
+
+def theme() -> gr.themes.Base:
+    """ Light neutral background, navy text, a muted blue for actions and selections; Inter if the browser can load
+    it, else the system's sans-serif font """
+    return gr.themes.Default(
+        primary_hue=gr.themes.colors.blue, neutral_hue=gr.themes.colors.slate, radius_size=gr.themes.sizes.radius_lg,
+        font=[gr.themes.GoogleFont("Inter"), "ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto",
+              "Helvetica Neue", "Arial", "sans-serif"],
+    ).set(
+        body_background_fill="#f7f8fa", body_text_color="#1d2733", block_border_color=BORDER, block_shadow="none",
+        button_primary_background_fill=BLUE, button_primary_background_fill_hover=BLUE_DARK,
+        button_primary_text_color="#ffffff", button_secondary_background_fill="#ffffff",
+        button_secondary_border_color=BORDER, button_secondary_text_color=BLUE_DARK,
+        checkbox_label_background_fill_selected="#eef3fa", input_border_color_focus=BLUE,
+    )
+
+
+def _card(value: str) -> str:
+    title, subtitle, _ = REVIEW_TYPES[value]
+    return f"{ICONS[value]}  {title}\n{subtitle}"
 
 
 def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
     limits = limits or AiLimits(load_settings().web)
     with gr.Blocks(title="Fund Performance Review") as ui:
-        gr.HTML("<div class='fp-header'><h1>Fund performance review</h1><p>Code does the maths and the ratings, AI "
-                "reads and writes, and a person makes the call.</p></div>")
-        gr.Markdown(PUBLIC_DATA, elem_classes="fp-notice")
-        gr.Markdown(INSTRUCTIONS)
-        gr.Markdown(FILES_TABLE)
-        gr.DownloadButton("Download example files", value=example_zip(), size="sm")
-        with gr.Accordion("How the agent works", open=True):
+        gr.HTML("<div class='fp-header'><h1>Fund Performance Review</h1>"
+                "<p>Clear insights for better investment oversight.</p></div>")
+
+        # A. What to analyse (fills in the review question; never changes a calculation)
+        gr.HTML("<h2>What would you like to analyse?</h2>", elem_classes="fp-section-title")
+        review_type = gr.Radio([(_card(v), v) for v in REVIEW_TYPES], value=DEFAULT_REVIEW, show_label=False,
+                               container=False, elem_classes="fp-cards", label="What would you like to analyse?")
+        gr.Markdown(REVIEW_HELP, elem_classes="fp-help")
+
+        # B. Review question
+        question = gr.Textbox(label="Review question", value=UI_QUESTION, lines=2,
+                              info="Edit it if you like. The agents use it to decide what to focus on.")
+
+        # C. Fund documents
+        gr.HTML("<h2>Fund documents</h2>", elem_classes="fp-section-title")
+        with gr.Row(equal_height=True):
+            with gr.Column(min_width=280):
+                price = gr.File(label="Fund price data · CSV or Excel · Required", file_types=PRICE_TYPES,
+                                type="filepath", height=150)
+                price_status = gr.HTML()
+            with gr.Column(min_width=280):
+                factsheet = gr.File(label="Fund factsheet · PDF or Word · Required", file_types=DOC_TYPES,
+                                    type="filepath", height=150)
+                factsheet_status = gr.HTML()
+
+        # D. Report audience (recorded only in this version)
+        audience = gr.Radio([(label, value) for value, label in AUDIENCES.items()], value="analyst",
+                            label="Report audience", info=AUDIENCE_HELP, elem_classes="fp-segmented")
+
+        # E. Additional options
+        with gr.Accordion("Additional options", open=False) as options:
+            with gr.Row():
+                with gr.Column(min_width=280):
+                    kid = gr.File(label="KID or prospectus · PDF or Word · Optional", file_types=DOC_TYPES,
+                                  type="filepath")
+                    kid_status = gr.HTML()
+                with gr.Column(min_width=280):
+                    peer = gr.File(label="Peer fund factsheets · PDF or Word · Optional (approved peers are built in)",
+                                   file_count="multiple", file_types=DOC_TYPES, type="filepath")
+                    peer_status = gr.HTML()
+            json_files = gr.File(label="Advanced: JSON inputs (fund_profile.json, factsheet_performance.json, "
+                                       "peer.json) · skip the AI reading step", file_count="multiple",
+                                 file_types=[".json"], type="filepath")
+
+        # F. Actions, the privacy note and help
+        run = gr.Button("Run Fund Review", variant="primary", elem_classes="fp-run")
+        with gr.Row():
+            use_demo = gr.Button("Use Demo Files", variant="secondary", scale=0, min_width=180)
+            gr.Markdown("A made-up fund. Runs in seconds, without AI.", elem_classes="fp-help")
+        gr.HTML(f"<div class='fp-notice' role='note'>{PUBLIC_DATA_HTML}</div>")
+        with gr.Accordion("Help & methodology", open=False):
+            gr.Markdown(INSTRUCTIONS)
+            gr.Markdown(FILES_TABLE)
+            gr.DownloadButton("Download example files", value=example_zip(), size="sm")
+            gr.Markdown("### How the agent works")
             gr.HTML(how_it_works_html())
 
-        question = gr.Textbox(label="Question", value=DEFAULT_QUESTION, lines=2)
-        with gr.Row():
-            price = gr.File(label="Price file (CSV or Excel), required", file_types=PRICE_TYPES, type="filepath")
-            factsheet = gr.File(label="Factsheet (PDF or Word), required", file_types=DOC_TYPES, type="filepath")
-        with gr.Row():
-            kid = gr.File(label="KID or prospectus (PDF or Word), optional", file_types=DOC_TYPES, type="filepath")
-            peer = gr.File(label="Peer fund factsheets (PDF or Word), optional: approved peers are built in",
-                           file_count="multiple", file_types=DOC_TYPES, type="filepath")
-        with gr.Accordion("Advanced: JSON files (skip the AI reading step)", open=False) as advanced:
-            json_files = gr.File(label="fund_profile.json, factsheet_performance.json, peer.json", file_count="multiple",
-                                 file_types=[".json"], type="filepath")
-        with gr.Row():
-            offline = gr.Checkbox(label="Offline: no AI calls (works with the demo or JSON files)", value=True)
-            use_demo = gr.Button("Use the demo files (made-up fund)", size="sm")
-        run = gr.Button("Run the review", variant="primary")
+        # Results (unchanged in this stage)
         progress = gr.Markdown(elem_classes="fp-progress")
         status = gr.Markdown()
         with gr.Row():
             pdf = gr.File(label="PDF report", interactive=False)
             log = gr.File(label="Run log (log.json)", interactive=False)
 
-        async def on_run(q, p, f, k, pr, j, off):
+        async def on_run(q, p, f, k, pr, j, _audience):
+            # The audience is recorded on the page only: it changes nothing in the review (see AUDIENCE_HELP)
             yield "Starting…", "", None, None
-            async for kind, item in with_progress(lambda say: start_review(q, p, f, k, pr, j, off, limits, say)):
+            offline = run_offline(p, j)
+            async for kind, item in with_progress(lambda say: start_review(q, p, f, k, pr, j, offline, limits, say)):
                 if kind == "progress":
                     yield item, gr.update(), gr.update(), gr.update()
                 else:
@@ -405,11 +583,17 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
 
         def on_demo():
             d = demo_files()
-            return d["price"], d["factsheet"], None, [d["peer"]], d["json"], True, gr.update(open=True)
+            return d["price"], d["factsheet"], None, [d["peer"]], d["json"], gr.update(open=True)
 
         private = {"api_visibility": "private"}         # the page is the only way in, with its limits
-        use_demo.click(on_demo, outputs=[price, factsheet, kid, peer, json_files, offline, advanced], **private)
-        run.click(on_run, inputs=[question, price, factsheet, kid, peer, json_files, offline],
+        review_type.change(question_for, inputs=[review_type, question], outputs=question, **private)
+        for box, status_box, allowed, kinds in ((price, price_status, PRICE_TYPES, "CSV or Excel"),
+                                                (factsheet, factsheet_status, DOC_TYPES, "PDF or Word"),
+                                                (kid, kid_status, DOC_TYPES, "PDF or Word"),
+                                                (peer, peer_status, DOC_TYPES, "PDF or Word")):
+            box.change(lambda v, a=allowed, k=kinds: file_status(v, a, k), inputs=box, outputs=status_box, **private)
+        use_demo.click(on_demo, outputs=[price, factsheet, kid, peer, json_files, options], **private)
+        run.click(on_run, inputs=[question, price, factsheet, kid, peer, json_files, audience],
                   outputs=[progress, status, pdf, log], **private)
     return ui
 
@@ -420,6 +604,6 @@ def launch(ui: gr.Blocks | None = None) -> None:
     ui = ui or build_ui()
     on_host = on_server()
     ui.queue(default_concurrency_limit=int(os.getenv("MAX_CONCURRENT_RUNS", "2")))
-    ui.launch(css=CSS, theme=gr.themes.Soft(), server_name="0.0.0.0" if on_host else None,
+    ui.launch(css=CSS, theme=theme(), server_name="0.0.0.0" if on_host else None,
               server_port=int(os.environ["PORT"]) if on_host else None, auth=login(),
               auth_message="Fund performance review: please log in.", max_file_size="20mb")

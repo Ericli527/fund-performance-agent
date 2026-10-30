@@ -53,12 +53,14 @@ cp .env.example .env            # add your OPENAI_API_KEY
 python app.py                   # opens on http://127.0.0.1:7860
 ```
 
-Click **Use the demo files (made-up fund)** and **Run the review** to try it without any AI calls. With
+Click **Use Demo Files** and **Run Fund Review** to try it: the demo is a made-up fund and runs without AI. With
 `APP_USERNAME` and `APP_PASSWORD` set in `.env`, the page asks for them before it opens; on your own computer you
 can leave them blank (no login).
 
 For a real fund: add the price file and the factsheet (KID and peer factsheets optional; for an S&P 500 fund the
-approved peers are used), untick **Offline** and click **Run the review**; code checks every value the agent read.
+approved peers are used) and click **Run Fund Review**; code checks every value the agent read. The KID, peer
+factsheets and JSON inputs are under **Additional options**. There is no Offline switch on the page: the demo runs
+without AI, and for development `FUND_REVIEW_OFFLINE=1 python app.py` runs every review without AI.
 Put the approved peers' factsheets in `data/peers/` (gitignored; found by the ISIN).
 
 From the command line:
