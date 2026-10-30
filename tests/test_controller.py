@@ -147,10 +147,9 @@ def reporter_answer(prompt):
 
 
 def judge_answer(prompt):
-    drafts = json.loads(prompt.split("Drafts:\n", 1)[1])
-    return {"drafts": [{"draft": d["draft"], "key_points_covered": True, "conclusion_clear": True,
-                        "plain_english": True, "no_rating_change": True, "supported_by_facts": True, "issues": []}
-                       for d in drafts], "preferred": len(drafts)}
+    """ The Judge approves the draft """
+    return {"approved": True, "factual_issue": False, "security_issue": False, "conclusion_reasonable": True,
+            "clear_for_analysts": True, "feedback": "Accurate, reasonable and clear."}
 
 
 @requires_test1
@@ -252,18 +251,18 @@ def test_email_when_switched_on_goes_through_resend_and_is_logged(tmp_path, monk
 def test_the_judged_ai_draft_becomes_the_suggested_conclusion(tmp_path):
     result = asyncio.run(run_review(TEST1, out_root=tmp_path, runners=mocked(), settings=full_settings()))
     concl = result.facts["suggested_conclusion"]
-    assert concl["source"] == "ai" and concl["angle"] == "analyst"            # tie: the Judge's preferred draft
-    assert concl["text"].startswith("For the analyst:") and concl["code_text"] != concl["text"]
-    assert [(d["angle"], d["score"], d["chosen"]) for d in result.facts["drafts"]] == [
-        ("board", 6, False), ("analyst", 6, True)]
+    assert concl["source"] == "ai" and concl["angle"] == "board"              # the first approved, in plan order
+    assert concl["text"].startswith("For the board:") and concl["code_text"] != concl["text"]
+    assert [(d["angle"], d["decision"], d["chosen"]) for d in result.facts["drafts"]] == [
+        ("board", "pass", True), ("analyst", "pass", False)]
     assert result.facts["plan"]["source"] == "planner" and result.facts["plan"]["focus"][:2] == ["Performance", "Fees"]
     p1 = " ".join(page_texts(result.pdf)[0].split())
-    assert "AI draft for the oversight analyst, chosen by the Judge and checked by code" in p1
+    assert "AI draft for the board, chosen by the Judge and checked by code" in p1
     pages = page_texts(result.pdf)
     start = next(i for i, x in enumerate(pages) if "Appendix D: Data quality, sources and audit" in x)
     appendix = " ".join(" ".join(pages[start:]).split())
     assert "Plan (Task Planner Agent): quarterly oversight review; focus Performance, Fees" in appendix
-    assert "Draft for the oversight analyst: 6 of 6 checks; chosen." in appendix
+    assert "Draft for the board: approved by the Judge; reason: Accurate, reasonable and clear; chosen." in appendix
 
 
 @requires_test1
@@ -307,7 +306,7 @@ def test_progress_runs_through_the_five_steps_in_order_with_the_agents(tmp_path)
     for step in ("read_files", "plan", "data_checks", "mandate", "calculator", "scorecard", "drafts", "report"):
         assert progress_line(*STAGES[step]) in messages, step
     assert "▶ Step 2 of 5 · Task Planner Agent · Choosing what the review should focus on…" in messages
-    assert "▶ Step 4 of 5 · Reporting Agents and Judge · Drafting and judging the summary…" in messages
+    assert "▶ Step 4 of 5 · Reporting Agent and Judge · Drafting the summary and checking it…" in messages
     assert any(m.startswith("↷ Step 3 of 5 · Research Agents · skipped: web research is off") for m in messages)
     assert any(m.startswith("✓ Step 5 of 5 · Code: reports · done (") for m in messages)
 

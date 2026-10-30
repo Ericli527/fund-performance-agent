@@ -95,18 +95,18 @@ STAGES = {
     "self_check": (1, "Code: self-check", "Checking every value the agents read against the documents"),
     "plan": (2, "Task Planner Agent", "Choosing what the review should focus on"),
     "extractor": (1, "Extractor Agent", "Reading the factsheet and KID"),
-    "peers": (1, "Extractor Agent", "Reading the approved peers' factsheets"),
+    "peers": (1, "Extractor Agent (approved peers)", "Reading the approved peers' factsheets"),
     "data_checks": (2, "Code: data checks", "Checking the prices and the factsheet figures"),
     "mandate": (2, "Mandate Agent", "Reading the fund's objective and promises"),
     "calculator": (3, "Code: calculator", "Calculating returns, risk and gaps to the index"),
     "scorecard": (3, "Code: scorecard", "Rating mandate, performance, value for investors and fees"),
     "research": (3, "Research Agents", "Checking approved sources and searching for market news"),
     "narrative": (4, "Oversight Analyst and Evaluator", "Writing and checking the market context"),
-    "drafts": (4, "Reporting Agents and Judge", "Drafting and judging the summary"),
+    "drafts": (4, "Reporting Agent and Judge", "Drafting the summary and checking it"),
     "report": (5, "Code: reports", "Building the Executive and Detailed PDF reports"),
 }
 TOTAL_STAGES = 5
-OUTCOME_ICON = {"ok": "✓", "skipped": "↷", "failed": "✗", "timeout": "✗", "stopped": "✗"}
+OUTCOME_ICON = {"ok": "✓", "skipped": "↷", "fallback": "↷", "failed": "✗", "timeout": "✗", "stopped": "✗"}
 DOCUMENTS_STAGE = (1, "Extractor Agent and Mandate Agent", "Reading the factsheet, KID and peer factsheets")
 
 
@@ -151,15 +151,19 @@ class RunLog:
         return record
 
     def end(self, record: StepRecord, status: str = "ok", outputs: dict | None = None,
-            notes: list[str] | None = None) -> None:
+            notes: list[str] | None = None, quiet: bool = False) -> None:
+        """ quiet: the step was already shown on the page (the agents that read the documents in Step 1) """
         record.ended, record.status = _now(), status
         record.seconds = round(time.monotonic() - self._clock.get(record.step, time.monotonic()), 2)
         record.outputs |= outputs or {}
         record.notes += notes or []
-        if self.on_step and record.step in STAGES:
+        if self.on_step and record.step in STAGES and not quiet:
             stage, who, _ = STAGES[record.step]
-            word = {"ok": f"done ({record.seconds:.1f} s)", "skipped": "skipped"}.get(status, status)
-            why = f": {record.notes[0]}" if status != "ok" and record.notes else ""
+            word = {"ok": f"done ({record.seconds:.1f} s)", "skipped": "skipped",
+                    "fallback": f"fallback after {record.seconds:.1f} s"}.get(status, status)
+            why = f": {record.notes[0]}" if status not in ("ok", "fallback") and record.notes else (
+                f": code's conclusion is used (labelled as such); {record.notes[0]}" if status == "fallback"
+                and record.notes else "")
             self.on_step(f"{OUTCOME_ICON.get(status, '•')} Step {stage} of {TOTAL_STAGES} · {who} · {word}{why}")
 
     def finish(self, status: str, message: str | None = None) -> None:
@@ -258,11 +262,12 @@ def _status() -> str:
     return "failed" if (_FAILURE.get() or "").startswith("failed") else "timeout"
 
 
-def _short(text: str, limit: int = 160) -> str:
-    """ An error message for the page and log.json: one line, no file paths, no key-like strings, short """
+def _short(text: str, limit: int = 240) -> str:
+    """ An error message for the page and log.json: one line, no file paths, no key-like strings, short. A long one
+    keeps its start and its end, where libraries usually put the reason """
     text = re.sub(r"(/[\w.\-]+)+", "<path>", " ".join(text.split()))
     text = re.sub(r"\b(sk|re)[-_][A-Za-z0-9_\-]{8,}", "<redacted>", text)
-    return text[:limit] + ("…" if len(text) > limit else "")
+    return text if len(text) <= limit else text[:limit // 2] + " … " + text[-(limit // 2):]
 
 
 async def run_review(folder: Path, question: str = DEFAULT_QUESTION, out_root: Path | None = None,
@@ -392,7 +397,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     step = log.start("extractor", [p.name for p in files["documents"]],
                      announce=not intake and factsheet is None and not offline and bool(files["documents"]))
     if intake:
-        log.end(step, "skipped", notes=["documents read before the run; values checked by code"])
+        log.end(step, "skipped", notes=["documents read before the run; values checked by code"], quiet=True)
     elif factsheet is not None:
         log.end(step, "skipped", notes=["factsheet_performance.json supplied"])
     elif offline or not files["documents"]:
@@ -477,7 +482,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     elif intake:
         promises = list(intake.get("promises", []))
         log.end(step, outputs={"promises": len(promises)},
-                notes=["Mandate Agent read the objective before the run"])
+                notes=["Mandate Agent read the objective before the run"], quiet=True)
     else:
         mandate = await _timed(read_mandate(profile, r.mandate), s.timeouts_seconds.mandate)
         if mandate is None:
@@ -572,7 +577,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         text_log += narrative.log
     step.outputs |= {"source": narrative.source, "sources": narrative.sources}
 
-    # 8b. Reporting Agents (one draft per angle) and the Judge Agent; code checks, scores and picks
+    # 8b. Reporting Agent (one draft per angle) and the Judge Agent's review; code checks and decides
     step = log.start("drafts", ["facts JSON"] + [f"angle: {a}" for a in plan.angles], announce=not offline)
     if offline:
         log.end(step, "skipped", notes=["offline run: code's conclusion"])
@@ -582,7 +587,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                                                s.drafting.max_drafts, s.drafting.rejudge_after_rewrite),
                                s.timeouts_seconds.drafting)
         if drafted is None:
-            flags.append(DataFlag(check="judge", level="warning", message=(
+            flags.append(DataFlag(check="judge", level="info", message=(
                 f"AI drafts: the Reporting Agent or Judge {_why(s.timeouts_seconds.drafting)}; code's conclusion "
                 "used (labelled as written by code)")))
             log.end(step, _status(), notes=[_why(s.timeouts_seconds.drafting)])
@@ -594,9 +599,10 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                                                   "revised": REVISED in chosen.issues}
             flags += drafted.flags
             text_log += drafted.log
-            log.end(step, "ok" if chosen else "failed", outputs={
-                "chosen": chosen.draft.angle if chosen else None,
-                "scores": {x.draft.angle: x.score for x in drafted.scored}}, notes=drafted.log)
+            log.end(step, "ok" if chosen else "fallback", outputs={
+                "chosen": chosen.draft.angle if chosen else None, "reason": drafted.reason,
+                "decisions": {x.draft.angle: x.decision for x in drafted.scored}},
+                notes=([] if chosen else [f"Judge: {drafted.reason}"]) + drafted.log)
 
     # 9. Report (its sources list comes from this log)
     step = log.start("report")

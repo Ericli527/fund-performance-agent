@@ -327,8 +327,11 @@ def page2(inp, content: ExecutiveContent) -> str:
     blocking = evidence_quality(data).blocking
     actions = merge_resolve_actions([report_action(point_to_data_issues(a, blocking)) for a in data.get("actions", [])])
     suggested = verdict_name(facts["scorecard"]["verdict"])
-    ticks = "".join(f"<td class='x-box-tick'>&nbsp;</td><td>{n}</td>" for n in ("Satisfied", "Monitor", "Action needed"))
-    manual = "".join(f"<tr><td class='x-box-tick'>&nbsp;</td><td>Manual check done: "
+    # Tick boxes as characters in one cell: a nested table of 12px box cells could be squeezed below its padding
+    # when the box crosses a page break, and ReportLab then stops the whole report (Stage 6C Live run)
+    ticks = "&nbsp;&nbsp;&nbsp;&nbsp;".join(f"<span class='x-box'>☐</span>&nbsp;{n}" for n in ("Satisfied", "Monitor",
+                                                                                            "Action needed"))
+    manual = "".join(f"<tr><td></td><td colspan='3'><span class='x-box'>☐</span>&nbsp;Manual check done: "
                      f"{escape(m.name)}: {escape(m.reason)}</td></tr>" for m in inp.card.manual_checks)
     return f"""
 <h1>{PAGE2}</h1>
@@ -340,8 +343,8 @@ def page2(inp, content: ExecutiveContent) -> str:
 <h2>Analyst sign-off</h2>
 <table class="x-approval">
 <tr><td colspan="4" class="x-signoff-lead">Suggested assessment: <b>{escape(suggested)}</b>. The analyst decides; tick one.</td></tr>
-<tr><td width="22%" class="x-tick-head">Decision</td><td colspan="3"><table class="x-ticks"><tr>{ticks}</tr></table></td></tr>
-{f'<tr><td></td><td colspan="3"><table class="x-ticks">{manual}</table></td></tr>' if manual else ''}
+<tr><td width="22%" class="x-tick-head">Decision</td><td colspan="3" class="x-tick-row">{ticks}</td></tr>
+{manual}
 <tr><td>Analyst's comments</td><td class="x-line" colspan="3">&nbsp;</td></tr>
 <tr><td>&nbsp;</td><td class="x-line" colspan="3">&nbsp;</td></tr>
 <tr><td colspan="2">If you disagree with the suggested assessment, why?</td><td class="x-line" colspan="2">&nbsp;</td></tr>
@@ -377,7 +380,7 @@ EXEC_CSS = f"""
 .x-signoff-lead {{ font-size: 9pt; }}
 .x-approval td {{ padding: 8px 4px 1px 4px; }} .x-line {{ border-bottom: 0.8px solid #1d2733; }}
 .x-right {{ text-align: right; }} .x-after {{ margin-top: 8px; }}
-.x-ticks td {{ padding: 3px 4px; }} .x-box-tick {{ border: 1px solid #1d2733; width: 12px; background-color: #ffffff; }}
+.x-box {{ font-size: 12pt; }} .x-tick-row {{ font-size: 9pt; }}
 .x-tick-head {{ font-weight: bold; color: {NAVY}; width: 22%; }}
 """
 

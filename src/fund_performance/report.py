@@ -690,6 +690,8 @@ def _calculated_sharpe(inp: ReportInputs) -> str:
 
 
 ANGLE_WORDS = {"board": "board", "analyst": "oversight analyst", "manager_meeting": "meeting with the manager"}
+JUDGE_WORDS = {"pass": "approved by the Judge", "revise": "sent back for one revision",
+               "fallback": "not used (security or factual concern)"}
 REPORT_TYPE_WORDS = {"quarterly_review": "quarterly oversight review", "fee_question": "fee question",
                      "performance_question": "performance question", "mandate_question": "mandate question"}
 
@@ -706,13 +708,14 @@ def _plan_and_drafts(facts: dict, compact: bool = False) -> str:
                      + ", ".join(ANGLE_WORDS.get(a, a) for a in plan.get("angles", [])) + ".")
     for d in facts.get("drafts", []):
         failed = [k.replace("_", " ") for k, v in d["checks"].items() if not v]
-        lines.append(f"Draft for the {ANGLE_WORDS.get(d['angle'], d['angle'])}: {d['score']} of {d['max_score']} "
-                     f"checks{' (rewritten once)' if d.get('rewritten') else ''}"
-                     + (f"; failed: {', '.join(failed)}" if failed else "") + ("; chosen" if d["chosen"] else "") + ".")
+        lines.append(f"Draft for the {ANGLE_WORDS.get(d['angle'], d['angle'])}: "
+                     f"{JUDGE_WORDS.get(d.get('decision'), 'reviewed')}{' (rewritten once)' if d.get('rewritten') else ''}"
+                     + (f"; reason: {d['reason'].rstrip('.')}" if d.get("reason") else "")
+                     + (f"; not passed: {', '.join(failed)}" if failed else "") + ("; chosen" if d["chosen"] else "") + ".")
     if facts.get("drafts") and not any(d["chosen"] for d in facts["drafts"]):
-        lines.append("No draft passed every check, so code's conclusion is used.")
+        lines.append("The draft was not used after the Judge's review, so code's conclusion is used.")
     if compact and len(lines) > 2:                       # the plan and the chosen draft (or the fallback) only
-        lines = lines[:1] + [x for x in lines[1:] if x.endswith("chosen.") or x.startswith("No draft")][:1]
+        lines = lines[:1] + [x for x in lines[1:] if x.endswith("chosen.") or x.startswith("The draft was not")][:1]
     return "".join(f"<li>{escape(x)}</li>" for x in lines)
 
 

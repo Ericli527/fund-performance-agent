@@ -173,7 +173,7 @@ def test_the_controller_uses_the_confirmation_and_reports_progress(tmp_path):
     assert steps_shown == sorted(steps_shown) and steps_shown[0] == 1 and steps_shown[-1] == 5
     assert started[0] == "▶ Step 1 of 5 · Code: self-check · Checking every value the agents read against the documents…"
     assert not any("Extractor Agent" in m or "Mandate Agent" in m for m in started)   # read on the page, not again
-    assert any(m.startswith("▶ Step 4 of 5 · Reporting Agents and Judge") for m in started)
+    assert any(m.startswith("▶ Step 4 of 5 · Reporting Agent and Judge") for m in started)
 
 
 # The documents route from the command line, and the live check that it matches the JSON route
@@ -333,3 +333,14 @@ def test_a_missing_performance_fee_is_flagged_and_the_review_can_go_on(tmp_path)
     assert any(f["check"] == "performance_fee" and f["level"] == "warning" and f["message"] == PERFORMANCE_FEE_MISSING
                for f in built.flags)
     assert built.profile["performance_fee"] is None                  # recorded as not established, never as no
+
+
+def test_locate_finds_values_printed_in_other_forms():
+    pages = {"factsheet.pdf": ["Fund facts as at 30.09.26. OCF 0.070%. Valuation point 12:00 UK time.",
+                               "Share class: Accumulating. Launch date 3 March 2014."]}
+    assert locate(0.07, pages) == "factsheet.pdf, page 1"                  # trailing zero
+    assert locate("2026-09-30", pages) == "factsheet.pdf, page 1"          # 30.09.26
+    assert locate("2014-03-03", pages) == "factsheet.pdf, page 2"          # 3 March 2014
+    assert locate("midday", pages) == "factsheet.pdf, page 1"              # 12:00
+    assert locate("accumulation", pages) == "factsheet.pdf, page 2"        # Accumulating
+    assert locate(0.7, pages) == NOT_FOUND and locate("2026-09-29", pages) == NOT_FOUND

@@ -283,3 +283,20 @@ def test_overlong_drafts_fail_codes_checks():
     assert f"style: {len(long_text.strip())} characters; use at most 700 (shorter sentences)" in \
         draft_problems(long_text.strip(), facts)
     assert not any("characters" in p for p in draft_problems(long_text.strip(), facts, max_chars=2000))
+
+
+
+# Stage 6C Live run: the sign-off box crossing a page break stopped the whole report with a ReportLab ValueError
+# ("flowable given negative availWidth"): its tick boxes were a nested table of 12px cells. They are characters now
+@pytest.mark.parametrize("words", [168, 174, 180, 186, 192])
+def test_the_sign_off_box_can_cross_a_page_break_without_breaking_the_reports(tmp_path, words):
+    from fund_performance.executive import build_executive_reliably
+    message = "CHECK DATA: " + " ".join(["mismatch"] * words)       # pushes the sign-off box onto the page break
+    inp = made_up_inputs(flags=[DataFlag(check="currency_match", level="blocking", message=message)])
+    try:
+        path, _ = build_executive_reliably(inp, tmp_path / "exec")
+        assert len(page_texts(path)) == 2
+    except ReportLayoutError:
+        pass                                                        # too long for two pages: said, never cut
+    detailed = " ".join(" ".join(page_texts(build_report(inp, tmp_path / "detailed"))).split())
+    assert "☐ Satisfied" in detailed and "☐ Action needed" in detailed and message.split()[-1] in detailed

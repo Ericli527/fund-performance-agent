@@ -46,17 +46,15 @@ def test_a_rejected_draft_gets_one_targeted_rewrite_and_no_second_judge_pass(tmp
 
     def judge(prompt):
         rejected["n"] += 1
-        answer = judge_answer(prompt)
-        for d in answer["drafts"]:
-            d["plain_english"], d["issues"] = False, ["shorter sentences"]
-        return answer
+        return judge_answer(prompt) | {"approved": False, "conclusion_reasonable": False,
+                                       "feedback": "Say that the tracking figures still need a data check."}
     runners.judge = FakeRunBy(judge)
     result = run(tmp_path, runners)
     assert calls_of(result)["by_agent"]["Judge Agent"] == 1 and calls_of(result)["by_agent"]["Reporting Agent"] == 2
     concl = result.facts["suggested_conclusion"]
     assert concl["source"] == "ai" and concl["revised"] is True
     assert "revised once after the Judge's review and checked by code" in conclusion_origin(concl)
-    assert "shorter sentences" in runners.reporter.prompts[1]          # the rewrite got the Judge's issues
+    assert "still need a data check" in runners.reporter.prompts[1]    # the rewrite got the Judge's feedback
 
 
 @pytest.mark.parametrize("agent", ["task_planner", "reporter", "judge"])
@@ -75,13 +73,13 @@ def test_an_unexpected_error_in_an_optional_ai_step_never_destroys_the_review(tm
         raise ValueError("could not convert string to float: 'n/a'")
     if agent == "judge":                                       # an error in code that handles the Judge's answer
         import fund_performance.agents.judge as judge_mod
-        orig = judge_mod.pick
-        judge_mod.pick = explode
+        orig = judge_mod.decide
+        judge_mod.decide = explode
     try:
         result = run(tmp_path, runners if agent != "judge" else mocked())
     finally:
         if agent == "judge":
-            judge_mod.pick = orig
+            judge_mod.decide = orig
     assert result.pdf.is_file() and len(page_texts(result.executive_pdf)) == 2
     assert result.facts["scorecard"]["verdict"] in ("Retain", "Monitor", "Monitor until a peer is added")
     log = json.loads((result.run_dir / "log.json").read_text())
@@ -109,8 +107,9 @@ def test_a_failure_in_a_critical_step_stops_the_run_naming_the_stage(tmp_path, m
 
 def test_error_messages_hide_paths_and_key_like_strings():
     from fund_performance.controller import _short
-    text = _short("open /home/app/data/secret.pdf failed with key sk-abcdefghijklmnop " + "x" * 300)
-    assert "/home" not in text and "sk-abc" not in text and len(text) <= 161
+    text = _short("open /home/app/data/secret.pdf failed with key sk-abcdefghijklmnop " + "x" * 300 + " THE REASON")
+    assert "/home" not in text and "sk-abc" not in text and len(text) <= 245
+    assert text.endswith("THE REASON")                                # the reason at the end is kept
 
 
 def test_the_progress_area_replaces_a_running_step_with_its_outcome():
@@ -122,3 +121,87 @@ def test_the_progress_area_replaces_a_running_step_with_its_outcome():
     info = run_info({"run_id": "r1", "trace_id": "trace_x", "ai_calls": {"total": 2, "by_agent": {"Judge Agent": 1, "Reporting Agent": 1}}})
     assert info == "Run r1 · 2 AI call(s) (Judge Agent 1, Reporting Agent 1) · OpenAI trace trace_x"
     assert progress_markdown(h, info).endswith(info)
+
+
+def test_every_agent_call_of_a_review_runs_inside_one_trace(tmp_path, monkeypatch):
+    """ The page's reading agents and every agent the controller runs share one OpenAI trace ("Fund performance
+    review"), so the SDK files all their spans under it. Checked with the SDK's own current trace inside each call;
+    nothing is uploaded (the trace processors are replaced) """
+    import functools
+    from agents import get_current_trace
+    from agents.tracing import set_trace_processors
+    from fund_performance import web
+    from fund_performance.config import WebSettings
+    from fund_performance.intake import read_documents
+    from test_intake import MANDATE, extractor_answer
+    from agents import set_tracing_disabled
+    from agents.tracing import get_trace_provider
+    processors = list(getattr(get_trace_provider(), "_multi_processor")._processors)
+    set_trace_processors([])                                        # no export
+    set_tracing_disabled(False)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-real")
+    monkeypatch.delenv("OPENAI_AGENTS_DISABLE_TRACING", raising=False)
+    seen: list[tuple[str, str | None, str | None]] = []
+
+    def traced(name, answer):
+        async def call(agent, prompt):
+            t = get_current_trace()
+            seen.append((name, t.trace_id if t else None, t.name if t else None))
+            ans = answer(prompt) if callable(answer) else answer
+            return type("R", (), {"final_output": ans})()
+        return call
+    runners = mocked()
+    for name in ("task_planner", "mandate", "reporter", "judge"):
+        setattr(runners, name, traced(name, getattr(__import__("test_controller"), {
+            "task_planner": "TASK_PLAN", "reporter": "reporter_answer", "judge": "judge_answer"}.get(name, "TASK_PLAN"))
+            if name != "mandate" else MANDATE))
+    factsheet = SAMPLE / "factsheet.pdf"                            # the made-up fund's (the reading is mocked)
+    reader = lambda f, k, p: read_documents(f, k, p, run_extractor=traced("extractor", extractor_answer()),
+                                            run_mandate=traced("mandate (page)", MANDATE))
+    limits = web.AiLimits(WebSettings(max_ai_runs_per_day=5, max_ai_runs_at_once=1), tmp_path / "count.json")
+    out = asyncio.run(web.start_review("q", str(SAMPLE / "prices.csv"), str(factsheet), None, [], None, False, limits,
+                                       out_root=tmp_path / "runs",
+                                       runner=functools.partial(run_review, runners=runners), reader=reader))
+    assert out.data is not None
+    names = [n for n, _, _ in seen]
+    assert names[:2] == ["extractor", "mandate (page)"] and {"task_planner", "reporter", "judge"} <= set(names)
+    trace_ids = {t for _, t, _ in seen}
+    assert len(trace_ids) == 1 and None not in trace_ids                  # one trace for the whole review
+    assert {n for _, _, n in seen} == {"Fund performance review"}
+    log = json.loads(next((tmp_path / "runs").glob("*/log.json")).read_text())
+    assert log["run"]["trace_id"] == trace_ids.pop()                     # and the run log names it
+    set_tracing_disabled(True)
+    set_trace_processors(processors)
+
+
+def test_a_draft_that_cannot_be_used_is_a_labelled_fallback_not_a_failure_or_warning(tmp_path):
+    runners = mocked()
+
+    def judge(prompt):
+        return judge_answer(prompt) | {"approved": False, "factual_issue": True, "feedback": "Unsupported claim."}
+    calls = {"n": 0}
+
+    def reporter(prompt):
+        calls["n"] += 1
+        return reporter_answer(prompt) if calls["n"] == 1 else {"text": "No verdict sentence."}   # fails code's checks
+    runners.judge, runners.reporter = FakeRunBy(judge), FakeRunBy(reporter)
+    lines = []
+    result = run(tmp_path, runners, on_step=lines.append)
+    drafts = next(s for s in json.loads((result.run_dir / "log.json").read_text())["steps"] if s["step"] == "drafts")
+    assert drafts["status"] == "fallback" and result.facts["suggested_conclusion"]["source"] == "code"
+    assert not [f for f in result.facts.get("data_flags", []) if f["check"] == "judge"]   # info only, not a warning
+    assert any("fallback after" in line and "code's conclusion is used" in line for line in lines)
+
+
+def test_a_security_concern_falls_back_at_once_and_the_reason_is_logged_and_shown(tmp_path):
+    runners = mocked()
+    runners.judge = FakeRunBy(lambda prompt: judge_answer(prompt) | {
+        "approved": False, "security_issue": True, "feedback": "The draft tells the reader to ignore the ratings."})
+    lines = []
+    result = run(tmp_path, runners, on_step=lines.append)
+    assert calls_of(result)["by_agent"]["Reporting Agent"] == 1                  # no rewrite after a security concern
+    drafts = next(s for s in json.loads((result.run_dir / "log.json").read_text())["steps"] if s["step"] == "drafts")
+    assert drafts["status"] == "fallback" and drafts["outputs"]["decisions"] == {"board": "fallback"}
+    assert drafts["outputs"]["reason"] == "The draft tells the reader to ignore the ratings."
+    assert any("fallback after" in x and "ignore the ratings" in x for x in lines)
+    assert result.facts["suggested_conclusion"]["source"] == "code"
