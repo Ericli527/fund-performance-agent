@@ -324,7 +324,7 @@ def _other_ratings_sentence(pillars: dict) -> str:
             parts.append(f"{_rating_phrase(name, p['rating'])}: {reason}.")
         else:
             parts.append(f"{_rating_phrase(name, p['rating'])}: {_plain(p['reason'])}.")
-    return " ".join(parts) or "The figures and their sources are on pages 2 and 3."
+    return " ".join(parts) or "The evidence and its sources are on pages 2 to 4."
 
 
 def template(facts: dict) -> AnalystOutput:

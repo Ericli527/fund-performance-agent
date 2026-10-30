@@ -7,9 +7,10 @@ sdk_version: 6.30.0
 
 # Fund Performance Review
 
-A web app that drafts an **investment oversight review** of a fund as a 4-page PDF: is the fund doing what it
+A web app that drafts an **investment oversight review** of a fund as a 5-page PDF: is the fund doing what it
 promised, how did it do against its index, did investors get a fair outcome, and is its fee justified? It gives
-a **draft verdict** (Retain / Monitor / Review) for a person to approve and sign.
+a **suggested verdict** (Satisfied / Monitor / Action needed) and a suggested conclusion, with an evidence
+dashboard; the analyst makes the judgement and signs.
 
 **Code does the maths and the ratings, AI reads and writes, and a person makes the call.**
 
@@ -20,17 +21,25 @@ The build specification is [`docs/FUND_PERFORMANCE_AGENT_SPEC.md`](docs/FUND_PER
 ## How it works
 
 ```
-Upload: fund_profile.json + price file (CSV/Excel) + factsheet_performance.json (or factsheet/KID PDFs) [+ peer.json]
+Upload: price file (CSV/Excel) + factsheet (PDF/Word) [+ KID, peer factsheets] + a question   or, Advanced: JSON files
    │
-   ├─ Extractor Agent (AI)    only without factsheet_performance.json: copies figures from the PDFs ("please verify")
+   ├─ Task Planner (AI)       turns the question into tasks from a fixed menu; code keeps all four ratings
+   ├─ Extractor Agent (AI)    reads the documents; you confirm the values in a table before anything is scored
+   ├─ Approved peers          config/peers.yaml per benchmark, used when you give no peer (factsheets in data/peers/)
    ├─ Data checks (code)      dates, gaps, repeated prices, currency, pre-launch prices
    ├─ Mandate Agent (AI)      reads the objective; the profile wins on any disagreement
    ├─ Calculator (code)       returns, risk, tracking difference and error, factsheet precedence
-   ├─ Scorecard (code)        4 ratings and the draft verdict, from config/thresholds.yaml
+   ├─ Peer checks (code)      currency, pricing time, share class, income vs accumulation; peers averaged
+   ├─ Scorecard (code)        4 ratings and the suggested verdict, from config/thresholds.yaml
+   ├─ Evidence (code)         yearly gaps, hit rate, t-test, peer percentile; conclusion, points, questions
    ├─ Research                approved pages fetched by code + up to 3 web searches (AI), vetted by code
    ├─ Findings and actions    written by code
    ├─ Market context (AI)     checked by code, then by the Evaluator Agent (AI)
-   └─ Report (code)           4-page PDF with charts, approval box and appendix; optional email (Resend)
+   ├─ Reporting Agents (AI)   draft the conclusion for the board, the analyst and the manager meeting, in parallel
+   ├─ Judge (AI) + code       code checks every figure; the Judge marks a checklist; code scores and picks the best,
+   │                          or sends the drafts back once; code's own conclusion is the fallback
+   └─ Report (code)           5-page PDF: summary, evidence dashboard, mandate and performance, value and fees,
+                              appendix; optional email (Resend)
 ```
 
 Every run is saved in `runs/<timestamp>/`: `report.pdf`, `facts.json`, `run_log.txt` and `log.json` (each step,
@@ -44,14 +53,20 @@ cp .env.example .env            # add your OPENAI_API_KEY
 python app.py                   # opens on http://127.0.0.1:7860
 ```
 
-Click **Use the demo files (made-up fund)** and **Run the review** to try it without any AI calls. On your own
-computer, AI runs need no login unless you set `APP_USERNAME` and `APP_PASSWORD` in `.env`.
+Click **Use the demo files (made-up fund)** and **Run the review** to try it without any AI calls. With
+`APP_USERNAME` and `APP_PASSWORD` set in `.env`, the page asks for them before it opens; on your own computer you
+can leave them blank (no login).
+
+For a real fund: add the price file and the factsheet (KID and peer factsheets optional; for an S&P 500 fund the
+approved peers are used), untick **Offline**, check the table of values the agent read, then **Confirm and run**.
+Put the approved peers' factsheets in `data/peers/` (gitignored; found by the ISIN).
 
 From the command line:
 
 ```bash
 PYTHONPATH=src python -m fund_performance.run_report --data data/test1            # with AI
 PYTHONPATH=src python -m fund_performance.run_report --data data/test1 --offline  # no AI calls
+PYTHONPATH=src python -m fund_performance.run_report --data data/test1 --from-documents  # read the PDFs with AI
 ```
 
 Tests: `pytest -q` (AI calls are mocked; `pytest --run-live` runs the few live tests).
@@ -60,9 +75,10 @@ Tests: `pytest -q` (AI calls are mocked; `pytest --run-live` runs the few live t
 
 1. In the Render dashboard: **New > Blueprint**, pick this repository. `render.yaml` sets up the web service
    (`python app.py`, free plan, deploys from `main`).
-2. Enter the secrets when Render asks: `OPENAI_API_KEY`, `APP_USERNAME` and `APP_PASSWORD`. On a server, AI runs
-   need this login (on the page); without it, visitors can only run the offline demo, so a public link cannot
-   spend your API credit. `RESEND_API_KEY`, `EMAIL_FROM` and `EMAIL_TO` (the recipients) are only needed to
+2. Enter the secrets when Render asks: `OPENAI_API_KEY`, `APP_USERNAME` and `APP_PASSWORD`. The page asks for the
+   username and password before it opens. Without them set, AI runs are off and only the offline demo works, so a
+   public link cannot spend your API credit. Daily and one-at-a-time limits on AI runs are in
+   `config/settings.yaml`. `RESEND_API_KEY`, `EMAIL_FROM` and `EMAIL_TO` (the recipients) are only needed to
    email the report.
 3. After a push to `main`, Render rebuilds and redeploys.
 
@@ -75,6 +91,7 @@ Runs are kept on the server's disk until the next deploy (Render's free plan has
 | `config/thresholds.yaml` | Rating thresholds and run limits (illustrative, to be agreed with the oversight team) |
 | `config/models.yaml` | The model for each AI agent |
 | `config/sources.yaml` | Approved web pages per fund and market, fetched by code |
-| `config/settings.yaml` | Timeouts per AI step, and email on/off (off by default; recipients come from `EMAIL_TO`) |
+| `config/settings.yaml` | Timeouts per AI step, limits on AI runs, the significance test level, and email on/off (off by default; recipients come from `EMAIL_TO`) |
+| `config/peers.yaml` | Approved peer funds per benchmark (factsheets in `data/peers/`), optional sector average OCF |
 
 Everything in `data/` is gitignored: the repository is public, so price files, factsheets and KIDs stay local.

@@ -33,6 +33,7 @@ discrete_12m: 12-month periods; end_date is the end of the period as YYYY-MM-DD.
 risk: one entry per basis of the risk table ("nav" or "pnav" as labelled, else null).
 All returns and percentages as plain numbers in percent (17.5 for 17.5%).
 profile: the fund facts as printed. Dates as YYYY-MM-DD. ocf_pct as a number (0.06 for 0.06%).
+minimum_investment: the minimum initial investment as printed (e.g. "GBP 10,000,000"), else null.
 transaction_cost_pct only if a transaction cost figure is printed. fund_size_gbp_m only if the size
 is in GBP millions.
 """
@@ -93,6 +94,7 @@ class ExtractedProfile(_Strict):
     fund_size_gbp_m: float | None
     risk_indicator: int | None
     pricing_point: Literal["midday", "market_close"] | None
+    minimum_investment: str | None
 
 
 class ExtractorOutput(_Strict):

@@ -2,16 +2,18 @@
 config/thresholds.yaml; AI agents only explain them """
 from dataclasses import dataclass, field
 from typing import get_args
-from fund_performance.calc import annualise, hit_rate_target
+from fund_performance.calc import hit_rate_target
 from fund_performance.config import Thresholds
 from fund_performance.mandate import SHORT_HISTORY_REASON, DecisionPath
-from fund_performance.models import FundProfile, ObjectiveType, Peer
+from fund_performance.models import FundProfile, ObjectiveType
+from fund_performance.peers import INSTITUTIONAL_NOTE, as_list, compare_peers, two_dp
 from fund_performance.precedence import PRICE_SERIES, ReportedFigures
 
 GREEN, AMBER, RED, CHECK_DATA = "GREEN", "AMBER", "RED", "CHECK DATA"
 MANUAL_CHECK = "MANUAL CHECK"       # a reviewer must check it; it does not block the verdict (owner decision)
 _SEVERITY = {GREEN: 0, AMBER: 1, RED: 2}
 NO_PEER = "no comparison available"
+NO_PEER_RETURNS = "no peer with returns comparable with the fund's"
 ADD_PEER = "Add peer"
 MANUAL_MANDATE_REASON = "Style and holdings need a reviewer check"
 SHORT_NAMES = {"Value for investors": "Value", "Fees": "Fees", "Mandate": "Mandate", "Performance": "Performance"}
@@ -22,6 +24,13 @@ class SubRating:
     name: str
     rating: str
     reason: str
+    limit: dict | None = None           # the value and its limits, for the dashboard's distance-to-limit chart
+
+
+def _limit(metric: str, value: float, green, amber, kind: str, unit: str) -> dict:
+    """ kind "max": lower is better (Green up to `green`); "min": higher is better; "range": Green and Amber are
+    (low, high) pairs """
+    return {"metric": metric, "value": round(value, 4), "green": green, "amber": amber, "kind": kind, "unit": unit}
 
 
 @dataclass
@@ -96,7 +105,10 @@ def mandate_rating(reported: ReportedFigures, profile: FundProfile, t: Threshold
         rating = AMBER
     else:
         rating = RED
-    return Pillar("Mandate", rating, f"R² {r2:.2f} and beta {beta:.2f}, {label}")
+    return Pillar("Mandate", rating, f"R² {r2:.2f} and beta {beta:.2f}, {label}",
+                  values={"limits": [_limit("R²", r2, m.green_min_r2, m.amber_min_r2, "min", ""),
+                                     _limit("Beta", beta, list(m.green_beta_range), list(m.amber_beta_range), "range",
+                                            "")]})
 
 
 # --- 6.2 Performance ----------------------------------------------------------------------------------------
@@ -123,7 +135,8 @@ def _index_tests(reported: ReportedFigures, profile: FundProfile, path: Decision
         amber = profile.ocf_pct + p.amber_td_margin_over_ocf_pp + extra_tolerance_pp
         td_sub = SubRating("Tracking difference", _band(abs(td), green, amber),
                            f"TD {_fmt(td, ' pp')} a year ({period}, {series} vs index); Green within {green:.2f}, "
-                           f"Amber within {amber:.2f}")
+                           f"Amber within {amber:.2f}",
+                           _limit("Tracking difference (size)", abs(td), round(green, 2), round(amber, 2), "max", "pp"))
         if extra_tolerance_pp:
             notes.append(f"Tolerance widened by {extra_tolerance_pp:.2f} pp for the fund/index timing difference")
 
@@ -138,7 +151,8 @@ def _index_tests(reported: ReportedFigures, profile: FundProfile, path: Decision
         te_sub = SubRating("Tracking error", CHECK_DATA, "tracking error not available from the factsheet or an index series")
     else:
         te_sub = SubRating("Tracking error", _band(te, p.green_max_te_pct, p.amber_max_te_pct),
-                           f"TE {te:.2f}%, {te_period}; Green up to {p.green_max_te_pct:.2f}, Amber up to {p.amber_max_te_pct:.2f}")
+                           f"TE {te:.2f}%, {te_period}; Green up to {p.green_max_te_pct:.2f}, Amber up to {p.amber_max_te_pct:.2f}",
+                           _limit("Tracking error", te, p.green_max_te_pct, p.amber_max_te_pct, "max", "%"))
         if not te_period.startswith(period):
             notes.append(f"Periods differ: tracking difference is {period}, tracking error is {te_period}")
     return [td_sub, te_sub], notes
@@ -192,44 +206,53 @@ def performance_rating(reported: ReportedFigures, profile: FundProfile, path: De
         notes.append(f"Short history: {SHORT_HISTORY_REASON}")
     if len(path.objectives) > 1:
         notes.append("Dual objective: Performance is the weaker of the two objectives")
-    return Pillar("Performance", rating, reason, subs, notes=notes)
+    limits = [s.limit for s in subs if s.limit]
+    return Pillar("Performance", rating, reason, subs, notes=notes, values={"limits": limits} if limits else {})
 
 
 # --- 6.3 Value and 6.4 Fees -------------------------------------------------------------------------------------
 
-def _peer_problem(peer: Peer | None, profile: FundProfile) -> tuple[str, str] | None:
-    """ (rating, reason) when the peer cannot be used """
-    if peer is None:
-        return AMBER, NO_PEER
-    if peer.currency.upper() != profile.currency.upper():
-        return CHECK_DATA, f"peer is in {peer.currency}, the fund in {profile.currency}; not comparable"
-    return None
+def _names(rows) -> str:
+    names = [r.peer.name for r in rows]
+    return names[0] if len(names) == 1 else f"the average of {len(names)} peers"
 
 
-def value_rating(reported: ReportedFigures, profile: FundProfile, t: Thresholds, peer: Peer | None) -> Pillar:
-    problem = _peer_problem(peer, profile)
-    if problem:
-        return Pillar("Value for investors", *problem, summary=ADD_PEER if problem[1] == NO_PEER else None)
-    n = profile.time_horizon_years
-    peer_value = getattr(peer.returns, f"y{n}")
-    fund = reported.value(f"{PRICE_SERIES}.ann.{n}y")
-    if peer_value is None or fund is None:
-        return Pillar("Value for investors", CHECK_DATA, f"{n}-year return missing for the fund or the peer")
-    peer_ann = peer_value if peer.returns.basis == "annualised" else annualise(peer_value, n)
-    gap = peer_ann - fund
+def value_rating(reported: ReportedFigures, profile: FundProfile, t: Thresholds, peers, comparison=None) -> Pillar:
+    """ Peer return gap over the main period, annualised and net of fees. With several peers: the average gap
+    over the peers whose returns can be used (same currency as the fund, a return for the period) """
+    peers = as_list(peers)
+    if not peers:
+        return Pillar("Value for investors", AMBER, NO_PEER, summary=ADD_PEER)
+    comparison = comparison or compare_peers(peers, profile, reported)
+    n = comparison.years
+    used = comparison.used
+    if not used:
+        why = "; ".join(f"{r.peer.name}: {r.excluded}" for r in comparison.rows)
+        return Pillar("Value for investors", AMBER, f"{NO_PEER_RETURNS} ({why})", summary=ADD_PEER,
+                      notes=comparison.notes)
+    gap = comparison.average_gap
+    fund = two_dp(sum(r.fund_returns[n] for r in used) / len(used))
+    peer_ann = two_dp(sum(r.returns[n] for r in used) / len(used))
     rating = _band(gap, t.value.green_max_peer_outperformance_pp, t.value.amber_max_peer_outperformance_pp)
-    return Pillar("Value for investors", rating, f"{peer.name} returned {_fmt(gap, ' pp')} a year vs the fund ({n}y, "
-                                                  "annualised, both net of fees)",
-                  values={"peer": peer.name, "years": n, "peer_ann": round(peer_ann, 2), "fund_ann": round(fund, 2),
-                          "gap_pp": round(gap, 2)})
+    bases = sorted({r.basis for r in used})
+    return Pillar("Value for investors", rating,
+                  f"{_names(used)} returned {_fmt(gap, ' pp')} a year vs the fund ({n}y, annualised, both net of fees; "
+                  f"{'; '.join(bases)})", notes=comparison.notes,
+                  values={"peer": _names(used), "peers": [r.peer.name for r in used], "count": len(used),
+                          "years": n, "peer_ann": peer_ann, "fund_ann": fund, "gap_pp": gap, "basis": bases,
+                          "limits": [_limit("Peer return gap", gap, t.value.green_max_peer_outperformance_pp,
+                                            t.value.amber_max_peer_outperformance_pp, "max", "pp")]})
 
 
-def fees_rating(profile: FundProfile, t: Thresholds, peer: Peer | None, performance: str) -> Pillar:
-    problem = _peer_problem(peer, profile)
-    if problem:
-        return Pillar("Fees", *problem, summary=ADD_PEER if problem[1] == NO_PEER else None)
-    gap = profile.ocf_pct - peer.ocf_pct
-    notes = []
+def fees_rating(profile: FundProfile, t: Thresholds, peers, performance: str) -> Pillar:
+    """ The fund's OCF against the peers' (their average when there are several). A fee does not depend on the
+    currency, so every peer counts here """
+    peers = as_list(peers)
+    if not peers:
+        return Pillar("Fees", AMBER, NO_PEER, summary=ADD_PEER)
+    peer_ocf = two_dp(sum(p.ocf_pct for p in peers) / len(peers))
+    gap = two_dp(profile.ocf_pct - peer_ocf)
+    notes = [f"{p.name}: {INSTITUTIONAL_NOTE}" for p in peers if p.investor_type == "institutional"]
     if profile.objective_type == "index_tracker":
         f = t.fees_index
         rating = _band(gap, f.green_max_ocf_over_peer_pp, f.amber_max_ocf_over_peer_pp)
@@ -249,10 +272,15 @@ def fees_rating(profile: FundProfile, t: Thresholds, peer: Peer | None, performa
             notes.append("The fund charges a performance fee, not justified in the profile, so at least Amber")
             if rating == GREEN:
                 rating = AMBER
-    return Pillar("Fees", rating, f"OCF {profile.ocf_pct:.2f}% vs {peer.name} {peer.ocf_pct:.2f}% "
-                                  f"(gap {_fmt(gap, ' pp')})", notes=notes,
-                  values={"peer": peer.name, "fund_ocf": profile.ocf_pct, "peer_ocf": peer.ocf_pct,
-                          "gap_pp": round(gap, 2)})
+    who = peers[0].name if len(peers) == 1 else f"the average of {len(peers)} peers"
+    each = "" if len(peers) == 1 else " (" + ", ".join(f"{p.name} {p.ocf_pct:.2f}%" for p in peers) + ")"
+    return Pillar("Fees", rating, f"OCF {profile.ocf_pct:.2f}% vs {who} {peer_ocf:.2f}%{each} (gap {_fmt(gap, ' pp')})",
+                  notes=notes,
+                  values={"peer": who, "peers": [p.name for p in peers], "count": len(peers),
+                          "peer_fees": [p.ocf_pct for p in peers], "fund_ocf": profile.ocf_pct, "peer_ocf": peer_ocf,
+                          "gap_pp": gap} | ({"limits": [_limit("Fee gap", gap, t.fees_index.green_max_ocf_over_peer_pp,
+                                                               t.fees_index.amber_max_ocf_over_peer_pp, "max", "pp")]}
+                                            if profile.objective_type == "index_tracker" else {}))
 
 
 # --- 6.5 Verdict -------------------------------------------------------------------------------------------------
@@ -274,14 +302,14 @@ def verdict(pillars: dict[str, Pillar]) -> tuple[str, str]:
                "Data check needed on " + ", ".join(data) + (f"; Amber on {', '.join(amber)}" if amber else "") + also
     if not amber:
         return "Retain", ("All four questions Green" if not manual else "No Amber or Red") + also
-    if all(pillars[n].reason == NO_PEER for n in amber):
+    if all(pillars[n].summary == ADD_PEER or pillars[n].reason == NO_PEER for n in amber):
         return "Monitor until a peer is added", "Value and fees cannot be judged without a peer" + also
     return "Monitor", "Amber on " + ", ".join(amber) + also
 
 
 def score(reported: ReportedFigures, profile: FundProfile, thresholds: Thresholds, path: DecisionPath,
-          peer: Peer | None = None, comparison_series: str = PRICE_SERIES,
-          extra_tolerance_pp: float = 0.0) -> Scorecard:
+          peer=None, comparison_series: str = PRICE_SERIES, extra_tolerance_pp: float = 0.0) -> Scorecard:
+    """ `peer`: None, one peer or a list of peers """
     pillars = {"Mandate": mandate_rating(reported, profile, thresholds),
                "Performance": performance_rating(reported, profile, path, thresholds, comparison_series,
                                                  extra_tolerance_pp)}

@@ -14,7 +14,8 @@ This spec follows the design diagram `Fund_Performance_Agent_Overview.pdf` (work
 3. **Flag doubtful data, never guess.** If data fails a check, output `CHECK DATA` for the affected item instead of a rating.
 4. **Every number has a source.** Each figure carries a `source` field: `factsheet`, `calculated`, `ai_extracted` (must be labelled "please verify"), or `web`.
 5. **The AI explains but cannot change.** The Oversight Analyst may only quote numbers present in the facts JSON it is given (enforced by a validator, Section 8.3).
-6. **A person decides.** The verdict is a draft until the reviewer signs Retain / Monitor / Review.
+6. **A person decides.** The verdict is a suggestion until the analyst signs Satisfied / Monitor / Action needed
+   (code keys Retain / Monitor / Review).
 7. **Kept in bounds.** Approved sources (fetched by code from `config/sources.yaml`) plus at most 3 web searches per run (demo setting, in config); public data only; no confidential client data uploaded. This API key has OpenAI data sharing on: public data only, never upload confidential or client data.
 9. **Code controls the flow.** A workflow controller in code runs the steps in a fixed order. No AI agent decides which step runs next.
 8. **All thresholds live in `config/thresholds.yaml`**, are printed in the report, and are clearly labelled as illustrative until agreed with the oversight team.
@@ -29,7 +30,7 @@ This spec follows the design diagram `Fund_Performance_Agent_Overview.pdf` (work
 | Factsheet | Yes (preferred) | PDF, or a structured file of its figures |
 | Fund profile | Yes | `fund_profile.json` (schema below); can be created by the Extractor Agent from factsheet + KID, then confirmed by the user |
 | Price history | Recommended | CSV/XLSX: `date, nav` (+ optional `index_level`) |
-| Peer fund | Recommended | `peer.json` (name, OCF, 1/3/5y returns, currency, share class) or its factsheet |
+| Peer funds | Recommended | `peer.json` (one peer or a list: name, OCF, 1/3/5y returns, currency, share class; optional ISIN, pricing point, distribution, share class type, minimum investment, official annualised returns, 3y volatility) or their factsheets. Without them, the approved peers for the fund's benchmark in `config/peers.yaml` are used (factsheets in `data/peers/`, read by the Extractor Agent) |
 | Optional evidence | No | Manager commentary, attribution data, fund code for price download |
 
 ### 2.1 `fund_profile.json` schema
@@ -182,13 +183,43 @@ Notation: `P_t` = price at month-end t; monthly return `r_t = P_t / P_{t-1} - 1`
 - Brinson: allocation `= (w_f - w_b) * (R_b,sector - R_b,total)`; selection `= w_b * (R_f,sector - R_b,sector)`; interaction `= (w_f - w_b) * (R_f,sector - R_b,sector)`. Sum across sectors.
 
 ### 4.6 Peer comparison
-- **Peer return gap (annualised):** `R_ann_peer - R_ann_fund` for 1/3/5y (same currency and share class basis, both net of fees).
+- **Peer return gap (annualised):** `R_ann_peer - R_ann_fund` for 1/3/5y (both net of fees). Main period: the
+  horizon (5 years, per year); 1 and 3 years are context. The peer's official annualised figure is preferred over
+  annualising its cumulative one.
 - **Fee gap:** `OCF_fund - OCF_peer` (percentage points).
+- **Peer checks (code, `peers.py`):**
+  - Currency: a peer's returns are used only if they are in the fund's currency; otherwise they are left out with
+    an info flag and only its OCF is used (a fee does not depend on the currency).
+  - Pricing time: noon NAV vs noon NAV, or market close vs the fund's PNAV; the basis is shown. A market-close
+    peer with no fund PNAV is compared with the NAV and noted ("timing differs").
+  - Share class: type (retail or institutional, derived by code from the name and minimum investment) and minimum
+    investment are recorded. An institutional class is kept with the note "institutional share class: its fee is
+    lower than retail investors could get".
+  - Income vs accumulation: comparable on a total-return basis; the type is shown.
+- **Several peers:** Value rates the average return gap over the peers whose returns can be used; Fees rates the
+  fund's OCF against the average OCF of all peers. Averages are stored at 2 d.p., rounded half up.
+- **Approved peers (`config/peers.yaml`):** peers per benchmark (matched by name), each with name and ISIN; the
+  factsheet is found in `data/peers/` by file name or by the ISIN in its text. Used when no peer is given; the fund
+  is never its own peer; a missing factsheet is an info flag. Optional `sector_average_ocf` (value, source, date)
+  is shown as context only. "Add peer" shows only when no peer can be compared.
 
 ### 4.7 Charts
-1. Cumulative growth of 100: fund vs benchmark (and peer) over 5 years.
+1. Cumulative growth of 100: fund vs benchmark over 5 years.
 2. Discrete 12-month returns bar chart: fund vs benchmark.
-3. Drawdown chart.
+3. Evidence dashboard (Section 9, page 2): yearly tracking difference, distance to each limit, fund vs peers vs
+   index, return vs volatility.
+
+### 4.8 Evidence statistics (code, `evidence.py`)
+- Yearly gaps: fund (PNAV if given, else NAV) minus index for each full calendar year on the factsheet (last 10).
+- Hit rate (years within OCF + the hit-rate margin for index funds; years at or above the benchmark for active
+  funds); average, best and worst yearly gap.
+- Significance: one-sample t-test (two-sided) against zero of the fee-adjusted yearly gap (gap + OCF) for index
+  funds, or the yearly excess return for active funds; mean, t-statistic and p-value; the level (5%) and the
+  minimum number of points (8) are in `config/settings.yaml` (`statistics`). Plain result: "Statistically
+  significant (p = …): the gap is unlikely to be chance" or "Not statistically significant (p = …): the gap could
+  be chance". When most values are identical after rounding: "Not reliable: the data is rounded and too short for
+  a significance test".
+- Peer percentile: with 3 or more peers whose returns can be used, how many the fund beat.
 
 ---
 
@@ -256,6 +287,8 @@ Uses the peer return gap over the main period (annualised, net of fees):
 - AMBER: peer outperforms by 0.10% to 0.50% a year
 - RED: peer outperforms by > 0.50% a year
 - No peer supplied: AMBER with reason "no comparison available".
+- Several peers: the average gap over the peers whose returns can be used (4.6). Peers but none with comparable
+  returns (e.g. all in another currency): AMBER, "no peer with returns comparable with the fund's" ("Add peer").
 
 ### 6.4 Is the fee justified?
 - Index funds: GREEN if `OCF_fund <= OCF_peer + 0.05`; AMBER if `<= OCF_peer + 0.20`; RED otherwise.
@@ -266,18 +299,23 @@ Uses the peer return gap over the main period (annualised, net of fees):
   optional text field filled in by a person only; an AI agent never writes it).
 
 ### 6.5 Verdict
-- Any RED -> **Review**
-- Else any AMBER -> **Monitor**
-- Else -> **Retain**
+Shown to people as a suggestion with plain names (the codes stay in facts.json and the scorecard):
+- Any RED -> **Review**, shown as **Action needed** ("Investigate and engage the manager")
+- Else any AMBER -> **Monitor** ("Keep a close eye on it")
+- Else -> **Retain**, shown as **Satisfied** ("No action needed")
 - Any `CHECK DATA` on Performance or Mandate -> verdict "Pending data check" (no verdict until resolved).
 - `CHECK DATA` on Value or Fees -> "Monitor (data check needed: Value)" (naming the items).
 - A **Manual check** does not change the verdict; it is named in the verdict reason and ticked by the reviewer.
 
 Expected example (Test 1, no peer supplied): Mandate GREEN (R2 1.00, beta 1.00, 3y factsheet), Performance GREEN (TD -0.10 pp a year over 5 years, PNAV vs index, within OCF + 0.10 = 0.16; TE 0.02, 3y (factsheet); note that the periods differ), Value and Fees AMBER with reason "no comparison available" (shown as "Add peer" in the summary) -> draft verdict **Monitor until a peer is added**. Never invent peer figures.
 
+Expected example (Test 1 with the approved peers, B2): Value GREEN (HSBC American Index Inst Inc 13.51% a year vs
+the fund's 13.5% over 5 years, noon NAV vs noon NAV; Vanguard's returns are in USD, so left out), Fees GREEN (0.06%
+vs the peers' average 0.05%: Vanguard 0.07%, HSBC Inst 0.02% with the institutional note) -> **Satisfied**.
+
 ---
 
-## 7. FCA Assessment of Value mapping (shown on report page 3)
+## 7. FCA Assessment of Value mapping (shown on report page 4)
 
 The FCA rule (COLL 6.6.20R) requires an annual assessment of whether charges are justified by overall value, across 7 factors. The report maps the scorecard to them:
 
@@ -299,7 +337,8 @@ The report must state clearly: "This is an indicative assessment from public dat
 
 All agents return structured JSON validated with Pydantic. Use the OpenAI Agents SDK (or LangGraph). Temperature low (0 to 0.3).
 - Models per agent in `config/models.yaml` (nothing hard-coded): Extractor, Mandate, Planner and Search `gpt-5.4-mini`;
-  Oversight Analyst `gpt-5.4`; Evaluator `gpt-6.1-sol` with its own strict checking prompt. `FUND_MODEL_<AGENT>` may
+  Oversight Analyst `gpt-5.4`; Evaluator `gpt-6.1-sol` with its own strict checking prompt; Task Planner
+  `gpt-5.4-mini`; Reporting Agents `gpt-5.4`; Judge `gpt-6.1-sol` (a different model from the Reporting Agents). `FUND_MODEL_<AGENT>` may
   override one agent's model for testing (it must be listed in the file). Temperature 0 is sent only if the config
   says the model supports it; otherwise a low reasoning effort is sent.
 - The API key is read from the `OPENAI_API_KEY` environment variable, loaded from `.env` (gitignored) by python-dotenv.
@@ -319,6 +358,9 @@ All agents return structured JSON validated with Pydantic. Use the OpenAI Agents
 | Search (parallel) | One query each, or the text of one approved page fetched by code | `{query, summary, url, date}` (for a page, the URL comes from the config) | One search or page each, no retries |
 | Oversight Analyst | search summaries + facts JSON (+ code's findings and actions, not to repeat) | Market context only (v1); the findings and the actions are written by code | No figures, direction only, [n] citations, at most 3 sentences; 2 rewrites after code's checks |
 | Evaluator | AI text (market context) + facts JSON + search summaries | `{pass: bool, issues: [..]}` (Section 8.4) | Its own one rewrite, then template fallback |
+| Task Planner | The question + the fund's public details | Plan from a fixed menu: report type, focus order of the four questions, market context yes/no, manager questions yes/no, drafting angles (Section 8.6) | Menu only; code keeps all four ratings; default plan offline or on failure |
+| Reporting Agents (parallel) | Facts JSON + one angle (board, analyst, meeting with the manager) + code's verdict sentence | One draft of the suggested conclusion, 3 to 5 sentences (Section 8.6) | Figures only from the facts; code's number, label, rating and style checks; must end with code's verdict sentence |
+| Judge | Facts JSON + the drafts that passed code's checks | Per draft: 5 checklist items true/false with issues; the preferred draft (Section 8.6) | No text, no numbers, no ratings; code scores, picks and sends back once |
 
 ### 8.1 Oversight Analyst system prompt (core rules)
 Who writes what in v1 (owner decision after the full Test 1 runs: the data-note insights are fixed facts, and
@@ -472,9 +514,11 @@ Flow:
 
 ### 8.5 Workflow controller (code)
 A plain Python function (not an AI agent, `controller.py`; `run_report.py` is its command line) that runs:
-read files -> extractor (only without `factsheet_performance.json`) -> data checks -> mandate -> calculator (with
-factsheet precedence) -> scorecard -> approved sources, planner and search (parallel) -> vetting -> analyst ->
-number, label, rating and wording checks -> evaluator -> report -> email (off by default).
+read files -> task plan -> extractor (only without `factsheet_performance.json`) -> approved peers -> data checks
+-> mandate -> calculator (with factsheet precedence) -> scorecard and evidence -> approved sources, planner and
+search (parallel; only if the plan needs market context) -> vetting -> analyst -> number, label, rating and wording
+checks -> evaluator -> reporting agents (parallel) -> code's checks and the judge -> report -> email (off by
+default).
 - The extractor runs before the data checks because the repeated-price check compares with the factsheet.
 - Stops the run with a clear message (`RunStopped`, printed, exit code 1, log.json still written) only when the
   fund cannot be scored: no folder, no or an invalid fund profile or input file, no or an unreadable price file,
@@ -483,7 +527,8 @@ number, label, rating and wording checks -> evaluator -> report -> email (off by
   and 6.5), so the report says what to fix.
 - Enforces limits from config: `limits.max_web_searches`, `limits.max_analyst_rewrites` (code checks) and
   `limits.max_evaluator_rewrites` (Evaluator) in thresholds.yaml, and a
-  timeout for each AI step (`config/settings.yaml`: extractor 180 s, mandate 90 s, research 240 s, narrative 300 s).
+  timeout for each AI step (`config/settings.yaml`: extractor 180 s, mandate 90 s, research 240 s, narrative 300 s,
+  task planner 60 s, drafting 300 s); `drafting.max_rewrites` (1) in settings.yaml.
   A step that runs over is handled like a failed step: mandate -> CHECK DATA (blocking flag); research -> no market
   context (warning); narrative -> template (warning); extractor -> calculated figures only (warning).
 - Logs each step to `runs/<timestamp>/log.json`: the run (folder, question, offline, start, end, status, message),
@@ -497,32 +542,77 @@ number, label, rating and wording checks -> evaluator -> report -> email (off by
 - Tests replace every model call, page fetch and email with stand-ins (`Runners`), so the full flow runs with no
   network.
 
-## 9. Report (Step 7): 3 main pages plus an appendix
+### 8.6 Task Planner, Reporting Agents and the Judge (the agent team)
 
-Length: 4 pages (3 main pages + 1 appendix page), 5 at most. Each main section starts on its own page.
+The framework: a planner breaks the request into tasks, specialists do one job each, reporting agents write drafts
+from different angles, a judge scores them against a checklist and picks the best or sends them back, and the
+analyst signs off. Code keeps every number, rating and the final pick.
+
+- **Task Planner** (`agents/task_planner.py`): turns the question into a plan from a fixed menu (report type:
+  quarterly review, fee, performance or mandate question; focus order of the four questions; market context yes/no;
+  manager questions yes/no; angles). Code checks it: all four questions are always measured and rated (named ones
+  first), angles come from the menu (at least one). The plan decides whether market research runs, whether manager
+  questions are listed, and which drafts are written. Offline, on failure or timeout: the default plan (everything).
+  The task list is logged and shown in the appendix.
+- **Reporting Agents** (`agents/reporter.py`): one per angle in the plan, in parallel. Each drafts the suggested
+  conclusion from the facts JSON only, 3 to 5 plain sentences, ending with code's verdict sentence word for word.
+  Code checks each draft: number guard, label and rating guards, no web addresses, no minus after "behind", at most
+  5 sentences, the verdict sentence at the end.
+- **Judge** (`agents/judge.py`): sees only the drafts that passed code's checks. For each it marks true or false:
+  key points covered, conclusion clear, plain English, no rating change, supported by the facts, with issues, and
+  names its preferred draft. It writes no text, gives no number and changes no rating.
+- **Code's pick:** score = figures match (code) + the Judge's passed items, out of 6. Only a draft that passes all 6
+  can be chosen: the highest score, then the Judge's preferred draft, then the plan's angle order. If none passes,
+  every draft is sent back once with all its issues and judged again; if still none passes (or the Judge cannot
+  answer), code's own conclusion (`conclusion.py`) is used with a warning flag ("AI drafts failed the checklist
+  (...); code's conclusion used").
+- **Report:** page 1 says who wrote the conclusion ("AI draft for the oversight analyst, chosen by the Judge and
+  code" or code). The appendix lists the plan and each draft's score, failed items and which was chosen; facts.json
+  keeps the plan, every draft and code's own text (`code_text`).
+
+## 9. Report (Step 7): 4 main pages plus an appendix
+
+Length: 5 pages (4 main pages + 1 appendix page), 5 at most. Each main section starts on its own page.
 If the content runs over 5 pages, the appendix is shortened first (info flags cut to the first 6 with
 "... and N more (full list in run_log.txt)", thresholds cut to the main lines). A main page that runs
 over is an error (`ReportLayoutError`), never a silent overflow. Code checks this after every render.
 
-1. **Summary** (must stand on its own): fund, question, review date; draft verdict; the 4 ratings
-   with one-line plain-English reasons and Green/Amber/Red colours; key findings and actions;
-   approval box (reviewer name, date, Retain / Monitor / Review, signature) with a tick box for each
-   Manual check item.
-2. **Mandate and performance:** objective, promises and the decision-tree path in plain words (no code
+1. **Summary** (must stand on its own): fund, question, review date; suggested verdict (Satisfied / Monitor /
+   Action needed / Pending data check, with its meaning); **suggested conclusion (draft for the analyst)**: 3 to
+   4 plain sentences in Assessment of Value style, written by code from templates (`conclusion.py`): what the fund
+   aims to do, whether it did it (main figure and period), how it compares with peers, whether the fee is
+   competitive, ending "Suggested verdict: …"; it goes through the number, label and rating checks, and a
+   sentence that fails is left out (logged); the 4 ratings with one-line plain-English reasons and
+   Green/Amber/Red colours; **points for your judgement** (at most 4, code-built from the flags, the limits a
+   rating is close to, the peer notes and the statistics); **questions to ask the manager** (2 to 4, code-built
+   from the findings; v1 has no AI rewording); key findings and actions; approval box (reviewer name, date,
+   Satisfied / Monitor / Action needed, "Analyst's comments", "If you disagree with the suggested verdict, why?",
+   signature) with a tick box for each Manual check item.
+2. **Evidence dashboard** (code only, no AI): yearly tracking difference bars (fund PNAV, else NAV, minus index,
+   each calendar year on the factsheet) with the OCF as a line and the Green/Amber limits as bands; distance to
+   each limit (one bar per rated figure: TD, TE, R², beta, peer return gap, fee gap, against its Green and Amber
+   zones); fund vs peers vs index (1/3/5 years a year; only peers with returns in the fund's currency); return vs
+   volatility (3 years: fund, index, peers where given); statistics table and significance test (4.8); peer
+   percentile with 3 or more peers. Every chart lists its source and period; a chart without data is left out
+   with a note.
+3. **Mandate and performance:** objective, promises and the decision-tree path in plain words (no code
    names); 1/3/5-year table (fund, index, gap; cumulative and annualised) with the note "Cumulative
    gaps to 1 d.p., yearly gaps to 2 d.p."; calendar years; risk table grouped under small subheadings
    by source, period and price basis (e.g. "Factsheet · 3 years, market-close price (PNAV)"), so no
    measure appears without its context; "Below the surface": the data notes' plain sentences, each
    followed by one short source line in small text with its figures; charts: growth of 100 and yearly
    returns, fund vs index.
-3. **Value, fees and Assessment of Value:** peer and fee comparison ("Add peer" callout when there
-   is no peer); the AoV 7-factor table (Covered / Partly / Not assessed) with its disclaimer; market
+4. **Value, fees and Assessment of Value:** peers table (each peer: share class, type and minimum, currency and
+   pricing time, OCF, 1/3/5-year returns a year, used for fees and returns or fees only, and why; the peer average
+   with several peers; the sector average OCF as context when configured) and fee comparison ("Add peer" callout
+   when there is no peer); the AoV 7-factor table (Covered / Partly / Not assessed) with its disclaimer; market
    context with [n] citations ("No market context" when there is none).
-4. **Appendix:** flags by level (blocking, warning, info); excluded web sources with reasons;
+5. **Appendix:** flags by level (blocking, warning, info); excluded web sources with reasons;
    numbered sources with dates ("published" or "as at") and every input file; the calculated Sharpe
    ratio (risk-free rate 0), noted as not comparable with the factsheet figure; thresholds
    ("illustrative, to be agreed with the oversight team"); glossary of the terms the report actually
-   uses (`glossary.py`, each definition under 10 words); known
+   uses (`glossary.py`, each definition under 10 words, including t-statistic, p-value, statistically
+   significant, percentile and drawdown); known
    limitations (Section 12); the "public data only" note and the disclaimer.
 
 Display rules:
@@ -588,7 +678,7 @@ Keep the manager's published Value Assessment Report out of the agent's inputs. 
 6. **Extractor and Mandate agents** with Pydantic schemas.
 7. **Oversight Analyst + number-guard validator.**
 8. **Planner + parallel Search agents** (no retries). 9b: approved sources fetched by code + up to 3 web searches.
-9. **PDF report** (3 main pages + appendix, 5 pages at most) with charts and approval box.
+9. **PDF report** (4 main pages + appendix, 5 pages at most) with charts and approval box.
 10. **Evaluator agent + workflow controller** (Sections 8.4 and 8.5); unit test that a draft with a changed rating or an unsupported claim is rejected.
 11. **Gradio front end** (upload files, ask the question, download the PDF); deploy as with the existing project.
     As built: `src/fund_performance/web.py` (the page) and `app.py` (starts it; Render runs `python app.py`). The
@@ -596,14 +686,28 @@ Keep the manager's published Value Assessment Report out of the agent's inputs. 
     verdict, the ratings with a "Why" column (the same one-line reasons as report page 1), the findings and actions,
     with the PDF and log.json to download; a run that cannot be scored shows the controller's message. "Use the
     demo files" loads a made-up fund (`demo/sample_index_fund`) and ticks "Offline" (no AI calls).
-    Protecting the API key: when APP_USERNAME and APP_PASSWORD are set, AI runs need the in-page login; without
-    it, only the offline demo runs (files checked byte for byte against the demo). On a server with no login set
-    up, AI runs are off; on your own computer (no PORT) they are on. Checked on the server for every run. Login:
-    constant-time comparison, 5 tries per visitor, logins paused after 20 failures in 10 minutes; the page's
-    events are not exposed through Gradio's API. MAX_CONCURRENT_RUNS reviews at once; uploads up to 20 MB.
+    Protecting the API key: when APP_USERNAME and APP_PASSWORD are set, the page asks for them before it opens
+    (Gradio's login). On a server with no login set up, AI runs are off and only the offline demo works; on your
+    own computer (no PORT) no login is needed. Limits in `config/settings.yaml` (`web`): AI reviews per day and one
+    AI review at a time. The page's events are not exposed through Gradio's API. MAX_CONCURRENT_RUNS reviews at
+    once; uploads up to 20 MB.
+    Documents route (main route): the price file and the factsheet (KID and peer factsheets optional; without peer
+    factsheets the approved peers are read); the Extractor and Mandate agents read them; an editable confirmation
+    table shows each value, where it was found and its status (AI-extracted, derived by code, entered by user);
+    "Confirm and run" stays off while a required value is missing. JSON files are the "Advanced" route. The page
+    has the instructions, the files table, "How the agent works" (Code / AI / Person tags) and progress messages
+    (Reading the documents…, Checking the data…, Scoring…, Researching…, Writing the report…), and shows the
+    suggested verdict, conclusion, ratings, points for judgement and questions for the manager.
     Value and Fees findings and reasons give the peer return gap and the fee gap (from `Pillar.values`). `render.yaml` keeps the old service name, so the existing Render service is updated. The
     old root-level app is removed.
 12. **Run all 4 test cases**, compare Test 1 with the published Value Assessment Report, and record results in `tests/RESULTS.md`.
+    As built: `tests/RESULTS.md` records Test 1 (passed: every expected figure, flag and rating; draft verdict
+    "Monitor until a peer is added"), the live AI runs and the design changes they led to, what the Evaluator
+    caught, and the comparison with Fidelity's 2025 Value Assessment (consistent conclusions). Tests 2 to 4 wait
+    for their input files.
+
+13. **Agent team** (Section 8.6): Task Planner, Reporting Agents (one per angle, in parallel) and the Judge, with
+    code checking every draft, scoring and picking; code's conclusion as the fallback. Unit tests mock every call.
 
 Definition of done: all unit tests pass; Test 1 and Test 2 expected values reproduced; no rating can be changed by the AI; every figure in the PDF has a source; the Evaluator rejects a bad draft in tests.
 
@@ -622,9 +726,11 @@ Definition of done: all unit tests pass; Test 1 and Test 2 expected values repro
 | Phase | Scope |
 |---|---|
 | **v1: next two days** | Steps 1 to 11 above on Test 1 (Fidelity Index US Fund). Value and Fees show "Add peer" when no peer is supplied. |
-| **v2: next step** | Peer comparison for value and fees (e.g. SPDR S&P 500 UCITS ETF); run Tests 2, 3 and 4 (currency trap, dual objective, short history, active fund). |
+| **v2: next step** | Run Tests 2, 3 and 4: Test 2 (Irish fund, currency trap), Test 3 (dual objective), short history and an active fund. (Peers for value and fees are built: approved peers per benchmark.) |
+| **v2: evidence** | Rolling 12-month tracking difference from monthly index prices; up/down capture for active funds; fee vs 5-year return chart for peers; AI rewording of the manager questions, only if they pass the checks. |
+| **v2: agent team** | Holdings and positions from an internal database for the Extractor (mandate and risk checks on holdings); research specialists per area once their outputs can be checked by code like the drafts. |
 | **v2: insights** | AI-written insight findings, once canonical phrasing per data note is defined (v1: code writes all findings; the AI writes only the market context). |
-| **v2: peers** | Allow the peer to be a sector median OCF (e.g. IA North America index funds, 0.10%), as Fidelity's own Assessment of Value does, as well as a single peer fund. |
+| **v2: peers** | Rate against a sector median OCF (e.g. IA North America index funds), as Fidelity's own Assessment of Value does; v1 shows `sector_average_ocf` from `config/peers.yaml` as context only. |
 | **v2: share classes** | Optional share-class table input (class, OCF, minimum investment, who can buy it) for the AoV "Classes of units" factor, which is "Not assessed" without it. |
 | **v2: sources** | v1 fetches the approved pages in `config/sources.yaml` in code. v2 option: the MCP Fetch server, so an agent can choose and fetch further URLs (checked against an approved-domain list) instead of open web search. |
 | **v3: later** | Agree thresholds and rating rules with the oversight team; adapt inputs to the team's own data and processes. |

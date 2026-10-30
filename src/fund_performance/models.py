@@ -3,7 +3,7 @@ from datetime import date
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-Source = Literal["factsheet", "calculated", "ai_extracted", "web"]
+Source = Literal["factsheet", "calculated", "ai_extracted", "user", "web"]   # "user": corrected on the page
 ObjectiveType = Literal["index_tracker", "active_target", "active_comparator", "active_constraint",
                         "income_target", "absolute_return"]
 BenchmarkRole = Literal["target", "comparator", "constraint", "none"]
@@ -41,6 +41,8 @@ class FundProfile(_Strict):
     pricing_point: PricingPoint
     as_of_date: date
     asset_class: str = "equity"
+    # Documents route (step 11 update): who gave each field, e.g. {"ocf_pct": "user", "isin": "ai_extracted"}
+    field_sources: dict[str, Literal["ai_extracted", "user", "code"]] = Field(default_factory=dict)
 
 
 class SeriesReturns(_Strict):
@@ -80,6 +82,8 @@ class FactsheetPerformance(_Strict):
     series_annualised: dict[str, SeriesReturns] = Field(default_factory=dict)
     discrete_12m: dict[str, dict[date, float]] = Field(default_factory=dict)
     risk_3y_nav: Risk3y | None = None
+    # Figures a person corrected on the page before the run, e.g. ["index.5y"] (reported as "Entered by user")
+    user_entered: list[str] = Field(default_factory=list)
 
     @field_validator("series_annualised")
     @classmethod
@@ -117,12 +121,22 @@ class FactsheetPerformance(_Strict):
 
 
 class Peer(_Strict):
-    """ peer.json (spec Section 2): name, OCF, 1/3/5y returns, currency, share class """
+    """ peer.json (spec Section 2): name, OCF, 1/3/5y returns, currency, share class. The optional fields are for
+    the peer checks (B2): pricing time, share class type and minimum investment, income or accumulation, and the
+    official annualised returns (preferred over annualising the cumulative ones) """
     name: str
     ocf_pct: float
     returns: SeriesReturns
     currency: str = Field(min_length=3, max_length=3)
     share_class: str
+    isin: str | None = None
+    returns_annualised: SeriesReturns | None = None
+    pricing_point: PricingPoint | None = None
+    distribution: Literal["accumulation", "income"] | None = None
+    investor_type: Literal["retail", "institutional"] | None = None
+    minimum_investment: str | None = None
+    vol_3y: float | None = None             # 3-year volatility from the peer's factsheet, for the dashboard
+    origin: Literal["typed", "uploaded", "approved"] = "typed"   # peer.json, an uploaded factsheet, config/peers.yaml
 
 
 class Figure(BaseModel):

@@ -1,0 +1,28 @@
+# Fund Performance Agent: approved peer funds per benchmark (B1)
+#
+# When the user uploads no peer factsheet, these peers are used automatically: the Extractor Agent reads each
+# peer's factsheet and the values appear in the confirmation table like the fund's own. A peer whose factsheet is
+# not found is left out with an info flag.
+#
+# Factsheets live in data/peers/ (gitignored: the repository is public, so factsheets are never committed). Code
+# finds each one by `factsheet` (a file name in data/peers/), else by a file whose name or text contains the ISIN.
+#
+# Peer checks are code (src/fund_performance/peers.py): a peer's returns are used only if they are in the fund's
+# currency (its fee is always used); noon prices are compared with noon prices, market close with the fund's PNAV;
+# the share class type and minimum investment are recorded (an institutional class gets a note).
+#
+# sector_average_ocf (optional): the average ongoing charge of the sector, with its source and date. Shown as
+# extra context on the value page; it does not change a rating. Only add a figure taken from a public source.
+
+benchmarks:
+  - benchmark: "S&P 500"
+    match: ["S&P 500", "S&P500"]
+    peers:
+      - name: "Vanguard S&P 500 UCITS ETF (USD) Accumulating"
+        isin: IE00BFMXXD54
+      - name: "HSBC American Index Fund Institutional Income"
+        isin: GB00BYWKBM47
+    # sector_average_ocf:
+    #   value_pct: 0.00
+    #   source: "Name of the public source"
+    #   date: "YYYY-MM-DD"

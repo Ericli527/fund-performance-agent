@@ -17,6 +17,9 @@ agents:
   search: gpt-5.4-mini
   analyst: gpt-5.4
   evaluator: gpt-6.1-sol          # a different model from the Analyst, with its own strict checking prompt (step 10)
+  task_planner: gpt-5.4-mini      # turns the request into a task plan (menu choices only)
+  reporter: gpt-5.4               # Reporting Agents: one draft conclusion per angle
+  judge: gpt-6.1-sol              # Judge Agent: checklist per draft, a different model from the Reporting Agents
 
 models:
   gpt-5.4-mini:

@@ -20,6 +20,11 @@ GLOSSARY: dict[str, str] = {
     "pp": "percentage points, the gap between two percentages",
     "Assessment of Value (AoV)": "the yearly value review UK fund managers publish",
     "AFM": "authorised fund manager, legally responsible for the fund",
+    "t-statistic": "the average gap measured against its own variation",
+    "p-value": "the chance of a gap this large by luck",
+    "statistically significant": "unlikely to be chance (p-value below 5%)",
+    "percentile": "the share of peers the fund did better than",
+    "drawdown": "a fall from a peak, as a percentage",
 }
 
 # How each term shows up in text (a term is in the report's glossary only if its text matches)
@@ -38,6 +43,11 @@ _PATTERNS: dict[str, re.Pattern] = {
     "pp": re.compile(r"\bpp\b"),
     "Assessment of Value (AoV)": re.compile(r"Assessment of Value|\bAoV\b"),
     "AFM": re.compile(r"\bAFM\b"),
+    "t-statistic": re.compile(r"t-statistic", re.I),
+    "p-value": re.compile(r"p-value|\bp [=<]", re.I),
+    "statistically significant": re.compile(r"statistically significant", re.I),
+    "percentile": re.compile(r"percentile", re.I),
+    "drawdown": re.compile(r"drawdown", re.I),
 }
 
 

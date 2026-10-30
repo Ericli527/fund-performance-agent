@@ -67,6 +67,11 @@ def apply_precedence(calculated: CalcResult, price_flags: list[DataFlag], profil
         # Figures the Extractor Agent read keep that label, so the report shows them "(please verify)"
         out.figures = {k: f.model_copy(update={"source": "ai_extracted"}) if f.source == "factsheet" else f
                        for k, f in out.figures.items()}
+    if factsheet is not None and factsheet.user_entered:
+        # Figures a person corrected before the run ("index.5y" -> index.cum.5y): reported as entered by user
+        corrected = {f"{key.split('.')[0]}.cum.{key.split('.')[1]}" for key in factsheet.user_entered if "." in key}
+        out.figures = {k: f.model_copy(update={"source": "user"}) if k in corrected and f.source != "calculated" else f
+                       for k, f in out.figures.items()}
     return out
 
 

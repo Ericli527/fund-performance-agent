@@ -200,8 +200,10 @@ def test_no_peer_is_amber_add_peer():
     assert (pillar.rating, pillar.reason, pillar.summary) == (AMBER, "no comparison available", "Add peer")
 
 
-def test_peer_in_another_currency_is_check_data():
-    assert sc.value_rating(figures(fund_nav__ann__5y=13.8), profile(), T, peer(currency="EUR")).rating == CHECK_DATA
+def test_a_peer_in_another_currency_counts_for_fees_only():
+    pillar = sc.value_rating(figures(fund_nav__ann__5y=13.8), profile(), T, peer(currency="EUR"))
+    assert (pillar.rating, pillar.summary) == (AMBER, "Add peer") and "returns in EUR, not GBP" in pillar.reason
+    assert sc.fees_rating(profile(ocf_pct=0.06), T, peer(ocf=0.03, currency="EUR"), GREEN).rating == GREEN
 
 
 # 6.4 Fees
@@ -307,4 +309,7 @@ def test_value_and_fees_pillars_carry_their_values():
     pillar = sc.value_rating(figures(fund_nav__ann__5y=13.8), profile(), T, peer(y5=13.5))
     assert pillar.values["gap_pp"] == -0.3 and pillar.values["years"] == 5
     fees = sc.fees_rating(profile(ocf_pct=0.06), T, peer(ocf=0.03), GREEN)
-    assert fees.values == {"peer": fees.values["peer"], "fund_ocf": 0.06, "peer_ocf": 0.03, "gap_pp": 0.03}
+    assert {k: fees.values[k] for k in ("fund_ocf", "peer_ocf", "gap_pp", "count")} == {
+        "fund_ocf": 0.06, "peer_ocf": 0.03, "gap_pp": 0.03, "count": 1}
+    assert fees.values["limits"][0] | {} == {"metric": "Fee gap", "value": 0.03, "green": 0.05, "amber": 0.2,
+                                             "kind": "max", "unit": "pp"}

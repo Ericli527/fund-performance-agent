@@ -16,12 +16,14 @@ class Out(BaseModel):
 
 # config/models.yaml
 def test_models_per_agent_match_the_owner_decision(monkeypatch):
-    for agent in ("extractor", "mandate", "planner", "search", "analyst", "evaluator"):
+    for agent in ("extractor", "mandate", "planner", "search", "analyst", "evaluator", "task_planner", "reporter",
+                  "judge"):
         monkeypatch.delenv(f"FUND_MODEL_{agent.upper()}", raising=False)
     m = load_models()
     assert {a: m.for_agent(a)[0] for a in m.agents} == {
         "extractor": "gpt-5.4-mini", "mandate": "gpt-5.4-mini", "planner": "gpt-5.4-mini",
-        "search": "gpt-5.4-mini", "analyst": "gpt-5.4", "evaluator": "gpt-6.1-sol"}
+        "search": "gpt-5.4-mini", "analyst": "gpt-5.4", "evaluator": "gpt-6.1-sol", "task_planner": "gpt-5.4-mini",
+        "reporter": "gpt-5.4", "judge": "gpt-6.1-sol"}
 
 
 def test_an_environment_variable_overrides_one_agent_only(monkeypatch):

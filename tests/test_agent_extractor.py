@@ -30,7 +30,8 @@ def output(**changes) -> dict:
         "profile": {"fund_name": "Sample Fund A Acc", "isin": None, "share_class": "A Acc", "currency": "GBP",
                     "distribution": "accumulation", "hedged": None, "launch_date": None, "objective_text": None,
                     "benchmark_name": None, "ocf_pct": 0.10, "transaction_cost_pct": None, "performance_fee": None,
-                    "fund_size_gbp_m": 1250, "risk_indicator": 4, "pricing_point": None}}
+                    "fund_size_gbp_m": 1250, "risk_indicator": 4, "pricing_point": None,
+                    "minimum_investment": None}}
     return data | changes
 
 
