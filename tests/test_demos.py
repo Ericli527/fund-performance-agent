@@ -3,6 +3,7 @@ the Quick/Live inputs, how a demo is recognised, the return check and the page. 
 tested at the end and skip when their files are absent """
 import asyncio
 import json
+import re
 from pathlib import Path
 import shutil
 import pytest
@@ -50,9 +51,25 @@ def test_the_committed_manifests_hold_metadata_only():
     assert "GB00B80QG615" in fidelity.peer and vanguard.live["peers"] == []
     for path in (ROOT / "demo" / "library").glob("*.yaml"):
         text = path.read_text()
-        for figure in ("17.81", "11.31", "18.02", "13.47", "88.3", "0.23%", "0.07%"):
+        assert not re.search(r"\d+\.\d+\s*%", text), path.name           # no percentage figure of any kind
+        for figure in _private_figures():                                # nor any figure typed from the documents
             assert figure not in text, (path.name, figure)
     assert not any(d.available for d in demos)                           # no private folder: shown as unavailable
+
+
+def _private_figures() -> set[str]:
+    """ The figures in the private quick inputs (when installed), read at test time: never written in a test """
+    out = set()
+    for path in (ROOT / "data" / "demos").glob("*/quick/*.json"):
+        def walk(x):
+            if isinstance(x, dict):
+                [walk(v) for v in x.values()]
+            elif isinstance(x, list):
+                [walk(v) for v in x]
+            elif isinstance(x, float) and abs(x) >= 1:
+                out.add(f"{x:.2f}")
+        walk(json.loads(path.read_text()))
+    return out
 
 
 def test_missing_private_files_make_a_demo_unavailable_not_an_error(library):
@@ -209,7 +226,9 @@ def test_real_vanguard_demo(tmp_path):
     assert not any(n.startswith(("relative.", "risk.")) for n in names)                   # no TE, beta, R² made up
     assert facts["peers"] == []
     figs = {f["name"]: f for f in facts["figures"]}
-    assert (figs["fund_nav.ann.5y"]["value"], figs["index.ann.5y"]["value"]) == (11.31, 11.6)   # GBP, from Vanguard
+    typed = json.loads(find_demo("vanguard_global").quick_files["json"][1].read_text())["series"]
+    assert (figs["fund_nav.ann.5y"]["value"], figs["index.ann.5y"]["value"]) == \
+        (typed["fund_nav"]["5y"], typed["index"]["5y"])                     # the GBP figures, as typed (annualised)
     assert figs["fund_nav.cum.5y"]["source"] == "calculated" and figs["fund_nav.cum.5y"]["value"] > 60
     text = " ".join(" ".join(page_texts(r.executive_pdf)).split())
     assert len(page_texts(r.executive_pdf)) == 2
