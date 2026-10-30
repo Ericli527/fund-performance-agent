@@ -61,10 +61,13 @@ Data: `data/` is gitignored (public repo). Test 1 files live in `data/test1/`, a
   uploaded factsheet. Page 2 shows the fund on the peers' price basis and one line per peer (class, currency,
   minimum, pricing). Tested with HSBC American Index Fund Acc C as the Fidelity peer (`test_peers.py`).
 - No peer comparison: the manager question asks for suitable peers instead of "why is the fee higher". This changes
-  the Test 1 golden baseline (`manager_questions` only); not regenerated, awaiting owner approval.
+  the Test 1 golden baseline (`manager_questions` only); regenerated after owner approval.
 - Blocking currency/benchmark mismatch: executive chart replaced by an explanation; Appendices A/B keep the charts
   with a "Read with care" warning (`presentation.comparison_problems`).
 - Readable download/email names: `{Fund_Name}_{Executive|Detailed}_Report_{YYYY-MM-DD}.pdf`.
+- Follow-up: under a blocking currency/benchmark mismatch no finding, point, question, headline or summary table treats
+  the fund-vs-index comparison as reliable; Appendix B keeps the raw figures marked. Test 1 golden baseline updated
+  (owner-approved; only `manager_questions` changed).
 
 ## 4. Known issues and test findings
 

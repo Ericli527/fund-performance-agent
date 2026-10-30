@@ -134,6 +134,19 @@ def test_offline_controller_material_outcomes(tmp_path, scenario, verdict, perfo
         detailed = ' '.join(' '.join(page_texts(result.pdf)).split())
         assert 'Read with care. Not reliable until the data check is resolved' in detailed
         assert (result.run_dir / 'dash_gaps.png').is_file()
+        # ... and nothing on the dashboard or in either PDF treats the comparison as reliable (Stage 3.1 follow-up):
+        # the summaries replace the fund-vs-index figures; the Detailed Report keeps them, marked
+        from html import unescape
+        import re
+        from fund_performance.dashboard import dashboard_data, dashboard_html
+        page = ' '.join(unescape(re.sub(r'<[^>]+>', ' ', dashboard_html(dashboard_data(result), 'analyst'))).split())
+        summary = ' '.join(' '.join(executive).split())
+        for text in (summary, page):
+            assert '16.0 pp' not in text and 'behind its index' not in text and 'would match its index' not in text
+            assert '−0.10 pp' not in text and 'Not reliable' in text
+        assert 'no finding is drawn from them' in summary and 'no finding is drawn from them' in page
+        assert 'Index (not reliable: data check)' in detailed and 'Gap at noon prices −16.0 pp' in detailed
+        assert 'Not reliable (data check): The fund is priced at noon' in detailed
     if scenario == 'underperformance':
         assert 'Action needed' in json.dumps(facts)
     assert result.pdf.is_file()  # real controller/report execution, no mocked financial stages

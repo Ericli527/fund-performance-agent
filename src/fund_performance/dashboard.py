@@ -19,7 +19,8 @@ from fund_performance.plain import verdict_meaning, verdict_name
 from fund_performance.presentation import (NAVY, NOT_AVAILABLE, QUESTIONS, RATING_STYLE,  # noqa: F401
                                            VERDICT_STYLE, EvidenceQuality, _date, _figures, _shown, _source,
                                            assessment_caveat, evidence_quality, flag_dicts, headline_metrics,
-                                           conclusion_origin, issue_groups, risk_measures)
+                                           conclusion_origin, issue_groups, risk_measures, UNRELIABLE,
+                                           UNRELIABLE_SOURCE, UNRELIABLE_WHY, comparison_invalid)
 from fund_performance.report import ANGLE_WORDS, REPORT_TYPE_WORDS, plain_note
 
 AUDIENCES = ("analyst", "management")
@@ -171,15 +172,22 @@ def _returns_table(facts: dict) -> str:
     cols = [("1 year", "cum.1y"), ("3 years", "cum.3y"), ("5 years", "cum.5y"), ("3 years, a year", "ann.3y"),
             ("5 years, a year", "ann.5y")]
     rows = ""
+    invalid = comparison_invalid(facts)
     for label, series in (("Fund price (NAV)", "fund_nav"), ("Fund, market-close price (PNAV)", "fund_pnav"),
                           ("Index or benchmark", "index")):
         cells = [figs.get(f"{series}.{c}") for _, c in cols]
-        if any(cells):
+        if any(cells) and invalid and series == "index":
+            rows += (f"<tr><td class='l'>{label}</td>" + f"<td>{UNRELIABLE}</td>" * len(cols)
+                     + f"<td class='l src'>{UNRELIABLE_SOURCE}</td></tr>")
+        elif any(cells):
             rows += (f"<tr><td class='l'>{label}</td>" + "".join(f"<td>{_shown(c) if c else '–'}</td>" for c in cells)
                      + f"<td class='l src'>{escape(_source(*cells))}</td></tr>")
     gaps = [figs.get(f"comparison.excess_cum.{c[-2:]}") if c.startswith("cum") else figs.get(f"comparison.td.{c[-2:]}")
             for _, c in cols]
-    if any(gaps):
+    if any(gaps) and invalid:
+        rows += ("<tr class='fp-total'><td class='l'>Gap to the index</td>" + f"<td>{UNRELIABLE}</td>" * len(cols)
+                 + f"<td class='l src'>{UNRELIABLE_SOURCE}</td></tr>")
+    elif any(gaps):
         rows += ("<tr class='fp-total'><td class='l'>Gap to the index</td>" + "".join(
             f"<td>{_shown(g) if g else '–'}</td>" for g in gaps) + "<td class='l src'>Calculated from the factsheet</td></tr>")
     if not rows:
@@ -200,6 +208,8 @@ def _statistics(facts: dict) -> str:
     ev = facts.get("evidence") or {}
     if not ev or not ev.get("gaps"):
         return ""
+    if comparison_invalid(facts):
+        return "<h4>Statistics (calculated from the factsheet)</h4>" + _list([UNRELIABLE_WHY + "."])
     years = list(ev["gaps"])
     hits = ev.get("hit_rate") or [0, 0]
     test = ev.get("test") or {}
@@ -236,6 +246,8 @@ def _findings(data: dict) -> str:
     if data.get("findings"):
         body += "<h4>Key findings</h4>" + _list(data["findings"])
     notes = [plain_note(n) for n in facts.get("data_notes", [])]
+    if notes and comparison_invalid(facts):        # the notes compare the fund with its index: not findings yet
+        notes = [UNRELIABLE_WHY + ". The notes are kept in the Detailed Report (Appendix B), marked."]
     if notes:
         body += "<h4>Below the surface</h4>" + _list(notes)
     if data.get("market_context"):

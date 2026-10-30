@@ -23,6 +23,7 @@ from fund_performance.glossary import glossary_lines
 from fund_performance.models import DataFlag
 from fund_performance.number_guard import check_labels, check_ratings, numbers_in
 from fund_performance.plain import plain_peer_reason
+from fund_performance.presentation import COMPARISON_FINDING, comparison_invalid
 
 MIN_ACTIONS, MAX_ACTIONS = 2, 3
 MAX_CONTEXT_SENTENCES = 3
@@ -162,6 +163,8 @@ def ratings_finding(facts: dict) -> str:
                          f"year{te_text}.")
         else:
             parts.append(f"{_rating_phrase('Performance', perf['rating'])}: {_plain(perf['reason'])}.")
+    if mandate and perf and mandate["rating"] == perf["rating"] == "CHECK DATA" and mandate["reason"] == perf["reason"]:
+        return f"Mandate and Performance need a data check: {_plain(perf['reason'])}."      # one data issue, said once
     return " ".join(parts)
 
 
@@ -193,7 +196,10 @@ def code_findings(facts: dict) -> list[str]:
     wording); if there are fewer than 2 data-note findings, the other ratings. "pp" is defined at first use """
     years = facts.get("fund", {}).get("time_horizon_years", 5)
     pillars = {p["name"]: p for p in facts["scorecard"]["pillars"]}
-    notes = [s for n in facts.get("data_notes", []) if (s := _note_sentence(n, years))]
+    if comparison_invalid(facts):     # a currency or benchmark mismatch: the notes rest on an invalid comparison
+        notes = [COMPARISON_FINDING]
+    else:
+        notes = [s for n in facts.get("data_notes", []) if (s := _note_sentence(n, years))]
     if len(notes) < 2:
         notes.append(_other_ratings_sentence(pillars))
     return define_first([ratings_finding(facts)] + notes, _PP, "percentage points")

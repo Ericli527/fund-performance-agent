@@ -89,3 +89,16 @@ def test_without_a_peer_the_question_asks_for_peers_not_why_the_fee_is_higher():
     assert q[0].startswith("Which comparable funds (same index, currency and share class type)")
     rated = manager_questions(facts("Monitor", ("GREEN", "GREEN", "GREEN", "AMBER")))     # a real peer comparison
     assert "Why is the fee higher than comparable funds', and is a cheaper share class available?" in rated
+
+
+def test_a_mismatch_asks_about_the_index_not_about_the_gap():
+    mismatch = facts("Pending data check", ("CHECK DATA", "CHECK DATA", "GREEN", "GREEN"),
+                     fee_note="The fee explains only part",
+                     data_flags=[{"check": "currency_match", "level": "blocking", "message": "CHECK DATA: x"}],
+                     data_notes=[{"kind": "fee", "note": "The fee explains only part", "figures": []},
+                                 {"kind": "timing", "note": "t", "figures": []}],
+                     evidence={"test": {"significant": True}})
+    q = manager_questions(mismatch)
+    assert any(x.startswith("Which index series and currency should the fund be compared with") for x in q)
+    assert not any("fee does not" in x or "significant" in x or "PNAV" in x for x in q)
+    assert not any("significant" in x for x in judgement_points(mismatch))

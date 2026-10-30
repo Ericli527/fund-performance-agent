@@ -89,13 +89,17 @@ def headline_metrics(facts: dict) -> list[Metric]:
     period = f"{n} years to {as_of}"
     index_fund = fund.get("objective_type") == "index_tracker"
     other = "index" if index_fund else "benchmark"
+    gap_label = f"Gap to {other}" + (" (tracking difference)" if index_fund else "")
+    if comparison_invalid(facts):
+        gap = Metric(gap_label, UNRELIABLE, period, UNRELIABLE_SOURCE, UNRELIABLE_WHY)
+    else:
+        gap = Metric(gap_label, _shown(td) + (" a year" if td else ""), period,
+                     _source(td) + (" from the factsheet" if td and td.get("source") == "calculated" else ""),
+                     f"{other.capitalize()} {_shown(index_ret)} a year" if index_ret else "")
     metrics = [
         Metric("Fund return", _shown(fund_ret) + (" a year" if fund_ret else ""), f"{period}, {price}",
                _source(fund_ret)),
-        Metric(f"Gap to {other}" + (" (tracking difference)" if index_fund else ""),
-               _shown(td) + (" a year" if td else ""), period, _source(td) + (" from the factsheet" if td and
-                                                                               td.get("source") == "calculated" else ""),
-               f"{other.capitalize()} {_shown(index_ret)} a year" if index_ret else ""),
+        gap,
     ]
     ocf = fund.get("ocf_pct")
     metrics.append(Metric("Ongoing charge (OCF)", NOT_AVAILABLE if ocf is None else f"{ocf:.2f}% a year",
@@ -185,6 +189,12 @@ def risk_measures(facts: dict) -> list[tuple[str, str, str]]:
               (f"Volatility, {n} years (fund)", f"fund_nav.vol.{n}y"), ("Volatility, 3 years (fund)", "risk.pnav.fund_vol.3y"),
               (f"Largest fall, {n} years (fund)", f"fund_nav.mdd.{n}y"), ("12-month windows within the fee + margin",
                                                                           "comparison.hit_rate")]
+    if comparison_invalid(facts):         # summaries replace fund-vs-index figures by one row; Detailed keeps them
+        rows = [(label, _shown(figs[name]), _source(figs[name])) for label, name in wanted
+                if name in figs and not is_comparative(name)]
+        replaced = list(dict.fromkeys(label.split(",")[0] for label, name in wanted
+                                      if name in figs and is_comparative(name)))
+        return rows + ([(", ".join(replaced), UNRELIABLE, UNRELIABLE_SOURCE)] if replaced else [])
     return [(label, _shown(figs[name]), _source(figs[name])) for label, name in wanted if name in figs]
 
 
@@ -224,11 +234,37 @@ def comparison_problems(flags) -> list[str]:
     return [f["message"] for f in flag_dicts(flags) if f["level"] == "blocking" and f["check"] in COMPARISON_CHECKS]
 
 
+def comparison_invalid(facts: dict | None) -> bool:
+    """ True while such a check is open: no fund-vs-index figure is then presented as a finding """
+    return bool(comparison_problems((facts or {}).get("data_flags", [])))
+
+
+# While the comparison is invalid, figures that compare the fund with its index (or describe the index next to it)
+# are shown as not reliable: replaced in the summaries (dashboard, Executive Report), kept and marked in the Detailed
+# Report for audit. The calculations themselves are unchanged.
+UNRELIABLE = "Not reliable"
+UNRELIABLE_SOURCE = "Data check needed"
+UNRELIABLE_MARK = "not reliable: data check"
+UNRELIABLE_WHY = ("Currency or benchmark mismatch: not reliable until the data check is resolved (see the data "
+                  "issues)")
+COMPARISON_FINDING = ("The figures that compare the fund with its index (the gap to the index, tracking and the notes "
+                      "built on them) are not reliable until the data check is resolved, so no finding is drawn from "
+                      "them.")
+_RELATIVE_RISK = ("tracking_error", "r2", "beta", "alpha", "information_ratio", "relative")
+
+
+def is_comparative(name: str) -> bool:
+    """ A figure that compares the fund with its index, or the index's own figure shown beside the fund's """
+    return (name.startswith(("comparison.", "relative.", "index.")) or
+            (name.startswith("risk.") and any(f".{k}" in name for k in _RELATIVE_RISK)))
+
+
 CHART_LEFT_OUT = ("A data check found a currency or benchmark mismatch between the fund and its index (see the data "
                   "issues on page 2), so a chart of the gap between them would mislead. Resolve the data check first. "
                   "The original charts are kept in the Detailed Report (Appendix A), marked as not reliable.")
 NOT_RELIABLE = ("Not reliable until the data check is resolved: a currency or benchmark mismatch means the fund and "
-                "its index are not on the same footing. These charts are kept as the original evidence only.")
+                "its index are not on the same footing. The fund-versus-index charts, figures and notes here are kept "
+                "as the original evidence for audit only, marked \"not reliable\"; they are not findings.")
 
 
 def merge_same_ending(items: list[str], ending: str, joiner: str = "and") -> list[str]:

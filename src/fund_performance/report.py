@@ -25,7 +25,8 @@ from fund_performance.models import DataFlag, Figure, FundProfile, Peer
 from fund_performance.evidence import Evidence
 from fund_performance.peers import PeerComparison, as_list
 from fund_performance.plain import plain_peer_reason
-from fund_performance.presentation import NOT_RELIABLE, comparison_problems
+from fund_performance.presentation import (NOT_RELIABLE, UNRELIABLE, UNRELIABLE_MARK, comparison_problems,
+                                           is_comparative)
 from fund_performance.precedence import ReportedFigures
 from fund_performance.scorecard import AMBER, CHECK_DATA, GREEN, MANUAL_CHECK, RED, Scorecard
 
@@ -170,6 +171,7 @@ def _returns_table(inp: ReportInputs) -> str:
     rows = ""
     for label, series in (("Fund, noon price (NAV)", "fund_nav"), ("Fund, market-close price (PNAV)", "fund_pnav"),
                           ("Index", "index")):
+        label = _marked(inp, label, series == "index")
         figs = [_f(inp, f"{series}.{c}") for _, c in cols]
         if any(figs):
             rows += (f"<tr><td class='l'>{label}</td>" + "".join(f"<td>{fmt(series, f, False)}</td>" for f in figs)
@@ -179,7 +181,7 @@ def _returns_table(inp: ReportInputs) -> str:
            for _, c in cols]
     if any(gap):
         who = "PNAV" if basis == "fund_pnav" else "NAV"
-        rows += (f"<tr class='total'><td class='l'>Gap to index ({who} vs index, pp)</td>"
+        rows += (f"<tr class='total'><td class='l'>{_marked(inp, f'Gap to index ({who} vs index, pp)')}</td>"
                  + "".join(f"<td>{fmt('comparison.td' if i >= 3 else 'comparison.excess_cum', g, False)}</td>"
                            for i, g in enumerate(gap)) + "<td class='src'>Calculated from the factsheet</td></tr>")
     head = "".join(f"<th>{c}</th>" for c, _ in cols)
@@ -193,6 +195,7 @@ def _calendar_table(inp: ReportInputs) -> str:
         return "<p>No calendar-year figures.</p>"
     rows = ""
     for label, series in (("Fund (NAV)", "fund_nav"), ("Fund (PNAV)", "fund_pnav"), ("Index", "index")):
+        label = _marked(inp, label, series == "index")
         figs = [_f(inp, f"{series}.calendar.{y}") for y in years]
         if any(figs):
             rows += (f"<tr><td class='l'>{label}</td>" + "".join(f"<td>{fmt(series, f, False)}</td>" for f in figs)
@@ -234,10 +237,11 @@ def _risk_table(inp: ReportInputs) -> str:
             body += f"<tr><td class='sub' colspan='3'>{source_of(*figs)} · {title}</td></tr>"
             for label, fund_name, index_name in rows:
                 index = _f(inp, index_name) if index_name else None
-                body += (f"<tr><td class='l'>{label}</td><td>{fmt(fund_name, _f(inp, fund_name), False)}</td>"
+                shown = _marked(inp, label, is_comparative(fund_name))
+                body += (f"<tr><td class='l'>{shown}</td><td>{fmt(fund_name, _f(inp, fund_name), False)}</td>"
                          f"<td>{fmt(index_name, index, False) if index else '–'}</td></tr>")
         return ("<table class='grid num tiny'><tr><th class='l' width='54%'>Risk measure</th><th>Fund</th>"
-                f"<th>Index</th></tr>{body}</table>")
+                f"<th>{_marked(inp, 'Index')}</th></tr>{body}</table>")
     groups = [g for g in _risk_groups(inp) if g[1]]
     if len(groups) < 2:
         return table(groups) if groups else "<p class='small'>No risk figures.</p>"
@@ -479,6 +483,11 @@ def inp_level(inp: ReportInputs) -> float:
     return load_settings().statistics.significance_level
 
 
+def _marked(inp: ReportInputs, label: str, comparative: bool = True) -> str:
+    """ A table label for a fund-vs-index figure, marked while a currency or benchmark mismatch is unresolved """
+    return f"{label} ({UNRELIABLE_MARK})" if comparative and comparison_problems(inp.flags) else label
+
+
 def _not_reliable(inp: ReportInputs) -> str:
     """ A warning above charts that compare the fund with an index the data checks found mismatched """
     if not comparison_problems(inp.flags):
@@ -512,11 +521,13 @@ def _page2(inp: ReportInputs, out_dir: Path) -> str:
     path = "".join(f"<li>{escape(step)}</li>" for step in plain_path(inp.card.path))
     promises = ("".join(f"<li>{escape(x)}</li>" for x in inp.promises) if inp.promises
                 else "<li>Not read: the Mandate Agent was not run.</li>")
-    notes = "".join(f"<li>{escape(plain_note(n))}<br/><span class='small'>{escape(note_source_line(n))}</span></li>"
+    mark = f"{UNRELIABLE} ({UNRELIABLE_MARK.split(': ')[1]}): " if comparison_problems(inp.flags) else ""
+    notes = "".join(f"<li>{mark}{escape(plain_note(n))}<br/><span class='small'>{escape(note_source_line(n))}</span></li>"
                     for n in inp.facts.get("data_notes", []))
     growth, yearly, caption = _chart_images(inp, out_dir)
     return f"""
 <h1>Appendix B: Mandate and performance</h1>
+{_not_reliable(inp)}
 {_in_full(inp)}
 <table class="facts"><tr><td class="label">Objective</td><td>{escape(inp.profile.objective_text)}</td></tr></table>
 <table width="100%"><tr><td width="50%" valign="top"><h3>What the fund promises</h3><ul class="tight">{promises}</ul></td>
@@ -525,7 +536,6 @@ def _page2(inp: ReportInputs, out_dir: Path) -> str:
 <h3>Calendar-year returns</h3>{_calendar_table(inp)}
 <h3>Risk</h3>{_risk_table(inp)}
 <h3>Below the surface</h3><ul class="tight">{notes or '<li>No data notes.</li>'}</ul>
-{_not_reliable(inp) if growth or yearly else ''}
 <table width="100%"><tr><td align="center">{_img(growth)}</td><td align="center">{_img(yearly)}</td></tr></table>
 <p class="small">{escape(caption)}</p>
 """

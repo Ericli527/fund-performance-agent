@@ -17,7 +17,8 @@ from pathlib import Path
 from fund_performance import charts
 from fund_performance.plain import verdict_meaning, verdict_name
 import re
-from fund_performance.presentation import (CHART_LEFT_OUT, NAVY, NOT_AVAILABLE, RATING_STYLE, VERDICT_STYLE, _figures,
+from fund_performance.presentation import (CHART_LEFT_OUT, UNRELIABLE, comparison_invalid,
+                                           NAVY, NOT_AVAILABLE, RATING_STYLE, VERDICT_STYLE, _figures,
                                            _shown, _source, assessment_caveat, chart_choice, comparison_problems,
                                            evidence_quality, flag_dicts, conclusion_origin, headline_metrics,
                                            issue_groups, merge_same_ending, point_to_data_issues, report_action,
@@ -130,7 +131,7 @@ def _statuses(data: dict) -> str:
 def _metrics(facts: dict) -> str:
     cells = "".join(
         f"<td width='33%' class='x-metric'><span class='x-label'>{escape(m.label.upper())}</span><br/>"
-        f"<span class='x-value{' x-na' if m.value == NOT_AVAILABLE else ''}'>{escape(m.value)}</span><br/>"
+        f"<span class='x-value{' x-na' if m.value in (NOT_AVAILABLE, UNRELIABLE) else ''}'>{escape(m.value)}</span><br/>"
         f"{escape(m.period)}{('<br/>' + escape(m.note)) if m.note else ''}<br/><span class='x-src'>Source: "
         f"{escape(m.source)}</span></td>" for m in headline_metrics(facts))
     return f"<table class='x-metrics'><tr>{cells}</tr></table>"
@@ -209,7 +210,9 @@ def _comparison(inp, facts: dict) -> str:
         words = "noon price (NAV)" if other == "fund_nav" else "market-close price (PNAV)"
         rows += row(f"This fund, {words}: compared with peers", ann(other), f"{inp.profile.ocf_pct:.2f}%",
                     _source(*(figs.get(f"{other}.ann.{k}y") for k in (3, 5))), True)
-    rows += row("Index or benchmark", ann("index"), "–", _source(*(figs.get(f"index.ann.{k}y") for k in (3, 5))))
+    invalid = comparison_invalid(facts)
+    rows += (row("Index or benchmark", ["–"] * 3, "–", f"{UNRELIABLE}: data check") if invalid else
+             row("Index or benchmark", ann("index"), "–", _source(*(figs.get(f"index.ann.{k}y") for k in (3, 5)))))
     for p in facts.get("peers", []):
         r = p.get("returns_pct_a_year", {})
         cells = ["–" if r.get(k) is None else f"{r[k]:.1f}%".replace("-", "−") for k in ("1y", "3y", "5y")]
@@ -220,6 +223,9 @@ def _comparison(inp, facts: dict) -> str:
     note = (f"Gap to the index over {n} years: {_shown(gap)} a year (tracking difference; calculated from the "
             "factsheet). Returns a year; 1 year is the 1-year return." if gap else
             "Returns a year; 1 year is the 1-year return.")
+    if invalid:
+        note = ("Index figures and the gap to the index are not reliable until the data check is resolved (see the "
+                "data issues); the Detailed Report keeps them, marked. Returns a year; 1 year is the 1-year return.")
     if not facts.get("peers"):
         note += " No comparable peer was supplied or approved for this benchmark."
     peer_notes = [_peer_note(p) for p in facts.get("peers", [])]

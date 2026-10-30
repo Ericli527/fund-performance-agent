@@ -585,7 +585,12 @@ dashboard also uses, so all three show the same verdict, ratings and headline fi
    return above the benchmark (other funds), 12-month returns fund vs index or benchmark, or none with a note. When a
    blocking currency or benchmark mismatch (`currency_match`, `implausible_tracker_gap`) makes the fund-vs-index
    comparison unreliable, the chart is replaced by a box that says why (the Detailed Report keeps the original
-   charts, marked "Read with care … not reliable"); the
+   charts, marked "Read with care … not reliable"). Under such a mismatch nothing presents the fund-vs-index
+   comparison as reliable: the key findings replace the data-note findings by one sentence saying no finding is
+   drawn from them; points and questions leave out the gap, the fee note and the significance test and ask which
+   index series and currency to use; the dashboard and the Executive Report show the gap, index and tracking
+   figures as "Not reliable" (one risk row); Appendix B keeps the raw figures and notes, each marked "not
+   reliable: data check", under a "Read with care" box; the
    four ratings (a rating waiting for a data check says so instead of repeating the data issue).
 2. **Comparisons and decision:** fund vs index vs peers (1, 3, 5 years; fee; what each peer is used for; a second
    fund row on the price basis the peers were compared with, when it differs; one line per peer with share class,

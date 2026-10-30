@@ -89,3 +89,25 @@ def test_the_same_wording_is_said_once():
         [f"Resolve the data check on Mandate and Performance {tail}", "Other."]
     assert report_action("Read the evidence on pages 2 to 4 before x.") == \
         "Read the evidence in the Detailed Report (Appendices A to D) before x."
+
+
+# Stage 3.1 follow-up: a blocking currency or benchmark mismatch -> no fund-vs-index figure shown as reliable
+MISMATCH = {"check": "currency_match", "level": "blocking", "message": "CHECK DATA: currency mismatch"}
+
+
+def test_a_mismatch_replaces_the_gap_headline_and_the_comparative_risk_rows():
+    from fund_performance.presentation import UNRELIABLE, comparison_invalid, is_comparative
+    f = facts()
+    assert not comparison_invalid(f)
+    f["data_flags"] = [MISMATCH]
+    assert comparison_invalid(f)
+    fund, gap, ocf = headline_metrics(f)
+    assert gap.value == UNRELIABLE and "data check" in gap.note and gap.source == "Data check needed"
+    assert fund.value == headline_metrics(facts())[0].value and ocf.value == headline_metrics(facts())[2].value
+    rows = risk_measures(f)
+    assert not any(is_comparative(n) for n in ("fund_nav.vol.5y", "fund_nav.mdd.5y"))
+    assert all(is_comparative(n) for n in ("comparison.td.5y", "relative.r2.5y", "risk.pnav.tracking_error.3y",
+                                           "risk.nav.beta.3y", "index.ann.5y"))
+    unreliable = [r for r in rows if r[1] == UNRELIABLE]
+    assert len(unreliable) == 1 and "Tracking error" in unreliable[0][0]       # one row, not one per measure
+    assert all(r[1] != UNRELIABLE for r in rows[:-1])
