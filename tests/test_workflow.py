@@ -122,3 +122,54 @@ def test_the_progress_area_replaces_a_running_step_with_its_outcome():
     info = run_info({"run_id": "r1", "trace_id": "trace_x", "ai_calls": {"total": 2, "by_agent": {"Judge Agent": 1, "Reporting Agent": 1}}})
     assert info == "Run r1 · 2 AI call(s) (Judge Agent 1, Reporting Agent 1) · OpenAI trace trace_x"
     assert progress_markdown(h, info).endswith(info)
+
+
+def test_every_agent_call_of_a_review_runs_inside_one_trace(tmp_path, monkeypatch):
+    """ The page's reading agents and every agent the controller runs share one OpenAI trace ("Fund performance
+    review"), so the SDK files all their spans under it. Checked with the SDK's own current trace inside each call;
+    nothing is uploaded (the trace processors are replaced) """
+    import functools
+    from agents import get_current_trace
+    from agents.tracing import set_trace_processors
+    from fund_performance import web
+    from fund_performance.config import WebSettings
+    from fund_performance.intake import read_documents
+    from test_intake import MANDATE, extractor_answer
+    from agents import set_tracing_disabled
+    from agents.tracing import get_trace_provider
+    processors = list(getattr(get_trace_provider(), "_multi_processor")._processors)
+    set_trace_processors([])                                        # no export
+    set_tracing_disabled(False)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-real")
+    monkeypatch.delenv("OPENAI_AGENTS_DISABLE_TRACING", raising=False)
+    seen: list[tuple[str, str | None, str | None]] = []
+
+    def traced(name, answer):
+        async def call(agent, prompt):
+            t = get_current_trace()
+            seen.append((name, t.trace_id if t else None, t.name if t else None))
+            ans = answer(prompt) if callable(answer) else answer
+            return type("R", (), {"final_output": ans})()
+        return call
+    runners = mocked()
+    for name in ("task_planner", "mandate", "reporter", "judge"):
+        setattr(runners, name, traced(name, getattr(__import__("test_controller"), {
+            "task_planner": "TASK_PLAN", "reporter": "reporter_answer", "judge": "judge_answer"}.get(name, "TASK_PLAN"))
+            if name != "mandate" else MANDATE))
+    factsheet = SAMPLE / "factsheet.pdf"                            # the made-up fund's (the reading is mocked)
+    reader = lambda f, k, p: read_documents(f, k, p, run_extractor=traced("extractor", extractor_answer()),
+                                            run_mandate=traced("mandate (page)", MANDATE))
+    limits = web.AiLimits(WebSettings(max_ai_runs_per_day=5, max_ai_runs_at_once=1), tmp_path / "count.json")
+    out = asyncio.run(web.start_review("q", str(SAMPLE / "prices.csv"), str(factsheet), None, [], None, False, limits,
+                                       out_root=tmp_path / "runs",
+                                       runner=functools.partial(run_review, runners=runners), reader=reader))
+    assert out.data is not None
+    names = [n for n, _, _ in seen]
+    assert names[:2] == ["extractor", "mandate (page)"] and {"task_planner", "reporter", "judge"} <= set(names)
+    trace_ids = {t for _, t, _ in seen}
+    assert len(trace_ids) == 1 and None not in trace_ids                  # one trace for the whole review
+    assert {n for _, _, n in seen} == {"Fund performance review"}
+    log = json.loads(next((tmp_path / "runs").glob("*/log.json")).read_text())
+    assert log["run"]["trace_id"] == trace_ids.pop()                     # and the run log names it
+    set_tracing_disabled(True)
+    set_trace_processors(processors)
