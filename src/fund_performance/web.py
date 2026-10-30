@@ -35,6 +35,7 @@ from typing import Awaitable, Callable
 import zipfile
 import gradio as gr
 from fund_performance.config import WebSettings, load_settings
+from fund_performance.dashboard import dashboard_data, dashboard_html, technical_html
 from fund_performance.controller import DEFAULT_QUESTION, RunResult, RunStopped, run_review
 from fund_performance.plain import verdict_meaning, verdict_name
 from fund_performance.report import ANGLE_WORDS, REPORT_TYPE_WORDS
@@ -120,8 +121,8 @@ UI_QUESTION = REVIEW_TYPES[DEFAULT_REVIEW][2]
 REVIEW_HELP = ("Fills in the review question below, which tells the agents what to focus on. All four ratings "
                "(mandate, performance, value and fees) are always calculated the same way.")
 AUDIENCES = {"analyst": "Investment Analyst", "management": "Management"}
-AUDIENCE_HELP = ("Recorded with your choices only: in this version both audiences get the same report, figures and "
-                 "ratings.")
+AUDIENCE_HELP = ("Changes what the on-screen results show first: Investment Analyst gives the full detail, Management "
+                 "a summary and the decisions. The figures, ratings and PDF are the same for both.")
 
 
 def question_for(review_type: str, current: str) -> str:
@@ -271,9 +272,10 @@ def _wrong_type(path: str | None, allowed: list[str], what: str) -> str | None:
 
 @dataclass
 class Outcome:
-    message: str                             # Markdown for the page
+    message: str                             # Markdown for the page (a refusal or a stopped run; or the plain summary)
     pdf: str | None = None
     log: str | None = None
+    data: dict | None = None                 # the finished run, for the dashboard (dashboard.dashboard_data)
 
 
 def summary_markdown(result: RunResult) -> str:
@@ -335,7 +337,8 @@ async def _run_controller(folder: Path, question: str, offline: bool, on_step: P
         traceback.print_exc()
         return Outcome(f"**Something went wrong** ({type(e).__name__}). Please try again, or run it offline.")
     log = result.run_dir / "log.json"
-    return Outcome(summary_markdown(result), str(result.pdf), str(log) if log.exists() else None)
+    return Outcome(summary_markdown(result), str(result.pdf), str(log) if log.exists() else None,
+                   dashboard_data(result))
 
 
 async def start_review(question: str, price, factsheet, kid, peer_factsheets, json_files, offline: bool,
@@ -476,9 +479,62 @@ CSS = f"""
 
 .fp-run button, button.fp-run {{ width: 100%; font-size: 16px !important; font-weight: 600 !important;
   padding: 12px !important; }}
+/* Results dashboard (stage 2) */
+.fp-dashboard {{ display: flex; flex-direction: column; gap: 14px; color: #1d2733; font-size: 15px; line-height: 1.5; }}
+.fp-dashboard h2 {{ color: {NAVY_TEXT}; font-size: 22px; font-weight: 600; margin: 0; }}
+.fp-dashboard h3 {{ color: {NAVY_TEXT}; font-size: 17px; font-weight: 600; margin: 0 0 8px 0; }}
+.fp-dashboard h4 {{ color: {NAVY_TEXT}; font-size: 15px; font-weight: 600; margin: 14px 0 6px 0; }}
+.fp-dashboard p {{ margin: 4px 0; }}
+.fp-dashboard ul {{ margin: 4px 0 4px 18px; padding: 0; }}
+.fp-dashboard li {{ margin: 3px 0; }}
+.fp-view, .fp-muted {{ color: {MUTED}; font-size: 13.5px; }}
+.fp-card, .fp-result-head, .fp-details {{ background: #fff; border: 1px solid {BORDER}; border-radius: 12px;
+  padding: 16px 18px; }}
+.fp-fund p {{ color: {MUTED}; font-size: 14px; }}
+.fp-status-row {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }}
+.fp-status {{ border: 1px solid {BORDER}; border-left: 5px solid; border-radius: 10px; padding: 10px 14px; }}
+.fp-kicker {{ color: {MUTED}; font-size: 12.5px; font-weight: 500; text-transform: uppercase; letter-spacing: .03em; }}
+.fp-status-main {{ font-size: 20px; font-weight: 600; margin: 2px 0; }}
+.fp-status-sub {{ color: #3c4857; font-size: 13.5px; }}
+.fp-conclusion {{ font-size: 15.5px; }}
+.fp-concern-title, .fp-group {{ font-weight: 600; color: {NAVY_TEXT}; margin-top: 10px !important; }}
+.fp-metrics {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }}
+.fp-metric {{ background: #fff; border: 1px solid {BORDER}; border-radius: 12px; padding: 14px 16px; }}
+.fp-metric-label {{ color: {MUTED}; font-size: 13.5px; font-weight: 500; }}
+.fp-metric-value {{ color: {NAVY_TEXT}; font-size: 24px; font-weight: 600; margin: 4px 0; }}
+.fp-metric-value.fp-na {{ color: {MUTED}; font-size: 18px; }}
+.fp-metric-meta {{ color: #3c4857; font-size: 13.5px; }}
+.fp-metric-source {{ color: {MUTED}; font-size: 12.5px; margin-top: 6px; }}
+.fp-attention {{ border-left: 5px solid #b7791f; background: #fffaf0; }}
+.fp-rating {{ display: grid; grid-template-columns: minmax(150px, 1.1fr) auto 3fr; gap: 12px; align-items: start;
+  padding: 10px 0; border-top: 1px solid #eef1f5; }}
+.fp-rating:first-of-type {{ border-top: none; }}
+.fp-rating-name span {{ display: block; color: {MUTED}; font-size: 13px; }}
+.fp-chip {{ display: inline-block; color: #fff; font-size: 13px; font-weight: 600; border-radius: 999px;
+  padding: 3px 12px; white-space: nowrap; }}
+.fp-sub {{ color: #3c4857; font-size: 13.5px; }}
+.fp-details summary {{ cursor: pointer; color: {NAVY_TEXT}; font-weight: 600; font-size: 16px; }}
+.fp-details summary:focus-visible {{ outline: 2px solid {BLUE}; outline-offset: 3px; }}
+.fp-details-body {{ margin-top: 8px; }}
+.fp-table {{ border-collapse: collapse; width: 100%; font-size: 14px; }}
+.fp-table th {{ background: #f1f4f8; color: {NAVY_TEXT}; font-weight: 600; text-align: right; padding: 6px 8px; }}
+.fp-table td {{ text-align: right; padding: 6px 8px; border-top: 1px solid #eef1f5; }}
+.fp-table .l {{ text-align: left; }}
+.fp-table .src {{ color: {MUTED}; font-size: 12.5px; }}
+.fp-total td {{ font-weight: 600; background: #f8fafc; }}
+.fp-scroll {{ overflow-x: auto; }}
+.fp-scroll .fp-table {{ min-width: 600px; }}
+.fp-dashboard table, .fp-dashboard th, .fp-dashboard td {{ border-left: none !important; border-right: none !important;
+  border-bottom: none !important; }}
+.fp-dashboard table {{ border-top: none !important; }}
+.fp-tech, .fp-small {{ font-size: 13.5px; }}
+.fp-download button, button.fp-download {{ max-width: 320px; }}
 @media (max-width: 760px) {{
   .fp-cards .wrap {{ grid-template-columns: 1fr; }}
   .fp-header h1 {{ font-size: 24px; }}
+  .fp-status-row, .fp-metrics {{ grid-template-columns: 1fr; }}
+  .fp-rating {{ grid-template-columns: 1fr auto; }}
+  .fp-rating-why {{ grid-column: 1 / -1; }}
 }}
 """
 
@@ -564,22 +620,39 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             gr.Markdown("### How the agent works")
             gr.HTML(how_it_works_html())
 
-        # Results (unchanged in this stage)
+        # Results (stage 2): hidden until a review finishes
         progress = gr.Markdown(elem_classes="fp-progress")
-        status = gr.Markdown()
-        with gr.Row():
-            pdf = gr.File(label="PDF report", interactive=False)
-            log = gr.File(label="Run log (log.json)", interactive=False)
+        message = gr.Markdown()
+        result_state = gr.State(None)
+        with gr.Column(visible=False) as results:
+            gr.HTML("<h2>Results</h2>", elem_classes="fp-section-title")
+            pdf = gr.DownloadButton("Download PDF report", variant="primary", elem_classes="fp-download")
+            dashboard = gr.HTML()
+            with gr.Accordion("Technical details", open=False):
+                technical = gr.HTML()
+                log = gr.File(label="Run log (log.json)", interactive=False)
+                gr.Markdown("**Plain-text summary** (the same results as text, for copying)")
+                plain = gr.Markdown()
 
-        async def on_run(q, p, f, k, pr, j, _audience):
-            # The audience is recorded on the page only: it changes nothing in the review (see AUDIENCE_HELP)
-            yield "Starting…", "", None, None
+        def show(outcome: Outcome, audience_value: str):
+            """ The page's outputs for a finished review, or for a message when it could not run """
+            if outcome.data is None:
+                return outcome.message, gr.update(visible=False), "", gr.update(value=None), "", None, "", None
+            return ("", gr.update(visible=True), dashboard_html(outcome.data, audience_value),
+                    gr.update(value=outcome.pdf), technical_html(outcome.data), outcome.log, outcome.message, outcome.data)
+
+        async def on_run(q, p, f, k, pr, j, audience_value):
+            hidden = gr.update(visible=False)
+            yield "Starting…", "", hidden, "", gr.update(value=None), "", None, "", None
             offline = run_offline(p, j)
             async for kind, item in with_progress(lambda say: start_review(q, p, f, k, pr, j, offline, limits, say)):
                 if kind == "progress":
-                    yield item, gr.update(), gr.update(), gr.update()
+                    yield (item,) + (gr.update(),) * 8
                 else:
-                    yield "", item.message, item.pdf, item.log
+                    yield ("",) + show(item, audience_value)
+
+        def on_audience(data, audience_value):
+            return dashboard_html(data, audience_value) if data else gr.update()
 
         def on_demo():
             d = demo_files()
@@ -594,7 +667,8 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             box.change(lambda v, a=allowed, k=kinds: file_status(v, a, k), inputs=box, outputs=status_box, **private)
         use_demo.click(on_demo, outputs=[price, factsheet, kid, peer, json_files, options], **private)
         run.click(on_run, inputs=[question, price, factsheet, kid, peer, json_files, audience],
-                  outputs=[progress, status, pdf, log], **private)
+                  outputs=[progress, message, results, dashboard, pdf, technical, log, plain, result_state], **private)
+        audience.change(on_audience, inputs=[result_state, audience], outputs=dashboard, **private)
     return ui
 
 

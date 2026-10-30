@@ -123,6 +123,11 @@ Instructions for Claude Code in this project. The build specification is
   peers, JSON), "Run Fund Review" + "Use Demo Files", public-data note, "Help & methodology". No Offline switch:
   the unchanged demo runs offline; `FUND_REVIEW_OFFLINE=1` for development. `tests/test_golden_facts.py` guards
   every figure and rating (baselines: tests/golden/, data/test1/golden/).
+- Results dashboard (UX stage 2, `dashboard.py`, presentation only): investment assessment and evidence quality
+  shown separately (evidence from code's checks and all run flags; never "verified"; "Not final" while data issues
+  remain); 3 headline figures from the facts with period/unit/source ("Not available", never zero); items needing
+  attention; four ratings; collapsible detail; Technical details (plan, drafts, Judge, info flags, log.json). The
+  audience changes the view only (Analyst: detail open; Management: key decisions). RunResult carries every flag.
 - Peers: approved peers per benchmark in `config/peers.yaml` (factsheets in `data/peers/`, found by ISIN), used when
   no peer is given. Peer checks in `peers.py`: returns only in the fund's currency (else fees only, info flag);
   noon vs noon NAV, market close vs PNAV; share class type and minimum investment (institutional note);

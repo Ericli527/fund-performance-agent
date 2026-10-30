@@ -59,7 +59,9 @@ can leave them blank (no login).
 
 For a real fund: add the price file and the factsheet (KID and peer factsheets optional; for an S&P 500 fund the
 approved peers are used) and click **Run Fund Review**; code checks every value the agent read. The KID, peer
-factsheets and JSON inputs are under **Additional options**. There is no Offline switch on the page: the demo runs
+factsheets and JSON inputs are under **Additional options**. When the review finishes, the page shows a dashboard (assessment, evidence quality, headline figures, items
+needing attention, the four ratings, details) and the PDF to download; choose **Management** for a short view or
+**Investment Analyst** for the full detail. There is no Offline switch on the page: the demo runs
 without AI, and for development `FUND_REVIEW_OFFLINE=1 python app.py` runs every review without AI.
 Put the approved peers' factsheets in `data/peers/` (gitignored; found by the ISIN).
 

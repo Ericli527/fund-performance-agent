@@ -215,7 +215,7 @@ def test_the_page_has_the_instructions_files_table_and_how_it_works():
                  "Make the judgement"):
         assert step in INSTRUCTIONS
     accordions = {c.label: c.open for c in ui.blocks.values() if isinstance(c, gr.Accordion)}
-    assert accordions == {"Additional options": False, "Help & methodology": False}       # both start closed
+    assert accordions == {"Additional options": False, "Help & methodology": False, "Technical details": False}
     assert any(isinstance(c, gr.DownloadButton) and c.label == "Download example files" for c in ui.blocks.values())
 
 
@@ -257,12 +257,45 @@ def test_review_type_cards_fill_in_the_question_and_keep_the_users_own():
     assert question_for("overall", "") == UI_QUESTION
 
 
-def test_the_audience_is_recorded_only_and_changes_nothing(tmp_path, limits):
+def test_the_audience_changes_the_view_not_the_review(tmp_path, limits):
     radio = next(c for c in _blocks(gr.Radio) if c.value == "analyst")
     assert [label for label, _ in radio.choices] == ["Investment Analyst", "Management"]
-    assert "same report, figures and ratings" in AUDIENCE_HELP
+    assert "The figures, ratings and PDF are the same for both." in AUDIENCE_HELP
     import inspect
     assert "audience" not in inspect.signature(start_review).parameters         # never reaches the review
+
+
+# The results dashboard (UX stage 2)
+def _fn(ui, name):
+    return next(f for f in ui.fns.values() if f.name == name).fn
+
+
+def test_results_are_hidden_until_a_review_finishes():
+    ui = build_ui()
+    results = next(c for c in ui.blocks.values() if isinstance(c, gr.Column) and
+                   any(isinstance(x, gr.DownloadButton) and x.label == "Download PDF report"
+                       for x in getattr(c, "children", [])))
+    assert results.visible is False
+    assert not any(isinstance(c, gr.File) and c.label == "PDF report" for c in ui.blocks.values())
+    accordions = {c.label for c in ui.blocks.values() if isinstance(c, gr.Accordion)}
+    assert "Technical details" in accordions
+
+
+def test_a_finished_demo_fills_the_dashboard_and_the_audience_redraws_it(tmp_path, limits):
+    d = demo()
+    outcome = asyncio.run(start_review("q", d["price"], d["factsheet"], None, [d["peer"]], d["json"], True, limits,
+                                       out_root=tmp_path))
+    assert outcome.data and outcome.data["facts"]["scorecard"]["verdict"] == "Retain" and outcome.pdf
+    ui = build_ui()
+    redraw = _fn(ui, "on_audience")
+    analyst, management = redraw(outcome.data, "analyst"), redraw(outcome.data, "management")
+    assert "Investment Analyst view" in analyst and "Key decisions" in management
+    assert isinstance(redraw(None, "management"), dict)                  # nothing to redraw before a run
+
+
+def test_a_refused_run_shows_its_message_and_no_dashboard(tmp_path, limits):
+    outcome = asyncio.run(start_review("q", None, None, None, None, [], False, limits))
+    assert outcome.message == NEED_FILES and outcome.data is None
 
 
 def test_each_upload_says_what_it_got():

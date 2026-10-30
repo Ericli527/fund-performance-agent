@@ -699,6 +699,20 @@ Keep the manager's published Value Assessment Report out of the agent's inputs. 
     No Offline switch on the page: code decides. The unchanged demo files (checked byte for byte) run offline;
     every other review uses the AI workflow; `FUND_REVIEW_OFFLINE=1` in the environment runs every review offline
     for development and testing. The command line keeps `--offline`.
+    Results dashboard (UX redesign, stage 2; `dashboard.py`, presentation only): hidden until a review finishes,
+    then a "Download PDF report" button and a dashboard: fund name, ISIN and reporting period; the investment
+    assessment (the suggested verdict, from the four ratings) and, separately, the evidence quality (from code's data
+    checks and every flag of the run: "Data check needed" for a blocking check or a Check data rating, "Warnings to
+    review" for warnings, else "No data issues raised", which is not a verification of the documents); while data
+    issues remain, the assessment says "Not final"; the summary (the suggested conclusion and material concerns);
+    three headline figures from the facts with period, unit and source (fund return a year and the gap to the index
+    over the main period, on the series the gap was measured on, and the ongoing charge; a missing figure says "Not
+    available", never zero); "Items needing attention" (data issues, then recommended actions); the four ratings
+    with their reasons; collapsible detail (returns, risk, statistics, peers, findings, data notes, market context,
+    points for judgement and questions for the manager); "Technical details" (plan, drafts and the Judge's
+    checklist, info flags, log.json and the plain-text summary). The report audience changes only the view:
+    Investment Analyst opens the detail and sub-ratings; Management leads with "Key decisions" and keeps the detail
+    closed. Same facts, figures and ratings for both; the PDF is the same for both.
     Protecting the API key: when APP_USERNAME and APP_PASSWORD are set, the page asks for them before it opens
     (Gradio's login). On a server with no login set up, AI runs are off and only the offline demo works; on your
     own computer (no PORT) no login is needed. Limits in `config/settings.yaml` (`web`): AI reviews per day and one

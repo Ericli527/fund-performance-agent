@@ -145,6 +145,7 @@ class RunResult:
     narrative: Narrative | None = None
     facts: dict | None = None
     reasons: dict[str, str] = field(default_factory=dict)    # one-line plain reason per rating, as on report page 1
+    flags: list[DataFlag] = field(default_factory=list)       # every flag of the run, as in the report's appendix
 
 
 def _now() -> str:
@@ -496,4 +497,5 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                        **({"post": r.email_post} if r.email_post else {}))
     text_log.append(line)
     log.end(step, "ok" if line.startswith("Email: sent") else "failed" if s.email.enabled else "skipped", notes=[line])
-    return RunResult(pdf, run_dir, log, narrative, facts, {name: plain_reason(inputs, name) for name in card.pillars})
+    return RunResult(pdf, run_dir, log, narrative, facts, {name: plain_reason(inputs, name) for name in card.pillars},
+                     list({(f.level, f.message): f for f in flags}.values()))
