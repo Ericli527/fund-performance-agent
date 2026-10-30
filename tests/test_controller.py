@@ -160,7 +160,7 @@ def test_test1_full_run_mocked(tmp_path):
     web = log["sources"]["web"]
     assert web and web == result.narrative.sources or not result.narrative.output.market_context
     assert result.facts["scorecard"]["verdict"] == "Monitor until a peer is added"
-    assert len(page_texts(result.pdf)) == 5
+    assert len(page_texts(result.executive_pdf)) == 2 and len(page_texts(result.pdf)) >= 6
 
 
 @requires_test1
@@ -201,7 +201,7 @@ def test_without_factsheet_figures_the_extractor_reads_the_documents(tmp_path):
     extractor = next(s for s in log["steps"] if s["step"] == "extractor")
     assert extractor["status"] == "ok" and "Monthly_FactSheet.pdf" in extractor["inputs"]
     assert "Key_Investor_Info.pdf" in log["sources"]["input_files"]                 # read, so listed plainly
-    assert "please verify" in page_texts(result.pdf)[2]                             # ai_extracted figures
+    assert "please verify" in " ".join(page_texts(result.pdf))                      # ai_extracted figures
     assert len(runners.extractor.prompts) == 1
 
 
@@ -225,7 +225,10 @@ def test_email_when_switched_on_goes_through_resend_and_is_logged(tmp_path, monk
                                     runners=Runners(email_post=post)))
     email = result.log.step("email")
     assert email.status == "ok" and email.notes == ["Email: sent to 1 recipient(s) from EMAIL_TO"]
-    assert post.calls[0]["json"]["attachments"][0]["filename"] == "report.pdf"
+    assert post.calls[0]["json"]["attachments"][0]["filename"] == "report_executive.pdf"     # the default (stage 3)
+    s.email = s.email.model_copy(update={"attachment": "detailed"})                      # the option kept
+    asyncio.run(run_review(TEST1, out_root=tmp_path, offline=True, settings=s, runners=Runners(email_post=post)))
+    assert post.calls[1]["json"]["attachments"][0]["filename"] == "report.pdf"
 
 
 # Task Planner, Reporting Agents and the Judge in the run
@@ -239,8 +242,10 @@ def test_the_judged_ai_draft_becomes_the_suggested_conclusion(tmp_path):
         ("board", 6, False), ("analyst", 6, True)]
     assert result.facts["plan"]["source"] == "planner" and result.facts["plan"]["focus"][:2] == ["Performance", "Fees"]
     p1 = " ".join(page_texts(result.pdf)[0].split())
-    assert "Suggested conclusion (AI draft for the oversight analyst, chosen by the Judge and code" in p1
-    appendix = " ".join(page_texts(result.pdf)[-1].split())
+    assert "AI draft for the oversight analyst, chosen by the Judge and checked by code" in p1
+    pages = page_texts(result.pdf)
+    start = next(i for i, x in enumerate(pages) if "Appendix D: Data quality, sources and audit" in x)
+    appendix = " ".join(" ".join(pages[start:]).split())
     assert "Plan (Task Planner Agent): quarterly oversight review; focus Performance, Fees" in appendix
     assert "Draft for the oversight analyst: 6 of 6 checks; chosen." in appendix
 

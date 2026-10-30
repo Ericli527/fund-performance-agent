@@ -270,12 +270,20 @@ def _fn(ui, name):
     return next(f for f in ui.fns.values() if f.name == name).fn
 
 
+def _descendants(block):
+    for child in getattr(block, "children", []) or []:
+        yield child
+        yield from _descendants(child)
+
+
 def test_results_are_hidden_until_a_review_finishes():
+    from fund_performance.web import DETAILED_LABEL, EXECUTIVE_LABEL
     ui = build_ui()
     results = next(c for c in ui.blocks.values() if isinstance(c, gr.Column) and
-                   any(isinstance(x, gr.DownloadButton) and x.label == "Download PDF report"
-                       for x in getattr(c, "children", [])))
+                   any(isinstance(x, gr.DownloadButton) and x.label == DETAILED_LABEL for x in _descendants(c)))
     assert results.visible is False
+    labels = {x.label for x in _descendants(results) if isinstance(x, gr.DownloadButton)}
+    assert labels == {DETAILED_LABEL, EXECUTIVE_LABEL}                     # both reports offered after a review
     assert not any(isinstance(c, gr.File) and c.label == "PDF report" for c in ui.blocks.values())
     accordions = {c.label for c in ui.blocks.values() if isinstance(c, gr.Accordion)}
     assert "Technical details" in accordions
@@ -285,12 +293,22 @@ def test_a_finished_demo_fills_the_dashboard_and_the_audience_redraws_it(tmp_pat
     d = demo()
     outcome = asyncio.run(start_review("q", d["price"], d["factsheet"], None, [d["peer"]], d["json"], True, limits,
                                        out_root=tmp_path))
-    assert outcome.data and outcome.data["facts"]["scorecard"]["verdict"] == "Retain" and outcome.pdf
-    ui = build_ui()
-    redraw = _fn(ui, "on_audience")
-    analyst, management = redraw(outcome.data, "analyst"), redraw(outcome.data, "management")
+    assert outcome.data and outcome.data["facts"]["scorecard"]["verdict"] == "Retain"
+    assert outcome.pdf.endswith("report.pdf") and outcome.executive.endswith("report_executive.pdf")
+    data = outcome.data | {"pdf": outcome.pdf, "executive_pdf": outcome.executive}
+    redraw = _fn(build_ui(), "on_audience")
+    (analyst, a_detailed, a_exec), (management, m_detailed, m_exec) = redraw(data, "analyst"), redraw(data, "management")
     assert "Investment Analyst view" in analyst and "Key decisions" in management
-    assert isinstance(redraw(None, "management"), dict)                  # nothing to redraw before a run
+    assert (a_detailed["variant"], a_exec["variant"]) == ("primary", "secondary")      # analyst: Detailed first
+    assert (m_detailed["variant"], m_exec["variant"]) == ("secondary", "primary")      # management: Executive first
+    assert a_exec["value"] == m_exec["value"] == outcome.executive                      # same files, no new run
+    assert all(isinstance(x, dict) for x in redraw(None, "management"))               # nothing to redraw before a run
+
+
+def test_without_an_executive_report_the_detailed_one_stays_primary():
+    from fund_performance.web import download_buttons
+    detailed, executive = download_buttons({"pdf": "report.pdf", "executive_pdf": None}, "management")
+    assert detailed["variant"] == "primary" and executive["visible"] is False
 
 
 def test_a_refused_run_shows_its_message_and_no_dashboard(tmp_path, limits):

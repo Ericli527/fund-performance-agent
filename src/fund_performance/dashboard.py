@@ -19,7 +19,7 @@ from fund_performance.plain import verdict_meaning, verdict_name
 from fund_performance.presentation import (NAVY, NOT_AVAILABLE, QUESTIONS, RATING_STYLE,  # noqa: F401
                                            VERDICT_STYLE, EvidenceQuality, _date, _figures, _shown, _source,
                                            assessment_caveat, evidence_quality, flag_dicts, headline_metrics,
-                                           issue_groups, risk_measures)
+                                           conclusion_origin, issue_groups, risk_measures)
 from fund_performance.report import ANGLE_WORDS, REPORT_TYPE_WORDS, plain_note
 
 AUDIENCES = ("analyst", "management")
@@ -94,8 +94,7 @@ def _header(data: dict, quality: EvidenceQuality) -> str:
 def _summary(data: dict, quality: EvidenceQuality) -> str:
     facts = data["facts"]
     concl = facts.get("suggested_conclusion") or {}
-    who = (f"AI draft for the {ANGLE_WORDS.get(concl.get('angle'), concl.get('angle'))}, chosen by the Judge and "
-           "checked by code" if concl.get("source") == "ai" else "Written by code from the scorecard")
+    who = conclusion_origin(concl)
     gaps, concerns = issue_groups(facts, data["reasons"])
     concerns_html = ""
     if concerns:

@@ -18,7 +18,8 @@ from fund_performance import charts
 from fund_performance.plain import verdict_meaning, verdict_name
 from fund_performance.presentation import (NAVY, NOT_AVAILABLE, RATING_STYLE, VERDICT_STYLE, _figures, _shown,
                                            _source, assessment_caveat, chart_choice, evidence_quality, flag_dicts,
-                                           headline_metrics, issue_groups, risk_measures)
+                                           conclusion_origin, headline_metrics, issue_groups,
+                                           risk_measures)
 
 PAGE1, PAGE2 = "Overview", "Comparisons and decision"
 EXEC_TITLES = (PAGE1, PAGE2)
@@ -168,7 +169,8 @@ def page1(inp, content: ExecutiveContent) -> str:
 {_statuses(data)}
 {_metrics(data['facts'])}
 <table width="100%"><tr><td width="55%" valign="top">
-<h2>Summary</h2><p>{escape(concl.get('text', ''))}</p>
+<h2>Summary</h2><p>{escape(concl.get('text', ''))}</p><p class='x-src'>{escape(conclusion_origin(concl))}; a draft for
+the analyst.</p>
 {'<h2>Key findings</h2>' + _ul(findings) if findings else ''}
 </td><td width="3%"></td><td valign="top" align="center">{chart}<p class='x-src'>{escape(content.chart_caption)}</p></td></tr></table>
 <h2>The four ratings</h2>{_scorecard(data)}

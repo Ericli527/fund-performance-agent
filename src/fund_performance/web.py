@@ -276,6 +276,7 @@ class Outcome:
     pdf: str | None = None
     log: str | None = None
     data: dict | None = None                 # the finished run, for the dashboard (dashboard.dashboard_data)
+    executive: str | None = None             # report_executive.pdf (stage 3); None if it could not fit
 
 
 def summary_markdown(result: RunResult) -> str:
@@ -337,8 +338,9 @@ async def _run_controller(folder: Path, question: str, offline: bool, on_step: P
         traceback.print_exc()
         return Outcome(f"**Something went wrong** ({type(e).__name__}). Please try again, or run it offline.")
     log = result.run_dir / "log.json"
+    executive = getattr(result, "executive_pdf", None)
     return Outcome(summary_markdown(result), str(result.pdf), str(log) if log.exists() else None,
-                   dashboard_data(result))
+                   dashboard_data(result), str(executive) if executive else None)
 
 
 async def start_review(question: str, price, factsheet, kid, peer_factsheets, json_files, offline: bool,
@@ -555,6 +557,20 @@ def theme() -> gr.themes.Base:
     )
 
 
+DETAILED_LABEL = "Detailed Report (PDF)"
+EXECUTIVE_LABEL = "Executive Report (PDF, 2 pages)"
+
+
+def download_buttons(data: dict, audience: str) -> tuple[dict, dict]:
+    """ (Detailed, Executive) button updates: Investment Analyst gets the Detailed Report as the primary download,
+    Management the Executive Report. An Executive Report that could not fit is hidden (the run's warning says why) """
+    analyst = audience != "management"
+    executive = data.get("executive_pdf")
+    return (gr.update(value=data.get("pdf"), variant="primary" if analyst or not executive else "secondary",
+                      visible=bool(data.get("pdf"))),
+            gr.update(value=executive, variant="secondary" if analyst else "primary", visible=bool(executive)))
+
+
 def _card(value: str) -> str:
     title, subtitle, _ = REVIEW_TYPES[value]
     return f"{ICONS[value]}  {title}\n{subtitle}"
@@ -626,7 +642,9 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
         result_state = gr.State(None)
         with gr.Column(visible=False) as results:
             gr.HTML("<h2>Results</h2>", elem_classes="fp-section-title")
-            pdf = gr.DownloadButton("Download PDF report", variant="primary", elem_classes="fp-download")
+            with gr.Row():
+                pdf = gr.DownloadButton(DETAILED_LABEL, variant="primary", elem_classes="fp-download")
+                executive_pdf = gr.DownloadButton(EXECUTIVE_LABEL, variant="secondary", elem_classes="fp-download")
             dashboard = gr.HTML()
             with gr.Accordion("Technical details", open=False):
                 technical = gr.HTML()
@@ -637,22 +655,28 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
         def show(outcome: Outcome, audience_value: str):
             """ The page's outputs for a finished review, or for a message when it could not run """
             if outcome.data is None:
-                return outcome.message, gr.update(visible=False), "", gr.update(value=None), "", None, "", None
-            return ("", gr.update(visible=True), dashboard_html(outcome.data, audience_value),
-                    gr.update(value=outcome.pdf), technical_html(outcome.data), outcome.log, outcome.message, outcome.data)
+                return (outcome.message, gr.update(visible=False), "", gr.update(value=None), gr.update(value=None),
+                        "", None, "", None)
+            data = outcome.data | {"pdf": outcome.pdf, "executive_pdf": outcome.executive}
+            detailed, executive = download_buttons(data, audience_value)
+            return ("", gr.update(visible=True), dashboard_html(data, audience_value), detailed, executive,
+                    technical_html(data), outcome.log, outcome.message, data)
 
         async def on_run(q, p, f, k, pr, j, audience_value):
             hidden = gr.update(visible=False)
-            yield "Starting…", "", hidden, "", gr.update(value=None), "", None, "", None
+            yield "Starting…", "", hidden, "", gr.update(value=None), gr.update(value=None), "", None, "", None
             offline = run_offline(p, j)
             async for kind, item in with_progress(lambda say: start_review(q, p, f, k, pr, j, offline, limits, say)):
                 if kind == "progress":
-                    yield (item,) + (gr.update(),) * 8
+                    yield (item,) + (gr.update(),) * 9
                 else:
                     yield ("",) + show(item, audience_value)
 
         def on_audience(data, audience_value):
-            return dashboard_html(data, audience_value) if data else gr.update()
+            """ A new view and a new primary download from the saved results: the review is not run again """
+            if not data:
+                return gr.update(), gr.update(), gr.update()
+            return (dashboard_html(data, audience_value),) + download_buttons(data, audience_value)
 
         def on_demo():
             d = demo_files()
@@ -667,8 +691,10 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             box.change(lambda v, a=allowed, k=kinds: file_status(v, a, k), inputs=box, outputs=status_box, **private)
         use_demo.click(on_demo, outputs=[price, factsheet, kid, peer, json_files, options], **private)
         run.click(on_run, inputs=[question, price, factsheet, kid, peer, json_files, audience],
-                  outputs=[progress, message, results, dashboard, pdf, technical, log, plain, result_state], **private)
-        audience.change(on_audience, inputs=[result_state, audience], outputs=dashboard, **private)
+                  outputs=[progress, message, results, dashboard, pdf, executive_pdf, technical, log, plain,
+                           result_state], **private)
+        audience.change(on_audience, inputs=[result_state, audience], outputs=[dashboard, pdf, executive_pdf],
+                        **private)
     return ui
 
 

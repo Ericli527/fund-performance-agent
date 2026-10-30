@@ -122,6 +122,17 @@ def flag_dicts(flags) -> list[dict]:
     return list(out.values())
 
 
+ANGLE_WORDS = {"board": "board", "analyst": "oversight analyst", "manager_meeting": "meeting with the manager"}
+
+
+def conclusion_origin(concl: dict) -> str:
+    """ Who wrote the suggested conclusion """
+    if concl.get("source") == "ai":
+        return (f"AI draft for the {ANGLE_WORDS.get(concl.get('angle'), concl.get('angle'))}, chosen by the Judge and "
+                "checked by code")
+    return "Written by code from the scorecard"
+
+
 def assessment_caveat(quality: EvidenceQuality) -> str:
     """ What the suggested verdict needs before it can be relied on """
     return {"check": "Not final: resolve the data check first.",
