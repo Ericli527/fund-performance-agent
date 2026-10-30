@@ -131,3 +131,27 @@ def test_live_test1_extraction_matches_the_typed_figures():
     assert fs.risk("pnav").tracking_error == 0.02
     assert not any(f.level == "warning" for f in result.flags)
     assert "performance_fee_justification" not in result.profile_draft
+
+
+def test_periods_labelled_by_their_start_dates_are_moved_to_their_end_dates():
+    # "30.09.2025 30.09.2026" read as its first date: every period one year early, the latest not on the as-of date
+    windows = [{"series": "fund_nav", "end_date": "2025-09-30", "value": 17.1},
+               {"series": "fund_nav", "end_date": "2024-09-30", "value": 22.9}]
+    out = ExtractorOutput.model_validate(output(discrete_12m=windows))
+    fs = to_factsheet(out)
+    assert {d.isoformat(): v for d, v in fs.discrete_12m["fund_nav"].items()} == {"2026-09-30": 17.1, "2025-09-30": 22.9}
+    result = asyncio.run(extract(DOC + " 17.1 22.9", run=FakeRun(output(discrete_12m=windows))))
+    assert any("labelled them by their start dates" in f.message and f.level == "info" for f in result.flags)
+
+
+def test_periods_already_labelled_by_their_end_dates_are_left_alone():
+    windows = [{"series": "fund_nav", "end_date": "2026-09-30", "value": 17.1}]
+    fs = to_factsheet(ExtractorOutput.model_validate(output(discrete_12m=windows)))
+    assert {d.isoformat(): v for d, v in fs.discrete_12m["fund_nav"].items()} == {"2026-09-30": 17.1}
+
+
+def test_fund_size_in_millions_is_found_when_printed_in_full():
+    data = output()
+    data["profile"]["fund_size_gbp_m"] = 21762.581005
+    doc = DOC.replace("£ 1,250m", "GBP 21,762,581,005")
+    assert unfound_numbers(ExtractorOutput.model_validate(data), doc) == []

@@ -106,7 +106,7 @@ STAGES = {
     "report": (5, "Code: reports", "Building the Executive and Detailed PDF reports"),
 }
 TOTAL_STAGES = 5
-OUTCOME_ICON = {"ok": "✓", "skipped": "↷", "failed": "✗", "timeout": "✗", "stopped": "✗"}
+OUTCOME_ICON = {"ok": "✓", "skipped": "↷", "fallback": "↷", "failed": "✗", "timeout": "✗", "stopped": "✗"}
 DOCUMENTS_STAGE = (1, "Extractor Agent and Mandate Agent", "Reading the factsheet, KID and peer factsheets")
 
 
@@ -159,8 +159,11 @@ class RunLog:
         record.notes += notes or []
         if self.on_step and record.step in STAGES and not quiet:
             stage, who, _ = STAGES[record.step]
-            word = {"ok": f"done ({record.seconds:.1f} s)", "skipped": "skipped"}.get(status, status)
-            why = f": {record.notes[0]}" if status != "ok" and record.notes else ""
+            word = {"ok": f"done ({record.seconds:.1f} s)", "skipped": "skipped",
+                    "fallback": f"fallback after {record.seconds:.1f} s"}.get(status, status)
+            why = f": {record.notes[0]}" if status not in ("ok", "fallback") and record.notes else (
+                ": the draft did not pass the Judge, so code's conclusion is used (labelled as such)"
+                if status == "fallback" else "")
             self.on_step(f"{OUTCOME_ICON.get(status, '•')} Step {stage} of {TOTAL_STAGES} · {who} · {word}{why}")
 
     def finish(self, status: str, message: str | None = None) -> None:
@@ -584,7 +587,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                                                s.drafting.max_drafts, s.drafting.rejudge_after_rewrite),
                                s.timeouts_seconds.drafting)
         if drafted is None:
-            flags.append(DataFlag(check="judge", level="warning", message=(
+            flags.append(DataFlag(check="judge", level="info", message=(
                 f"AI drafts: the Reporting Agent or Judge {_why(s.timeouts_seconds.drafting)}; code's conclusion "
                 "used (labelled as written by code)")))
             log.end(step, _status(), notes=[_why(s.timeouts_seconds.drafting)])
@@ -596,7 +599,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                                                   "revised": REVISED in chosen.issues}
             flags += drafted.flags
             text_log += drafted.log
-            log.end(step, "ok" if chosen else "failed", outputs={
+            log.end(step, "ok" if chosen else "fallback", outputs={
                 "chosen": chosen.draft.angle if chosen else None,
                 "scores": {x.draft.angle: x.score for x in drafted.scored}}, notes=drafted.log)
 

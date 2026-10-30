@@ -333,3 +333,14 @@ def test_a_missing_performance_fee_is_flagged_and_the_review_can_go_on(tmp_path)
     assert any(f["check"] == "performance_fee" and f["level"] == "warning" and f["message"] == PERFORMANCE_FEE_MISSING
                for f in built.flags)
     assert built.profile["performance_fee"] is None                  # recorded as not established, never as no
+
+
+def test_locate_finds_values_printed_in_other_forms():
+    pages = {"factsheet.pdf": ["Fund facts as at 30.09.26. OCF 0.070%. Valuation point 12:00 UK time.",
+                               "Share class: Accumulating. Launch date 3 March 2014."]}
+    assert locate(0.07, pages) == "factsheet.pdf, page 1"                  # trailing zero
+    assert locate("2026-09-30", pages) == "factsheet.pdf, page 1"          # 30.09.26
+    assert locate("2014-03-03", pages) == "factsheet.pdf, page 2"          # 3 March 2014
+    assert locate("midday", pages) == "factsheet.pdf, page 1"              # 12:00
+    assert locate("accumulation", pages) == "factsheet.pdf, page 2"        # Accumulating
+    assert locate(0.7, pages) == NOT_FOUND and locate("2026-09-29", pages) == NOT_FOUND

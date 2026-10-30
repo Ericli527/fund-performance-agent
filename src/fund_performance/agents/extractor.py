@@ -7,6 +7,7 @@ The agent never sets objective_type, benchmark_role, the horizon, the secondary 
 performance-fee justification: those come from the Mandate Agent or from a person.
 """
 from dataclasses import dataclass, field
+from datetime import date
 import re
 from typing import Literal
 from pydantic import BaseModel, ConfigDict
@@ -29,7 +30,9 @@ series: one entry per series and basis. basis "cumulative" for cumulative growth
 "annualised" for annualised rows. y1, y3, y5 = 1, 3 and 5-year figures; since_launch = the
 since-launch figure. pricing = "midday" or "market_close" if the document says so, else null.
 calendar_years: one entry per series and calendar year (year as "2025").
-discrete_12m: 12-month periods; end_date is the end of the period as YYYY-MM-DD.
+discrete_12m: 12-month periods; end_date is the END of the period as YYYY-MM-DD. Periods are often printed as a
+pair of dates ("30.09.2025 30.09.2026"): the end is the LATER date of the pair; the latest period usually ends on
+the factsheet date.
 risk: one entry per basis of the risk table ("nav" or "pnav" as labelled, else null).
 All returns and percentages as plain numbers in percent (17.5 for 17.5%).
 profile: the fund facts as printed. Dates as YYYY-MM-DD. ocf_pct as a number (0.06 for 0.06%).
@@ -122,6 +125,34 @@ def extractor_agent():
     return build_agent("Extractor Agent", INSTRUCTIONS, ExtractorOutput, "extractor")
 
 
+def start_labelled(out: ExtractorOutput) -> bool:
+    """ The 12-month periods were labelled by their start dates: the latest one should end on the factsheet date,
+    and every one ends exactly one year early (a pair of dates "30.09.2025 30.09.2026" read as its first date) """
+    ends = {w.end_date for w in out.discrete_12m}
+    if not ends or not out.as_of_date:
+        return False
+    try:
+        as_of = date.fromisoformat(out.as_of_date)
+        latest = max(date.fromisoformat(e) for e in ends)
+    except ValueError:
+        return False
+    return latest != as_of and _one_year_later(latest) == as_of
+
+
+def _one_year_later(day: date) -> date:
+    try:
+        return day.replace(year=day.year + 1)
+    except ValueError:                                   # 29 February
+        return day.replace(year=day.year + 1, day=28)
+
+
+def period_end(end_date: str, out: ExtractorOutput) -> str:
+    """ The period's end date, moved one year on when the periods were labelled by their start dates (code) """
+    if not start_labelled(out):
+        return end_date
+    return _one_year_later(date.fromisoformat(end_date)).isoformat()
+
+
 def to_factsheet(out: ExtractorOutput) -> FactsheetPerformance:
     """ Convert the agent's lists into factsheet_performance.json; raises ValueError if it does not validate """
     series, annualised = {}, {}
@@ -134,7 +165,7 @@ def to_factsheet(out: ExtractorOutput) -> FactsheetPerformance:
         years.setdefault(y.series, {})[y.year] = y.value
     windows: dict[str, dict[str, float]] = {}
     for w in out.discrete_12m:
-        windows.setdefault(w.series, {})[w.end_date] = w.value
+        windows.setdefault(w.series, {})[period_end(w.end_date, out)] = w.value
     risk = {r.basis: r.model_dump(exclude_none=True) for r in out.risk}
     data = {"as_of_date": out.as_of_date, "currency": out.currency, "series": series,
             "series_annualised": annualised, "calendar_years": years, "discrete_12m": windows,
@@ -174,9 +205,13 @@ def unfound_numbers(out: ExtractorOutput, text: str) -> list[str]:
     """ Extracted numbers that do not appear anywhere in the document text """
     found = _numbers_in(text)
     missing = []
-    def check(label: str, value):
-        if value is not None and not isinstance(value, bool) and round(float(value), 6) not in found \
-                and round(abs(float(value)), 6) not in found:
+    def check(label: str, value, millions: bool = False):
+        if value is None or isinstance(value, bool):
+            return
+        candidates = {round(float(value), 6), round(abs(float(value)), 6)}
+        if millions:                                     # GBP millions, printed in full ("GBP 21,762,581,005")
+            candidates.add(round(float(value) * 1_000_000, 0))
+        if not candidates & found:
             missing.append(f"{label} = {value}")
     for s in out.series:
         for period in ("y1", "y3", "y5", "since_launch"):
@@ -189,7 +224,7 @@ def unfound_numbers(out: ExtractorOutput, text: str) -> list[str]:
         for name, value in r.model_dump(exclude={"basis"}).items():
             check(f"risk ({r.basis}) {name}", value)
     for name in ("ocf_pct", "transaction_cost_pct", "fund_size_gbp_m", "risk_indicator"):
-        check(name, getattr(out.profile, name))
+        check(name, getattr(out.profile, name), millions=name == "fund_size_gbp_m")
     return missing
 
 
@@ -210,6 +245,10 @@ async def extract(document_text: str, run: RunFn | None = None) -> ExtractionRes
     draft, missing = profile_draft(out)
     flags = [DataFlag(check="extractor_agent", level="info",
                       message="Figures read by the Extractor Agent (ai_extracted): please verify against the documents")]
+    if start_labelled(out):
+        flags.append(DataFlag(check="extractor_agent", level="info", message=(
+            "12-month periods: the Extractor Agent labelled them by their start dates; code moved each to its end "
+            "date (the latest period ends on the factsheet date)")))
     unfound = unfound_numbers(out, document_text)
     if unfound:
         flags.append(DataFlag(check="extractor_agent", level="warning",

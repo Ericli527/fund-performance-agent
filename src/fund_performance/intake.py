@@ -99,8 +99,24 @@ class Built:
 
 def _number_pattern(value: float) -> re.Pattern:
     variants = {f"{abs(value):.2f}", f"{abs(value):.1f}", f"{abs(value):g}"}
-    alts = "|".join(re.escape(v) for v in sorted(variants, key=len, reverse=True))
+    # "0.07" is also printed "0.070" or "0.0700": trailing zeros after the decimal point are allowed
+    alts = "|".join(re.escape(v) + ("0*" if "." in v else "") for v in sorted(variants, key=len, reverse=True))
     return re.compile(rf"(?<![\d.])(?:{alts})(?![\d])")
+
+
+# Values the documents print in other words: a choice is found by any of its usual wordings
+WORDINGS = {"midday": ("midday", "12:00", "12.00", "noon"), "market_close": ("market close", "market-close", "close of"),
+            "accumulation": ("accumulat", " acc "), "income": ("income", "distribut")}
+
+
+def _date_variants(value: str) -> list[str]:
+    """ "2026-09-30" as factsheets print it: 30.09.26, 30.09.2026, 30/09/2026, 30 September 2026, 30 Sep 2026 """
+    try:
+        d = date.fromisoformat(value)
+    except ValueError:
+        return []
+    return [f"{d:%d.%m.%y}", f"{d:%d.%m.%Y}", f"{d:%d/%m/%Y}", f"{d:%d/%m/%y}", f"{d.day} {d:%B %Y}",
+            f"{d:%d %B %Y}", f"{d.day} {d:%b %Y}", f"{d:%d %b %Y}", value]
 
 
 def locate(value, pages: dict[str, list[str]]) -> str:
@@ -113,8 +129,9 @@ def locate(value, pages: dict[str, list[str]]) -> str:
         pattern = _number_pattern(float(value))
         match = lambda text: pattern.search(text.replace("−", "-"))          # noqa: E731
     else:
-        needle = str(value).strip().lower()[:40]
-        match = lambda text: needle and needle in " ".join(text.lower().split())  # noqa: E731
+        text_value = str(value).strip()
+        needles = [n.lower() for n in (_date_variants(text_value) or WORDINGS.get(text_value) or [text_value[:40]])]
+        match = lambda text: any(n and n in f" {' '.join(text.lower().split())} " for n in needles)  # noqa: E731
     for name, doc_pages in pages.items():
         for i, text in enumerate(doc_pages, start=1):
             if match(text):
@@ -351,7 +368,7 @@ def self_check(intake: dict) -> Built:
             built.flags.append({"check": "self_check", "level": "warning", "message": (
                 f"Read by the Extractor Agent but not found in the documents: {r['label']} = {r['value']}")})
         if r["source"] == UNCLEAR_HEDGING:
-            built.flags.append({"check": "self_check", "level": "warning", "message": (
+            built.flags.append({"check": "self_check", "level": "info", "message": (
                 "Currency hedging: the documents mention hedging but do not state it for this share class; "
                 "taken as not hedged")})
     fee = next((r for r in intake["rows"] if r["key"] == "performance_fee"), None)

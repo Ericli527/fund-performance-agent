@@ -125,7 +125,7 @@ async def _judge_once(facts, drafts, angles, focus, run_reporter, run_judge, max
     out.log.append("Drafts: " + "; ".join(f"{s.draft.angle} {s.score}/{MAX_SCORE}" for s in scored)
                    + (f" (Judge: {error})" if error else ""))
     if error:
-        out.flags.append(DataFlag(check="judge", level="warning", message=(
+        out.flags.append(DataFlag(check="judge", level="info", message=(
             f"AI drafts not judged: the Judge Agent gave no valid answer ({error[:150]}); code's conclusion used")))
         return out
     out.chosen = pick(scored, preferred, angles)
@@ -143,7 +143,7 @@ async def _judge_once(facts, drafts, angles, focus, run_reporter, run_judge, max
             return out
     if out.chosen is None:
         failed = sorted({CHECK_WORDS[k] for s in out.scored for k, v in s.checks.items() if not v})
-        out.flags.append(DataFlag(check="judge", level="warning", message=(
+        out.flags.append(DataFlag(check="judge", level="info", message=(
             f"{AI_DRAFTS_FAILED} ({', '.join(failed) or 'no valid draft'}); code's conclusion used")))
     return out
 
@@ -177,7 +177,7 @@ async def draft_and_judge(facts: dict, angles: list[str], focus: list[str], run_
         out.log.append(f"Drafts, round {attempt + 1}: " + "; ".join(
             f"{s.draft.angle} {s.score}/{MAX_SCORE}" for s in scored) + (f" (Judge: {error})" if error else ""))
         if error:
-            out.flags.append(DataFlag(check="judge", level="warning", message=(
+            out.flags.append(DataFlag(check="judge", level="info", message=(
                 f"AI drafts not judged: the Judge Agent gave no valid answer ({error[:150]}); code's conclusion used")))
             return out
         out.chosen = pick(scored, preferred, angles)
@@ -189,6 +189,6 @@ async def draft_and_judge(facts: dict, angles: list[str], focus: list[str], run_
                         s.draft.text, max_chars) for s in scored)))
     if out.chosen is None:
         failed = sorted({CHECK_WORDS[k] for s in out.scored for k, v in s.checks.items() if not v})
-        out.flags.append(DataFlag(check="judge", level="warning", message=(
+        out.flags.append(DataFlag(check="judge", level="info", message=(
             f"{AI_DRAFTS_FAILED} ({', '.join(failed) or 'no valid draft'}); code's conclusion used")))
     return out

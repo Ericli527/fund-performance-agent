@@ -174,3 +174,25 @@ def test_every_agent_call_of_a_review_runs_inside_one_trace(tmp_path, monkeypatc
     assert log["run"]["trace_id"] == trace_ids.pop()                     # and the run log names it
     set_tracing_disabled(True)
     set_trace_processors(processors)
+
+
+def test_a_draft_that_cannot_be_used_is_a_labelled_fallback_not_a_failure_or_warning(tmp_path):
+    runners = mocked()
+
+    def judge(prompt):
+        answer = judge_answer(prompt)
+        for d in answer["drafts"]:
+            d["supported_by_facts"], d["issues"] = False, ["unsupported claim"]
+        return answer
+    calls = {"n": 0}
+
+    def reporter(prompt):
+        calls["n"] += 1
+        return reporter_answer(prompt) if calls["n"] == 1 else {"text": "No verdict sentence."}   # fails code's checks
+    runners.judge, runners.reporter = FakeRunBy(judge), FakeRunBy(reporter)
+    lines = []
+    result = run(tmp_path, runners, on_step=lines.append)
+    drafts = next(s for s in json.loads((result.run_dir / "log.json").read_text())["steps"] if s["step"] == "drafts")
+    assert drafts["status"] == "fallback" and result.facts["suggested_conclusion"]["source"] == "code"
+    assert not [f for f in result.facts.get("data_flags", []) if f["check"] == "judge"]   # info only, not a warning
+    assert any("fallback after" in line and "code's conclusion is used" in line for line in lines)
