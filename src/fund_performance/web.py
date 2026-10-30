@@ -67,11 +67,12 @@ JSON_NEEDED = {"fund_profile": "fund_profile.json", "factsheet_performance": "fa
 OFFLINE_ENV = "FUND_REVIEW_OFFLINE"         # development and testing only: every review runs without AI
 
 PUBLIC_DATA = ("**Public data only.** Files and figures may be sent to OpenAI, which has data sharing on for this "
-               "service. Never upload confidential or client data.")
+               "service. Never upload confidential client data or internal company documents: use published "
+               "factsheets, KIDs and price histories only.")
 PUBLIC_DATA_HTML = PUBLIC_DATA.replace("**Public data only.**", "<b>Public data only.</b>")
 INSTRUCTIONS = """### How to use it
 1. **Try a demo:** pick Fidelity or Vanguard under **Try a demo**, then **Run Fund Review**. The Quick Demo is free, takes seconds and uses no AI.
-2. **Upload a real fund:** the fund price data and the factsheet. The KID and peer factsheets are optional, under **Additional options**.
+2. **Test a real fund:** download the fund's public price history (CSV or Excel), latest factsheet and KID from the provider's website. Upload the prices and the factsheet; add the KID (and any peer factsheets) under **Additional options**. The agents read them in 1–2 minutes and the page shows each step as it runs.
 3. **Let the agent check itself:** code checks every value the AI read against the documents and the prices, and flags anything it cannot confirm. Takes 1–2 minutes.
 4. **Read the evidence:** the suggested verdict, conclusion, ratings and charts; download the PDF.
 5. **Make the judgement:** the verdict is a suggestion. The analyst decides and signs the approval box."""
