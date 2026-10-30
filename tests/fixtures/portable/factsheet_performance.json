@@ -1,0 +1,46 @@
+{
+  "as_of_date": "2025-12-31",
+  "currency": "GBP",
+  "source": "factsheet",
+  "entered_by": "manual",
+  "series": {
+    "fund_nav": {
+      "1y": 8.1,
+      "3y": 29.0,
+      "5y": 60.0,
+      "basis": "cumulative",
+      "pricing": "midday"
+    },
+    "fund_pnav": {
+      "5y": 75.0,
+      "basis": "cumulative",
+      "pricing": "market_close"
+    },
+    "index": {
+      "5y": 76.0,
+      "basis": "cumulative",
+      "pricing": "market_close"
+    }
+  },
+  "series_annualised": {
+    "fund_pnav": {
+      "5y": 12.0,
+      "basis": "annualised"
+    },
+    "index": {
+      "5y": 12.1,
+      "basis": "annualised"
+    }
+  },
+  "risk_3y": {
+    "tracking_error": 0.02,
+    "beta": 1.0,
+    "r2": 1.0,
+    "fund_vol": 8.0,
+    "basis": "pnav"
+  },
+  "risk_3y_nav": {
+    "fund_vol": 9.0,
+    "basis": "nav"
+  }
+}
