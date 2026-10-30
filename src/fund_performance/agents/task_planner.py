@@ -10,8 +10,9 @@ Offline, or when the agent gives no valid answer, code uses the default plan (ev
 from dataclasses import asdict, dataclass, field
 import json
 from typing import Literal
+from agents import Agent
 from pydantic import BaseModel, ConfigDict
-from fund_performance.agents.base import RunFn, build_agent, run_structured
+from fund_performance.agents.base import RunFn, model_kwargs, run_structured
 from fund_performance.models import DataFlag, FundProfile
 
 ReportType = Literal["quarterly_review", "fee_question", "performance_question", "mandate_question"]
@@ -85,8 +86,9 @@ def checked_plan(out: PlanOutput) -> TaskPlan:
                     out.reason.strip()[:200], "planner")
 
 
-def task_planner_agent():
-    return build_agent("Task Planner Agent", INSTRUCTIONS, PlanOutput, "task_planner")
+def task_planner_agent() -> Agent:
+    return Agent(name="Task Planner Agent", instructions=INSTRUCTIONS, output_type=PlanOutput,
+                 **model_kwargs("task_planner"))
 
 
 def planner_input(question: str, profile: FundProfile) -> str:

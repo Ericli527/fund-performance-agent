@@ -116,13 +116,14 @@ def test_everything_from_the_old_results_is_still_on_the_page():
     d = data(findings=["Finding one."], actions=["Action one."],
              flags=[{"check": "x", "level": "warning", "message": "Gap in prices"},
                     {"check": "i", "level": "info", "message": "Risk-free rate 0"}])
-    d["facts"]["drafts"] = [{"angle": "board", "score": 6, "max_score": 6, "checks": {"figures_match": True},
-                             "chosen": True, "issues": [], "rewritten": False, "text": "x"}]
+    d["facts"]["drafts"] = [{"angle": "board", "score": 5, "max_score": 5, "checks": {"figures_match": True},
+                             "decision": "pass", "reason": "Accurate and clear.", "chosen": True, "issues": [],
+                             "rewritten": False, "text": "x"}]
     page = text(dashboard_html(d, "analyst") + technical_html(d))
     facts = d["facts"]
     for expected in ([facts["fund"]["fund_name"], "30 Sep 2026", "Satisfied", facts["suggested_conclusion"]["text"],
                       "Finding one.", "Action one.", "Warning: Gap in prices", "Risk-free rate 0", "Plan (",
-                      "Drafts and the Judge's checklist", "6 of 6"]
+                      "Draft and the Judge's review", "approved by the Judge", "Accurate and clear."]
                      + list(d["reasons"].values()) + facts["judgement_points"] + facts["manager_questions"]):
         assert expected in page, expected
 

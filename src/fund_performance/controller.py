@@ -162,8 +162,8 @@ class RunLog:
             word = {"ok": f"done ({record.seconds:.1f} s)", "skipped": "skipped",
                     "fallback": f"fallback after {record.seconds:.1f} s"}.get(status, status)
             why = f": {record.notes[0]}" if status not in ("ok", "fallback") and record.notes else (
-                ": the draft did not pass the Judge, so code's conclusion is used (labelled as such)"
-                if status == "fallback" else "")
+                f": code's conclusion is used (labelled as such); {record.notes[0]}" if status == "fallback"
+                and record.notes else "")
             self.on_step(f"{OUTCOME_ICON.get(status, '•')} Step {stage} of {TOTAL_STAGES} · {who} · {word}{why}")
 
     def finish(self, status: str, message: str | None = None) -> None:
@@ -577,7 +577,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         text_log += narrative.log
     step.outputs |= {"source": narrative.source, "sources": narrative.sources}
 
-    # 8b. Reporting Agents (one draft per angle) and the Judge Agent; code checks, scores and picks
+    # 8b. Reporting Agent (one draft per angle) and the Judge Agent's review; code checks and decides
     step = log.start("drafts", ["facts JSON"] + [f"angle: {a}" for a in plan.angles], announce=not offline)
     if offline:
         log.end(step, "skipped", notes=["offline run: code's conclusion"])
@@ -600,8 +600,9 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
             flags += drafted.flags
             text_log += drafted.log
             log.end(step, "ok" if chosen else "fallback", outputs={
-                "chosen": chosen.draft.angle if chosen else None,
-                "scores": {x.draft.angle: x.score for x in drafted.scored}}, notes=drafted.log)
+                "chosen": chosen.draft.angle if chosen else None, "reason": drafted.reason,
+                "decisions": {x.draft.angle: x.decision for x in drafted.scored}},
+                notes=([] if chosen else [f"Judge: {drafted.reason}"]) + drafted.log)
 
     # 9. Report (its sources list comes from this log)
     step = log.start("report")

@@ -22,7 +22,7 @@ from fund_performance.presentation import (NAVY, NOT_AVAILABLE, QUESTIONS, RATIN
                                            conclusion_origin, issue_groups, risk_measures, UNRELIABLE,
                                            UNRELIABLE_SOURCE, UNRELIABLE_WHY, assessment_meaning, comparison_invalid,
                                            report_action)
-from fund_performance.report import ANGLE_WORDS, REPORT_TYPE_WORDS, plain_note
+from fund_performance.report import ANGLE_WORDS, JUDGE_WORDS, REPORT_TYPE_WORDS, plain_note
 
 AUDIENCES = ("analyst", "management")
 
@@ -286,11 +286,11 @@ def technical_html(data: dict) -> str:
                  f"{escape(', '.join(plan.get('focus', [])[:2]))}.</p>" + _list(plan.get("tasks", [])))
     drafts = facts.get("drafts") or []
     if drafts:
-        rows = "".join(f"<tr><td class='l'>{escape(ANGLE_WORDS.get(d['angle'], d['angle']))}</td><td>{d['score']} of "
-                       f"{d['max_score']}</td><td class='l'>{escape(', '.join(k.replace('_', ' ') for k, v in d['checks'].items() if not v) or 'none')}"
+        rows = "".join(f"<tr><td class='l'>{escape(ANGLE_WORDS.get(d['angle'], d['angle']))}</td><td class='l'>"
+                       f"{escape(JUDGE_WORDS.get(d.get('decision'), ''))}</td><td class='l'>{escape(d.get('reason', ''))}"
                        f"</td><td>{'Chosen' if d['chosen'] else ''}</td></tr>" for d in drafts)
-        body += ("<p><b>Drafts and the Judge's checklist</b></p><table class='fp-table'><tr><th class='l'>Draft for</th>"
-                 f"<th>Checks passed</th><th class='l'>Failed</th><th></th></tr>{rows}</table>")
+        body += ("<p><b>Draft and the Judge's review</b></p><table class='fp-table'><tr><th class='l'>Draft for</th>"
+                 f"<th class='l'>Judge's decision</th><th class='l'>Reason</th><th></th></tr>{rows}</table>")
     info = [f["message"] for f in data.get("flags", []) if f["level"] == "info"]
     if info:
         body += "<p><b>For the record (info flags)</b></p>" + _list(info, "fp-small")

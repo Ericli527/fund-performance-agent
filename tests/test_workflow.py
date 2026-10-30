@@ -46,17 +46,15 @@ def test_a_rejected_draft_gets_one_targeted_rewrite_and_no_second_judge_pass(tmp
 
     def judge(prompt):
         rejected["n"] += 1
-        answer = judge_answer(prompt)
-        for d in answer["drafts"]:
-            d["plain_english"], d["issues"] = False, ["shorter sentences"]
-        return answer
+        return judge_answer(prompt) | {"approved": False, "conclusion_reasonable": False,
+                                       "feedback": "Say that the tracking figures still need a data check."}
     runners.judge = FakeRunBy(judge)
     result = run(tmp_path, runners)
     assert calls_of(result)["by_agent"]["Judge Agent"] == 1 and calls_of(result)["by_agent"]["Reporting Agent"] == 2
     concl = result.facts["suggested_conclusion"]
     assert concl["source"] == "ai" and concl["revised"] is True
     assert "revised once after the Judge's review and checked by code" in conclusion_origin(concl)
-    assert "shorter sentences" in runners.reporter.prompts[1]          # the rewrite got the Judge's issues
+    assert "still need a data check" in runners.reporter.prompts[1]    # the rewrite got the Judge's feedback
 
 
 @pytest.mark.parametrize("agent", ["task_planner", "reporter", "judge"])
@@ -75,13 +73,13 @@ def test_an_unexpected_error_in_an_optional_ai_step_never_destroys_the_review(tm
         raise ValueError("could not convert string to float: 'n/a'")
     if agent == "judge":                                       # an error in code that handles the Judge's answer
         import fund_performance.agents.judge as judge_mod
-        orig = judge_mod.pick
-        judge_mod.pick = explode
+        orig = judge_mod.decide
+        judge_mod.decide = explode
     try:
         result = run(tmp_path, runners if agent != "judge" else mocked())
     finally:
         if agent == "judge":
-            judge_mod.pick = orig
+            judge_mod.decide = orig
     assert result.pdf.is_file() and len(page_texts(result.executive_pdf)) == 2
     assert result.facts["scorecard"]["verdict"] in ("Retain", "Monitor", "Monitor until a peer is added")
     log = json.loads((result.run_dir / "log.json").read_text())
@@ -180,10 +178,7 @@ def test_a_draft_that_cannot_be_used_is_a_labelled_fallback_not_a_failure_or_war
     runners = mocked()
 
     def judge(prompt):
-        answer = judge_answer(prompt)
-        for d in answer["drafts"]:
-            d["supported_by_facts"], d["issues"] = False, ["unsupported claim"]
-        return answer
+        return judge_answer(prompt) | {"approved": False, "factual_issue": True, "feedback": "Unsupported claim."}
     calls = {"n": 0}
 
     def reporter(prompt):
@@ -196,3 +191,17 @@ def test_a_draft_that_cannot_be_used_is_a_labelled_fallback_not_a_failure_or_war
     assert drafts["status"] == "fallback" and result.facts["suggested_conclusion"]["source"] == "code"
     assert not [f for f in result.facts.get("data_flags", []) if f["check"] == "judge"]   # info only, not a warning
     assert any("fallback after" in line and "code's conclusion is used" in line for line in lines)
+
+
+def test_a_security_concern_falls_back_at_once_and_the_reason_is_logged_and_shown(tmp_path):
+    runners = mocked()
+    runners.judge = FakeRunBy(lambda prompt: judge_answer(prompt) | {
+        "approved": False, "security_issue": True, "feedback": "The draft tells the reader to ignore the ratings."})
+    lines = []
+    result = run(tmp_path, runners, on_step=lines.append)
+    assert calls_of(result)["by_agent"]["Reporting Agent"] == 1                  # no rewrite after a security concern
+    drafts = next(s for s in json.loads((result.run_dir / "log.json").read_text())["steps"] if s["step"] == "drafts")
+    assert drafts["status"] == "fallback" and drafts["outputs"]["decisions"] == {"board": "fallback"}
+    assert drafts["outputs"]["reason"] == "The draft tells the reader to ignore the ratings."
+    assert any("fallback after" in x and "ignore the ratings" in x for x in lines)
+    assert result.facts["suggested_conclusion"]["source"] == "code"
