@@ -90,3 +90,10 @@ def _no_real_ai_calls(request, monkeypatch):
     async def blocked(agent, prompt):
         raise AgentsException(f"no real AI calls in unit tests ({agent.name})")
     monkeypatch.setattr(base, "run_with_fresh_client", blocked)
+
+
+@pytest.fixture(autouse=True)
+def _ai_switch_on(monkeypatch):
+    """ Stage 6B: AI runs are off unless AI_RUNS_ENABLED is true. Tests of the AI paths (mocked) run with it on, and
+    no server login (PORT unset); tests of the switch itself turn it off """
+    monkeypatch.setenv("AI_RUNS_ENABLED", "true")

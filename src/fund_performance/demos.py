@@ -52,6 +52,9 @@ class Demo:
     order: int = 99
     ticker: str | None = None
     return_check_tolerance_pp: float = 0.05
+    fallback: bool = False          # shown only where no real-fund demo is installed (the made-up fund)
+    location: str | None = None     # a folder in the repository (public, made-up data) instead of the private one
+    notice: str = NOTICE
 
     def path(self, relative: str) -> Path:
         return self.folder / relative
@@ -85,8 +88,16 @@ def load_demos(library: Path | None = None, data: Path | None = None) -> list[De
     for path in sorted(library.glob("*.yaml")):
         m = yaml.safe_load(path.read_text(encoding="utf-8"))
         m["review_date"] = date.fromisoformat(str(m["review_date"]))
-        demos.append(Demo(folder=data / m["id"], **m))
+        folder = ROOT / m["location"] if m.get("location") else data / m["id"]
+        demos.append(Demo(folder=folder, **m))
     return sorted(demos, key=lambda d: (d.order, d.id))
+
+
+def shown_demos(demos: list[Demo] | None = None) -> list[Demo]:
+    """ The demos the page offers: the real ones whose private files are installed, else the made-up fallback """
+    demos = load_demos() if demos is None else demos
+    real = [d for d in demos if d.available and not d.fallback]
+    return real or [d for d in demos if d.available and d.fallback]
 
 
 def find_demo(demo_id: str, demos: list[Demo] | None = None) -> Demo | None:

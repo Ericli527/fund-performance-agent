@@ -171,5 +171,9 @@ Instructions for Claude Code in this project. The build specification is
   difference cannot be ruled out; the fund's NAV is compared as published). Never guessed.
 - Ratings waiting for figures the documents do not give are "missing evidence" in the wording (evidence quality
   "Evidence missing", "obtain the evidence missing for ..."), not a data check; ratings and verdict codes unchanged.
+- Deployment safety (Stage 6B): AI runs only when `AI_RUNS_ENABLED` is true (default off) and, on a server, the
+  login is set; the login alone never turns AI on. Each review gets its own folder (`<time>-<random id>`); on a server
+  run folders and Gradio's cached files older than `web.keep_runs_hours` (24) are deleted. Where no real-fund demo is
+  installed (Render), the made-up fund is the Quick Demo (`demo/library/sample_index_fund.yaml`, fallback).
 - Executive summary: AI drafts over `drafting.max_summary_chars` (700) fail code's checks; if page 1 still overflows
   with an AI summary, the Executive Report uses code's summary (info flag) and the Detailed Report keeps the AI text.

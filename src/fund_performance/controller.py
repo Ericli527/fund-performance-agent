@@ -26,6 +26,7 @@ from functools import partial
 import json
 from pathlib import Path
 import time
+import uuid
 from fund_performance.agents.analyst import AI_TEXT_UNAVAILABLE, Narrative, template, write_narrative
 from fund_performance.agents.base import RunFn
 from fund_performance.agents.evaluator import review
@@ -151,6 +152,19 @@ class RunResult:
     executive_pdf: Path | None = None          # report_executive.pdf (2 pages), or None if it could not fit
 
 
+def new_run_dir(root: Path) -> Path:
+    """ A new folder for one review: the time (readable, sortable) plus a random id, created exclusively, so two
+    reviews that start in the same second never share a folder or a report """
+    root.mkdir(parents=True, exist_ok=True)
+    while True:
+        path = root / f"{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}"
+        try:
+            path.mkdir()
+            return path
+        except FileExistsError:
+            continue
+
+
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
@@ -188,8 +202,7 @@ async def run_review(folder: Path, question: str = DEFAULT_QUESTION, out_root: P
     s = settings or load_settings()
     r = runners or Runners()
     folder = Path(folder)
-    run_dir = Path(out_root or Path(__file__).resolve().parents[2] / "runs") / datetime.now().strftime("%Y%m%d-%H%M%S")
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_dir = new_run_dir(Path(out_root or Path(__file__).resolve().parents[2] / "runs"))
     log = RunLog(folder, question, offline, on_step)
     text_log: list[str] = []
     try:

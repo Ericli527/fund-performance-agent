@@ -60,6 +60,9 @@ them the cards are not shown, and the example input files (a made-up fund) are u
 `APP_USERNAME` and `APP_PASSWORD` set in `.env`, the page asks for them before it opens; on your own computer you
 can leave them blank (no login).
 
+AI is off unless `AI_RUNS_ENABLED=true` (in `.env` locally; on a server the login must be set as well). Without
+the private demo files (as on Render), the demo is a made-up fund.
+
 For a real fund: add the price file and the factsheet (KID and peer factsheets optional; for an S&P 500 fund the
 approved peers are used) and click **Run Fund Review**; code checks every value the agent read. The KID, peer
 factsheets and JSON inputs are under **Additional options**. When the review finishes, the page shows a dashboard (assessment, evidence quality, headline figures, items

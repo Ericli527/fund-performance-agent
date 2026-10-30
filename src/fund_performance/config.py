@@ -237,6 +237,9 @@ class EmailSettings(_Section):
 class WebSettings(_Section):
     max_ai_runs_per_day: int = Field(gt=0)
     max_ai_runs_at_once: int = Field(gt=0)
+    keep_runs_hours: float = Field(default=24, gt=0)        # on a server, run folders older than this are deleted
+    cache_cleanup_minutes: int = Field(default=60, gt=0)    # how often Gradio's file cache is cleaned (files older
+                                                            # than keep_runs_hours go)
 
 
 class StatisticsSettings(_Section):

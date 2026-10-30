@@ -345,8 +345,11 @@ def test_code_decides_offline_runs_not_the_user(monkeypatch, tmp_path):
 
 def test_the_made_up_fund_is_not_a_demo_card_but_still_the_example_files():
     """ Stage 4B: the made-up fund stays in CI and the example input files, not in the demo selector """
+    from fund_performance.demos import shown_demos
     cards = [c for c in _blocks(gr.Radio) if "fp-demo-cards" in (c.elem_classes or [])]
-    assert cards and all("Sample World" not in label for label, _ in cards[0].choices)
+    real = [d for d in shown_demos() if not d.fallback]
+    if real:                          # real demos installed: the made-up fund is not a card (on a server it is)
+        assert cards and all("Sample World" not in label for label, _ in cards[0].choices)
     assert "example_files/prices.csv" in zipfile.ZipFile(example_zip()).namelist()
 
 

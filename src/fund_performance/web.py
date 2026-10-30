@@ -40,7 +40,7 @@ from fund_performance.dashboard import dashboard_data, dashboard_html, technical
 from fund_performance.controller import DEFAULT_QUESTION, RunResult, RunStopped, run_review
 from fund_performance.plain import verdict_meaning, verdict_name
 from fund_performance.presentation import MISSING_MEANING, download_copy, missing_evidence
-from fund_performance.demos import NOTICE, Demo, find_demo, load_demos, matching_demo, return_checks
+from fund_performance.demos import Demo, find_demo, matching_demo, return_checks, shown_demos
 from fund_performance.report import ANGLE_WORDS, REPORT_TYPE_WORDS
 from fund_performance.intake import read_documents, self_check, write_inputs
 
@@ -55,8 +55,8 @@ RATING_WORDS = {"GREEN": "🟢 Green", "AMBER": "🟠 Amber", "RED": "🔴 Red",
 
 LIMIT_REACHED = "Today’s AI run limit is reached. You can still run the offline demo."
 BUSY = "A review is already running, please try again in 2 minutes."
-AI_OFF = ("AI runs are switched off on this server, because no login is set up (APP_USERNAME and APP_PASSWORD). "
-          "You can still run the offline demo.")
+AI_OFF = ("AI runs are switched off here (AI_RUNS_ENABLED, and on a server the login APP_USERNAME and APP_PASSWORD). "
+          "You can still run the Quick Demo and other reviews that need no AI.")
 NEEDS_AI = ("Reading the documents uses AI, which is switched off in this setup. Click **Use Demo Files**, or add "
             "JSON files under **Additional options**.")
 NEED_FILES = "Please add the fund price data and the fund factsheet (both required), or pick a demo under **Try a demo**."
@@ -192,9 +192,32 @@ def on_server() -> bool:
     return "PORT" in os.environ
 
 
+AI_ENV = "AI_RUNS_ENABLED"
+
+
+def ai_enabled_by_setting() -> bool:
+    """ The independent AI switch: AI runs happen only when AI_RUNS_ENABLED is true (off when unset) """
+    return os.getenv(AI_ENV, "").strip().lower() in ("1", "true", "yes")
+
+
 def ai_switched_off() -> bool:
-    """ On a server, AI runs need the login to be set up; on your own computer they never do """
-    return on_server() and login() is None
+    """ AI runs need the switch on, and on a server also the login; offline reviews never need either """
+    return not ai_enabled_by_setting() or (on_server() and login() is None)
+
+
+def prune_runs(root: Path, keep_hours: float, now: float | None = None) -> list[str]:
+    """ Delete review folders older than keep_hours (reports and logs are kept for downloading, not stored). Only
+    folders named like a run are touched; the AI-run counter file stays """
+    import re as _re
+    import time as _time
+    now = now or _time.time()
+    gone = []
+    for path in root.glob("*") if root.is_dir() else []:
+        if path.is_dir() and _re.fullmatch(r"\d{8}-\d{6}(-[0-9a-f]{8})?", path.name) and \
+                now - path.stat().st_mtime > keep_hours * 3600:
+            shutil.rmtree(path, ignore_errors=True)
+            gone.append(path.name)
+    return gone
 
 
 class AiLimits:
@@ -333,6 +356,8 @@ Progress = Callable[[str], None]
 
 async def _run_controller(folder: Path, question: str, offline: bool, on_step: Progress | None, out_root: Path,
                           runner, intake: dict | None = None) -> Outcome:
+    if on_server():                                   # a server keeps reports for a day, not for ever
+        prune_runs(out_root, load_settings().web.keep_runs_hours)
     try:
         result = await runner(folder, (question or "").strip() or DEFAULT_QUESTION, out_root, offline,
                               intake=intake, on_step=on_step)
@@ -485,7 +510,7 @@ def demo_info_html(demo: Demo, mode: str) -> str:
     notes = "".join(f"<li>{escape(x)}</li>" for x in demo.disclosures)
     ticker = f" · {escape(demo.ticker)}" if demo.ticker else ""
     return f"""<div class='fp-card fp-demo-info'>
-<div class='fp-kicker'>{'Live AI Demo' if mode == LIVE else 'Quick Demo'} · historical data</div>
+<div class='fp-kicker'>{'Live AI Demo' if mode == LIVE else 'Quick Demo'} · {'made-up data' if demo.fallback else 'historical data'}</div>
 <h3>{escape(demo.fund_name)}</h3>
 <p>{escape(demo.share_class)} · ISIN {escape(demo.isin)}{ticker} · Benchmark: {escape(demo.benchmark)}<br/>
 Peer: {escape(demo.peer)}<br/>Review date: {demo.review_date:%d %b %Y}</p>
@@ -496,17 +521,17 @@ Peer: {escape(demo.peer)}<br/>Review date: {demo.review_date:%d %b %Y}</p>
 {rows}</table></details>
 <details><summary>Disclosures</summary><ul>{notes}</ul></details>
 <details><summary>Sources</summary><ul>{sources}</ul></details>
-<p class='fp-help'>{escape(NOTICE)}</p></div>"""
+<p class='fp-help'>{escape(demo.notice)}</p></div>"""
 
 
 def demo_banner(price, json_files, picked: str | None, mode: str) -> dict | None:
     """ What the results say about a demo run: which demo, and whether its evidence was prevalidated or read by AI """
     if (demo := matching_demo(price, json_files)):
-        return {"label": "Quick Demo", "fund": demo.fund_name, "evidence": EVIDENCE_WORDS[QUICK], "notice": NOTICE}
+        return {"label": "Quick Demo", "fund": demo.fund_name, "evidence": EVIDENCE_WORDS[QUICK], "notice": demo.notice}
     demo = find_demo(picked) if picked else None
     if demo and mode == LIVE and demo.available and _one(price) and \
             Path(_one(price)).read_bytes() == demo.live_files["price"].read_bytes():
-        return {"label": "Live AI Demo", "fund": demo.fund_name, "evidence": EVIDENCE_WORDS[LIVE], "notice": NOTICE}
+        return {"label": "Live AI Demo", "fund": demo.fund_name, "evidence": EVIDENCE_WORDS[LIVE], "notice": demo.notice}
     return None
 
 
@@ -678,7 +703,9 @@ def _card(value: str) -> str:
 
 def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
     limits = limits or AiLimits(load_settings().web)
-    with gr.Blocks(title="Fund Performance Review") as ui:
+    web_settings = load_settings().web
+    cleanup = (web_settings.cache_cleanup_minutes * 60, int(web_settings.keep_runs_hours * 3600))
+    with gr.Blocks(title="Fund Performance Review", delete_cache=cleanup) as ui:
         gr.HTML("<div class='fp-header'><h1>Fund Performance Review</h1>"
                 "<p>Clear insights for better investment oversight.</p></div>")
 
@@ -693,7 +720,7 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                               info="Edit it if you like. The agents use it to decide what to focus on.")
 
         # C. Try a demo (real funds; the made-up fund stays in the tests and the example files)
-        demos = [d for d in load_demos() if d.available]
+        demos = shown_demos()
         gr.HTML("<h2>Try a demo</h2>", elem_classes="fp-section-title")
         demo_choice = gr.Radio([(demo_card(d), d.id) for d in demos], value=None, show_label=False, container=False,
                                elem_classes=["fp-cards", "fp-demo-cards"], label="Try a demo", visible=bool(demos))

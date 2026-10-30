@@ -79,6 +79,12 @@ Data: `data/` is gitignored (public repo). Test 1 files live in `data/test1/`, a
 - Missing evidence worded as such (Vanguard: no TE, beta, R²): verdict stays "Pending data check".
 - Executive reliability: `drafting.max_summary_chars` + `executive.build_executive_reliably` fallback.
 
+## 3d. Stage 6B: deployment safety (done, not merged or deployed)
+
+- Unique run folders; `AI_RUNS_ENABLED` switch (default off); clean-up of old runs and Gradio's cache on servers;
+  made-up fund as the Quick Demo where no real demo is installed; `render.yaml` adds PYTHON_VERSION and the switch.
+- `tests/test_security.py`: concurrency, the switch, clean-up, and the login/file access on a real local server.
+
 ## 4. Known issues and test findings
 
 - CI added in Stage 2.5 (`.github/workflows/tests.yml`, skip audit). 57 test functions still need `data/test1/` and skip without it, including

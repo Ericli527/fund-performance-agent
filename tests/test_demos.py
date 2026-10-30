@@ -42,7 +42,7 @@ def library(tmp_path, monkeypatch):
 
 def test_the_committed_manifests_hold_metadata_only():
     """ The two real demos are described in the repository without any figure from their documents """
-    demos = load_demos(data=Path("/nonexistent"))
+    demos = [d for d in load_demos(data=Path("/nonexistent")) if not d.fallback]
     assert [d.id for d in demos] == ["fidelity_us", "vanguard_global"]
     fidelity, vanguard = demos
     assert (fidelity.isin, vanguard.isin, vanguard.ticker) == ("GB00BJS8SH10", "GB00BD3RZ582", "VAFTGAG")
@@ -138,14 +138,30 @@ def test_a_live_demo_respects_the_ai_run_limit(library, tmp_path):
     assert out.message == web.LIMIT_REACHED and out.data is None
 
 
-def test_with_no_demo_files_the_page_says_so_and_still_works(tmp_path, monkeypatch):
+def test_without_the_private_files_the_made_up_fund_is_the_quick_demo(tmp_path, monkeypatch):
+    """ Stage 6B: on a server without the real-fund files (Render), the made-up fund is offered instead; it runs
+    offline and its notice says the figures are invented """
     from fund_performance import web
     monkeypatch.setenv(lib.DATA_ENV, str(tmp_path / "nothing"))
     ui = web.build_ui()
-    texts = " ".join(str(getattr(c, "value", "") or "") for c in ui.blocks.values())
-    assert "The real-fund demos need their private data files" in texts
     cards = next(c for c in ui.blocks.values() if "fp-demo-cards" in (getattr(c, "elem_classes", None) or []))
-    assert cards.choices == [] and cards.visible is False
+    assert [v for _, v in cards.choices] == ["sample_index_fund"] and cards.visible is True
+    on_demo = next(f for f in ui.fns.values() if f.name == "on_demo").fn
+    price, _, _, _, json_files, _, info = on_demo("sample_index_fund", web.QUICK)
+    assert web.run_offline(price, json_files) and "made-up data" in info and "every figure is invented" in info
+    banner = web.demo_banner(price, json_files, "sample_index_fund", web.QUICK)
+    assert banner["label"] == "Quick Demo" and "invented" in banner["notice"]
+
+
+def test_the_made_up_fund_is_hidden_where_real_demos_are_installed(library):
+    from fund_performance.demos import shown_demos
+    sample = lib.Demo(**{**MANIFEST, "id": "made_up", "fallback": True, "review_date": lib.date(2026, 9, 30)},
+                      folder=library / "sample")
+    assert [d.id for d in shown_demos(load_demos() + [sample])] == ["sample"]
+    assert [d.id for d in shown_demos([sample])] == ["made_up"]
+    with_none = lib.Demo(**{**MANIFEST, "id": "none", "fallback": True, "review_date": lib.date(2026, 9, 30)},
+                         folder=library / "missing")
+    assert shown_demos([with_none]) == []                              # nothing installed at all: no cards
 
 
 # The real demos: private files, local only
