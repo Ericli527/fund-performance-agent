@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import date
 import pandas as pd
 from fund_performance import checks
-from fund_performance.calc import CALENDAR_YEARS_SHOWN, PERIODS, CalcResult, annualise, hit_rate_index
+from fund_performance.calc import CALENDAR_YEARS_SHOWN, PERIODS, CalcResult, annualise, cumulate, hit_rate_index
 from fund_performance.checks import ComparisonBasis
 from fund_performance.config import Thresholds
 from fund_performance.models import DataFlag, FactsheetPerformance, Figure, FundProfile
@@ -84,9 +84,21 @@ def _returns(out: ReportedFigures, calculated: CalcResult, calc_series: dict[str
         reported = factsheet.series.get(name) if factsheet else None
         annual = factsheet.series_annualised.get(name) if factsheet else None
         calc_prefix = next((k for k, v in calc_series.items() if v == name), None)
+        annualised_input = reported is not None and reported.basis == "annualised"
         for n in PERIODS:
             period = f"{n}y"
             official = getattr(reported, f"y{n}") if reported else None
+            if official is not None and annualised_input:
+                # The input says these are a-year figures: kept as such; the cumulative one is derived by code
+                if annual is None or getattr(annual, f"y{n}") is None:
+                    out.figures[f"{name}.ann.{period}"] = _factsheet(official, "%", period)
+                out.figures[f"{name}.cum.{period}"] = (_factsheet(official, "%", period) if n == 1 else
+                                                      _derived(cumulate(official, n), "%", period))
+                if n > 1:
+                    out.log.append(f"{name} {period} cumulative derived from the factsheet's annualised {official}%")
+                if annual is not None and getattr(annual, f"y{n}") is not None:
+                    out.figures[f"{name}.ann.{period}"] = _factsheet(getattr(annual, f"y{n}"), "%", period)
+                continue
             if official is not None:
                 out.figures[f"{name}.cum.{period}"] = _factsheet(official, "%", period)
             elif calc_prefix and f"{calc_prefix}.cum.{period}" in calculated.figures:
@@ -132,6 +144,12 @@ def _since_launch(out: ReportedFigures, calculated: CalcResult, profile: FundPro
         calc_prefix = next((k for k, v in calc_series.items() if v == name), None)
         calc_cum = calculated.figures.get(f"{calc_prefix}.since_launch.cum") if calc_prefix else None
         calc_ann = calculated.figures.get(f"{calc_prefix}.since_launch.ann") if calc_prefix else None
+        if reported is not None and reported.since_launch is not None and reported.basis == "annualised":
+            if annual is None or annual.since_launch is None:            # kept as a-year; never read as cumulative
+                out.figures[f"{name}.since_launch.ann"] = _factsheet(reported.since_launch, "%", period)
+            if calc_cum is not None:
+                out.figures[f"{name}.since_launch.cum"] = calc_cum
+            continue
         if reported is not None and reported.since_launch is not None:
             out.figures[f"{name}.since_launch.cum"] = _factsheet(reported.since_launch, "%", period)
             if calc_cum is not None and name == PRICE_SERIES:
@@ -175,13 +193,15 @@ def _risk(out: ReportedFigures, calculated: CalcResult, factsheet: FactsheetPerf
 def _cross_check(out: ReportedFigures, calculated: CalcResult, factsheet: FactsheetPerformance,
                  tolerance_pp: float) -> list[DataFlag]:
     """ Calculated 1/3/5y NAV returns vs the factsheet NAV returns (spec 3.4); the factsheet wins """
-    values = {f"{n}y": calculated.figures[f"fund.cum.{n}y"].exact for n in PERIODS
-              if f"fund.cum.{n}y" in calculated.figures}
     reported = factsheet.series[PRICE_SERIES]
+    kind = "ann" if reported.basis == "annualised" else "cum"      # compare like with like: the input's own basis
+    values = {f"{n}y": calculated.figures[f"fund.{kind}.{n}y"].exact for n in PERIODS
+              if f"fund.{kind}.{n}y" in calculated.figures}
     for period, value in values.items():
         official = getattr(reported, f"y{_years(period)}")
         if official is not None:
-            out.log.append(f"Cross-check {period} NAV return: calculated {value:.2f}% vs factsheet {official:.1f}% "
+            what = "NAV return a year" if kind == "ann" else "NAV return"
+            out.log.append(f"Cross-check {period} {what}: calculated {value:.2f}% vs factsheet {official:.1f}% "
                            f"(difference {value - official:+.2f} pp)")
     return checks.cross_check(values, reported, tolerance_pp)
 

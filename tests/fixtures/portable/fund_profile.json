@@ -1,0 +1,19 @@
+{
+  "fund_name": "Synthetic Arithmetic Tracker",
+  "isin": "XX0000000001",
+  "share_class": "A Acc",
+  "currency": "GBP",
+  "distribution": "accumulation",
+  "hedged": false,
+  "launch_date": "2020-12-31",
+  "objective_text": "Made-up test fund. Aims to track the Sample World Index over 5 years or more.",
+  "objective_type": "index_tracker",
+  "benchmark_name": "Synthetic Index",
+  "benchmark_role": "target",
+  "time_horizon_years": 5,
+  "secondary_objective": null,
+  "ocf_pct": 0.1,
+  "performance_fee": false,
+  "pricing_point": "midday",
+  "as_of_date": "2025-12-31"
+}

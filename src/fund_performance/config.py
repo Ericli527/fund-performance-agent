@@ -221,6 +221,8 @@ class Timeouts(_Section):
 class DraftingSettings(_Section):
     """ Reporting Agents and the Judge: how many times the drafts may be sent back """
     max_rewrites: int = Field(default=1, ge=0)
+    # The longest summary a draft may have: it is Executive page 1's summary (measured to fit with room to spare)
+    max_summary_chars: int = Field(default=700, ge=200)
 
 
 class EmailSettings(_Section):
@@ -229,11 +231,15 @@ class EmailSettings(_Section):
     enabled: bool
     sender: str
     subject: str
+    attachment: Literal["executive", "detailed"] = "executive"   # which PDF is attached (stage 3)
 
 
 class WebSettings(_Section):
     max_ai_runs_per_day: int = Field(gt=0)
     max_ai_runs_at_once: int = Field(gt=0)
+    keep_runs_hours: float = Field(default=24, gt=0)        # on a server, run folders older than this are deleted
+    cache_cleanup_minutes: int = Field(default=60, gt=0)    # how often Gradio's file cache is cleaned (files older
+                                                            # than keep_runs_hours go)
 
 
 class StatisticsSettings(_Section):

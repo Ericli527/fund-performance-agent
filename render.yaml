@@ -8,7 +8,7 @@ services:
     branch: main
     buildCommand: pip install -r requirements.txt
     startCommand: python app.py          # app.py adds src/ to the path and starts the Gradio page on $PORT
-    healthCheckPath: /
+    healthCheckPath: /                   # 200 even with the login on (the login page); nothing else is served without it
     autoDeploy: true
     envVars:
       # Secrets: Render asks for these when you create the Blueprint; they never go in the repo
@@ -18,6 +18,8 @@ services:
         sync: false
       - key: APP_PASSWORD
         sync: false
+      - key: AI_RUNS_ENABLED             # the independent AI switch: off unless "true" (set it in the dashboard after
+        sync: false                      # the offline smoke test; a dashboard value is never overwritten by this file)
       - key: RESEND_API_KEY              # optional: email the report (off by default in config/settings.yaml)
         sync: false
       - key: EMAIL_FROM
@@ -25,6 +27,8 @@ services:
       - key: EMAIL_TO                    # comma-separated recipients; kept out of the public repository
         sync: false
       # Plain settings
+      - key: PYTHON_VERSION              # the version tested (Python 3.13)
+        value: "3.13.16"
       - key: MAX_CONCURRENT_RUNS
         value: "2"
       - key: GRADIO_ANALYTICS_ENABLED

@@ -26,6 +26,7 @@ from functools import partial
 import json
 from pathlib import Path
 import time
+import uuid
 from fund_performance.agents.analyst import AI_TEXT_UNAVAILABLE, Narrative, template, write_narrative
 from fund_performance.agents.base import RunFn
 from fund_performance.agents.evaluator import review
@@ -47,7 +48,9 @@ from fund_performance.io import detect_file_type, read_document, read_json, read
 from fund_performance.mandate import decision_path
 from fund_performance.models import DataFlag, FactsheetPerformance, FundProfile, Peer
 from fund_performance.peers import approved_peers, compare_peers
+from fund_performance.presentation import report_filename
 from fund_performance.precedence import apply_precedence
+from fund_performance.executive import build_executive_reliably
 from fund_performance.report import ReportInputs, ReportLayoutError, build_report, plain_reason
 from fund_performance.scorecard import score
 
@@ -139,12 +142,27 @@ class RunLog:
 
 @dataclass
 class RunResult:
-    pdf: Path | None
+    pdf: Path | None                           # the Detailed Report, report.pdf (kept for compatibility)
     run_dir: Path
     log: RunLog
     narrative: Narrative | None = None
     facts: dict | None = None
     reasons: dict[str, str] = field(default_factory=dict)    # one-line plain reason per rating, as on report page 1
+    flags: list[DataFlag] = field(default_factory=list)       # every flag of the run, as in the report's appendix
+    executive_pdf: Path | None = None          # report_executive.pdf (2 pages), or None if it could not fit
+
+
+def new_run_dir(root: Path) -> Path:
+    """ A new folder for one review: the time (readable, sortable) plus a random id, created exclusively, so two
+    reviews that start in the same second never share a folder or a report """
+    root.mkdir(parents=True, exist_ok=True)
+    while True:
+        path = root / f"{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}"
+        try:
+            path.mkdir()
+            return path
+        except FileExistsError:
+            continue
 
 
 def _now() -> str:
@@ -184,8 +202,7 @@ async def run_review(folder: Path, question: str = DEFAULT_QUESTION, out_root: P
     s = settings or load_settings()
     r = runners or Runners()
     folder = Path(folder)
-    run_dir = Path(out_root or Path(__file__).resolve().parents[2] / "runs") / datetime.now().strftime("%Y%m%d-%H%M%S")
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_dir = new_run_dir(Path(out_root or Path(__file__).resolve().parents[2] / "runs"))
     log = RunLog(folder, question, offline, on_step)
     text_log: list[str] = []
     try:
@@ -456,7 +473,8 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         log.end(step, "skipped", notes=["offline run: code's conclusion"])
     else:
         drafted = await _timed(draft_and_judge(facts, plan.angles, plan.focus, r.reporter, r.judge,
-                                               s.drafting.max_rewrites), s.timeouts_seconds.drafting)
+                                               s.drafting.max_rewrites, s.drafting.max_summary_chars),
+                               s.timeouts_seconds.drafting)
         if drafted is None:
             flags.append(DataFlag(check="judge", level="warning", message=(
                 f"AI drafts not finished within {s.timeouts_seconds.drafting:g} seconds; code's conclusion used")))
@@ -482,18 +500,36 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                           input_files=input_files, web_sources=web_sources,
                           entered_by_user=[r["label"] for r in (intake or {}).get("rows", [])
                                            if r.get("status") == "Entered by user"])
+    # The Executive Report (2 pages) first: if it cannot fit without losing information it is not produced, and a
+    # warning says so in the Detailed Report, which keeps everything
+    executive_pdf = None
+    try:
+        executive_pdf, fallback = build_executive_reliably(inputs, run_dir)
+        if fallback:
+            flags.append(fallback)
+            inputs.flags = flags
+    except ReportLayoutError as e:
+        flags.append(DataFlag(check="report_layout", level="warning", message=(
+            f"Executive Report not produced: {e}. Nothing was cut; the Detailed Report has every section.")))
+        inputs.flags = flags
     try:
         pdf = build_report(inputs, run_dir)
     except ReportLayoutError as e:
         _stop(log, step, f"Run stopped: the report does not fit its pages ({e})")
     (run_dir / "facts.json").write_text(json.dumps(facts, indent=1, ensure_ascii=False), encoding="utf-8")
     text_log += [f"[{f.level}] {f.message}" for f in flags]
-    log.end(step, outputs={"pdf": str(pdf)})
+    log.end(step, outputs={"pdf": str(pdf), "executive_pdf": str(executive_pdf) if executive_pdf else None})
 
     # 10. Email (plain code, off by default; recipients from EMAIL_TO only)
     step = log.start("email")
-    line = send_report(pdf, s.email, profile.fund_name, f"{profile.as_of_date:%d %b %Y}",
-                       **({"post": r.email_post} if r.email_post else {}))
+    attach = executive_pdf if s.email.attachment == "executive" and executive_pdf else pdf
+    kind = "Executive" if attach == executive_pdf else "Detailed"
+    line = send_report(attach, s.email, profile.fund_name, f"{profile.as_of_date:%d %b %Y}",
+                       **({"post": r.email_post} if r.email_post else {}),
+                       filename=report_filename(profile.fund_name, kind, profile.as_of_date))
+    if s.email.attachment == "executive" and executive_pdf is None and s.email.enabled:
+        line += " (Detailed Report attached: the Executive Report was not produced)"
     text_log.append(line)
     log.end(step, "ok" if line.startswith("Email: sent") else "failed" if s.email.enabled else "skipped", notes=[line])
-    return RunResult(pdf, run_dir, log, narrative, facts, {name: plain_reason(inputs, name) for name in card.pillars})
+    return RunResult(pdf, run_dir, log, narrative, facts, {name: plain_reason(inputs, name) for name in card.pillars},
+                     list({(f.level, f.message): f for f in flags}.values()), executive_pdf)

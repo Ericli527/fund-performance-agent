@@ -10,7 +10,8 @@ import pytest
 from fund_performance.config import WebSettings
 from fund_performance.controller import RunStopped
 from fund_performance.web import (AI_OFF, BUSY, FILES_TABLE, HOW_END, INSTRUCTIONS, LIMIT_REACHED, NEED_FILES, NEEDS_AI,
-                                  PUBLIC_DATA, AiLimits, build_ui, demo_files, example_zip,
+                                  PUBLIC_DATA_HTML, AUDIENCE_HELP, REVIEW_TYPES, UI_QUESTION, AiLimits,
+                                  build_ui, demo_files, example_zip, file_status, question_for, run_offline,
                                   prepare_inputs, start_review, summary_markdown, with_progress)
 from test_intake import extractor_answer, MANDATE, peer_answer
 
@@ -209,13 +210,147 @@ def test_progress_messages_come_before_the_result():
 def test_the_page_has_the_instructions_files_table_and_how_it_works():
     ui = build_ui()
     texts = " ".join(str(getattr(c, "value", "") or "") for c in ui.blocks.values())
-    assert PUBLIC_DATA in texts and INSTRUCTIONS in texts and FILES_TABLE in texts and HOW_END in texts
-    for step in ("Try the demo", "Upload a real fund", "Let the agent check itself", "Read the evidence",
+    assert PUBLIC_DATA_HTML in texts and INSTRUCTIONS in texts and FILES_TABLE in texts and HOW_END in texts
+    for step in ("Try a demo", "Upload a real fund", "Let the agent check itself", "Read the evidence",
                  "Make the judgement"):
         assert step in INSTRUCTIONS
     accordions = {c.label: c.open for c in ui.blocks.values() if isinstance(c, gr.Accordion)}
-    assert accordions == {"How the agent works": True, "Advanced: JSON files (skip the AI reading step)": False}
-    assert any(isinstance(c, gr.DownloadButton) and c.label == "Download example files" for c in ui.blocks.values())
+    assert accordions == {"Additional options": False, "Help & methodology": False, "Technical details": False}
+    assert any(isinstance(c, gr.DownloadButton) and c.label == "Download example input files (a made-up fund)"
+               for c in ui.blocks.values())
+
+
+# The redesigned input page (UX stage 1)
+def _blocks(kind):
+    return [c for c in build_ui().blocks.values() if isinstance(c, kind)]
+
+
+def test_the_page_follows_the_new_layout():
+    ui = build_ui()
+    texts = " ".join(str(getattr(c, "value", "") or "") for c in ui.blocks.values())
+    assert "<h1>Fund Performance Review</h1>" in texts and "Clear insights for better investment oversight." in texts
+    assert "What would you like to analyse?" in texts and "Try a demo" in texts and "Fund documents" in texts
+    buttons = {c.value: c.variant for c in _blocks(gr.Button) if not isinstance(c, gr.DownloadButton)}
+    assert buttons == {"Run Fund Review": "primary"}           # Stage 4B: demos are picked from cards
+    files = [c.label for c in _blocks(gr.File)]
+    for label in ("Fund price data · CSV or Excel · Required", "Fund factsheet · PDF or Word · Required"):
+        assert label in files
+    assert any(label.startswith("KID or prospectus") for label in files)
+    assert any(label.startswith("Peer fund factsheets") for label in files)
+    assert any(label.startswith("Advanced: JSON inputs") for label in files)
+    question = next(c for c in _blocks(gr.Textbox) if c.label == "Review question")
+    assert question.value == "Is this fund meeting its investment objective, and are its fees justified?"
+
+
+def test_there_is_no_offline_switch_on_the_page():
+    assert _blocks(gr.Checkbox) == []
+    texts = " ".join(str(getattr(c, "value", "") or "") + str(getattr(c, "label", "") or "") for c in build_ui().blocks.values())
+    assert "Offline" not in texts and "untick" not in texts.lower()
+
+
+def test_review_type_cards_fill_in_the_question_and_keep_the_users_own():
+    radio = next(c for c in _blocks(gr.Radio) if c.value == "overall")
+    assert [v for _, v in radio.choices] == ["overall", "performance", "fees_value"]
+    assert [label.split("\n")[0][3:] for label, _ in radio.choices] == ["Overall Review", "Performance", "Fees & Value"]
+    assert question_for("fees_value", UI_QUESTION) == REVIEW_TYPES["fees_value"][2]
+    assert question_for("performance", REVIEW_TYPES["fees_value"][2]) == REVIEW_TYPES["performance"][2]
+    assert question_for("performance", "My own question?") == "My own question?"
+    assert question_for("overall", "") == UI_QUESTION
+
+
+def test_the_audience_changes_the_view_not_the_review(tmp_path, limits):
+    radio = next(c for c in _blocks(gr.Radio) if c.value == "analyst")
+    assert [label for label, _ in radio.choices] == ["Investment Analyst", "Management"]
+    assert "The figures, ratings and PDF are the same for both." in AUDIENCE_HELP
+    import inspect
+    assert "audience" not in inspect.signature(start_review).parameters         # never reaches the review
+
+
+# The results dashboard (UX stage 2)
+def _fn(ui, name):
+    return next(f for f in ui.fns.values() if f.name == name).fn
+
+
+def _descendants(block):
+    for child in getattr(block, "children", []) or []:
+        yield child
+        yield from _descendants(child)
+
+
+def test_results_are_hidden_until_a_review_finishes():
+    from fund_performance.web import DETAILED_LABEL, EXECUTIVE_LABEL
+    ui = build_ui()
+    results = next(c for c in ui.blocks.values() if isinstance(c, gr.Column) and
+                   any(isinstance(x, gr.DownloadButton) and x.label == DETAILED_LABEL for x in _descendants(c)))
+    assert results.visible is False
+    labels = {x.label for x in _descendants(results) if isinstance(x, gr.DownloadButton)}
+    assert labels == {DETAILED_LABEL, EXECUTIVE_LABEL}                     # both reports offered after a review
+    assert not any(isinstance(c, gr.File) and c.label == "PDF report" for c in ui.blocks.values())
+    accordions = {c.label for c in ui.blocks.values() if isinstance(c, gr.Accordion)}
+    assert "Technical details" in accordions
+
+
+def test_a_finished_demo_fills_the_dashboard_and_the_audience_redraws_it(tmp_path, limits):
+    d = demo()
+    outcome = asyncio.run(start_review("q", d["price"], d["factsheet"], None, [d["peer"]], d["json"], True, limits,
+                                       out_root=tmp_path))
+    assert outcome.data and outcome.data["facts"]["scorecard"]["verdict"] == "Retain"
+    # Downloads carry readable names; the run folder keeps report.pdf and report_executive.pdf
+    assert outcome.pdf.endswith("/download/Sample_World_Index_Fund_A_Acc_Detailed_Report_2026-09-30.pdf")
+    assert outcome.executive.endswith("/download/Sample_World_Index_Fund_A_Acc_Executive_Report_2026-09-30.pdf")
+    run_dir = Path(outcome.pdf).parents[1]
+    assert (run_dir / "report.pdf").is_file() and (run_dir / "report_executive.pdf").is_file()
+    data = outcome.data | {"pdf": outcome.pdf, "executive_pdf": outcome.executive}
+    redraw = _fn(build_ui(), "on_audience")
+    (analyst, a_detailed, a_exec), (management, m_detailed, m_exec) = redraw(data, "analyst"), redraw(data, "management")
+    assert "Investment Analyst view" in analyst and "Key decisions" in management
+    assert (a_detailed["variant"], a_exec["variant"]) == ("primary", "secondary")      # analyst: Detailed first
+    assert (m_detailed["variant"], m_exec["variant"]) == ("secondary", "primary")      # management: Executive first
+    assert a_exec["value"] == m_exec["value"] == outcome.executive                      # same files, no new run
+    assert all(isinstance(x, dict) for x in redraw(None, "management"))               # nothing to redraw before a run
+
+
+def test_without_an_executive_report_the_detailed_one_stays_primary():
+    from fund_performance.web import download_buttons
+    detailed, executive = download_buttons({"pdf": "report.pdf", "executive_pdf": None}, "management")
+    assert detailed["variant"] == "primary" and executive["visible"] is False
+
+
+def test_a_refused_run_shows_its_message_and_no_dashboard(tmp_path, limits):
+    outcome = asyncio.run(start_review("q", None, None, None, None, [], False, limits))
+    assert outcome.message == NEED_FILES and outcome.data is None
+
+
+def test_each_upload_says_what_it_got():
+    d = demo()
+    assert file_status(d["price"], [".csv", ".xlsx", ".xls"], "CSV or Excel").startswith("<span class='fp-ok'>✓ prices.csv · ")
+    bad = file_status(d["factsheet"], [".csv", ".xlsx", ".xls"], "CSV or Excel")
+    assert "✗ factsheet.pdf: not a CSV or Excel file" in bad and "fp-bad" in bad
+    assert file_status(None, [".pdf"], "PDF or Word") == ""
+    two = file_status([d["factsheet"], d["peer"]], [".pdf", ".docx"], "PDF or Word")
+    assert two.count("✓") == 2
+
+
+def test_code_decides_offline_runs_not_the_user(monkeypatch, tmp_path):
+    monkeypatch.delenv("FUND_REVIEW_OFFLINE", raising=False)
+    d = demo()
+    assert run_offline(d["price"], d["json"]) is True                    # the unchanged demo: deterministic, no AI
+    changed = tmp_path / "fund_profile.json"
+    changed.write_text(Path(d["json"][0]).read_text().replace("Sample", "Other"))
+    assert run_offline(d["price"], [str(changed)] + d["json"][1:]) is False
+    assert run_offline(d["price"], []) is False                          # documents: the AI workflow
+    monkeypatch.setenv("FUND_REVIEW_OFFLINE", "1")                       # development and testing only
+    assert run_offline(d["price"], []) is True
+
+
+def test_the_made_up_fund_is_not_a_demo_card_but_still_the_example_files():
+    """ Stage 4B: the made-up fund stays in CI and the example input files, not in the demo selector """
+    from fund_performance.demos import shown_demos
+    cards = [c for c in _blocks(gr.Radio) if "fp-demo-cards" in (c.elem_classes or [])]
+    real = [d for d in shown_demos() if not d.fallback]
+    if real:                          # real demos installed: the made-up fund is not a card (on a server it is)
+        assert cards and all("Sample World" not in label for label, _ in cards[0].choices)
+    assert "example_files/prices.csv" in zipfile.ZipFile(example_zip()).namelist()
 
 
 def test_the_page_events_are_not_in_the_public_api():

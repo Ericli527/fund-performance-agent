@@ -19,6 +19,7 @@ from fund_performance.models import FactsheetPerformance, FundProfile, Peer
 FileType = Literal["prices", "factsheet_performance", "fund_profile", "peer", "document", "unknown"]
 Frequency = Literal["daily", "monthly", "unknown"]
 
+CURRENCY = r"^(?:[£$€]|(?:GBP|USD|EUR|GBX)\s*)|\s*(?:GBP|USD|EUR|GBX)$"   # a currency before or after a number
 MISSING_TOKENS = {"", "-", "–", "—", "n/a", "na", "nan", "null"}
 DATE_ALIASES = ["date", "as_of", "as_of_date", "price_date", "valuation_date"]
 NAV_ALIASES = ["nav", "price", "nav_price", "fund_nav", "close"]
@@ -27,7 +28,7 @@ DOCUMENT_SUFFIXES = {".pdf", ".docx", ".txt", ".md"}
 TABLE_SUFFIXES = {".csv", ".xlsx", ".xls"}
 
 # Day/month order, named as people write them
-DMY, MDY, YMD = "DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD"
+DMY, MDY, YMD, DMON = "DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD", "DD Mon YYYY"
 
 
 class AmbiguousDatesError(ValueError):
@@ -68,8 +69,30 @@ def detect_frequency(dates: pd.Series) -> Frequency:
 
 
 def _one_per_month_in_order(dates: pd.Series) -> bool:
+    """ One price per month, in date order: oldest first or newest first (as downloads often are), the same direction
+    through the whole file, and every step a month apart (20 to 40 days). A reading that needs anything looser is not
+    accepted, so an ambiguous file is never resolved by a lucky fit: it stops and asks instead """
+    if len(dates) < 2:
+        return False
     months = dates.dt.year * 12 + dates.dt.month
-    return bool(dates.is_monotonic_increasing and months.is_unique)
+    steps = dates.diff().dropna().dt.days.abs()
+    return bool((dates.is_monotonic_increasing or dates.is_monotonic_decreasing) and months.is_unique
+                and steps.between(20, 40).all() and months.diff().dropna().abs().eq(1).all())
+
+
+MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov",
+                                      "dec"), start=1)}
+
+
+def _named_month_dates(text: pd.Series) -> pd.Series:
+    """ "30 Sept 2026", "08-Nov-2016" or "1 March 2020": the month is read from its first three letters, so the
+    four-letter "Sept" some providers use is not lost """
+    parts = text.str.extract(r"^(\d{1,2})[ \-]([A-Za-z]{3,9})\.?[ \-](\d{4})$")
+    months = parts[1].str[:3].str.lower().map(MONTHS)
+    if months.isna().any():
+        raise ValueError(f"Month names not recognised, e.g. {text[months.isna()].head(3).tolist()}")
+    return pd.to_datetime(pd.DataFrame({"year": parts[2].astype(int), "month": months.astype(int),
+                                        "day": parts[0].astype(int)}))
 
 
 def parse_dates(values: pd.Series) -> tuple[pd.Series, str, str]:
@@ -77,6 +100,8 @@ def parse_dates(values: pd.Series) -> tuple[pd.Series, str, str]:
     text = values.astype(str).str.strip()
     if text.str.fullmatch(r"\d{4}-\d{1,2}-\d{1,2}").all():
         return pd.to_datetime(text, format="%Y-%m-%d"), YMD, "ISO dates"
+    if text.str.fullmatch(r"\d{1,2}[ \-][A-Za-z]{3,9}\.?[ \-]\d{4}").all():
+        return _named_month_dates(text), DMON, "month names, so the day and month cannot be confused"
     parts = text.str.extract(r"^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2}|\d{4})$")
     if parts.isna().any().any():
         bad = text[parts.isna().any(axis=1)].head(3).tolist()
@@ -102,7 +127,8 @@ def parse_dates(values: pd.Series) -> tuple[pd.Series, str, str]:
             fits[name] = dates
     if len(fits) == 1:
         name, dates = fits.popitem()
-        return dates, name, "only this order gives one price per month in date order"
+        order = "oldest first" if dates.is_monotonic_increasing else "newest first"
+        return dates, name, f"only this order gives one price per month in date order ({order})"
     raise AmbiguousDatesError(
         "Cannot tell whether dates are DD/MM/YYYY or MM/DD/YYYY: "
         + ("both orders fit" if fits else "neither order gives one price per month")
@@ -112,6 +138,8 @@ def parse_dates(values: pd.Series) -> tuple[pd.Series, str, str]:
 def _to_number(values: pd.Series, column: str) -> pd.Series:
     """ Numbers as floats; '-' and blanks become missing; anything else unreadable stops the run """
     text = values.astype(str).str.strip()
+    text = text.str.replace(CURRENCY, "", regex=True).str.strip()
+    text = text.where(~text.str.fullmatch(r"-?\d{1,3}(,\d{3})+(\.\d+)?"), text.str.replace(",", "", regex=False))
     missing = text.str.lower().isin(MISSING_TOKENS) | values.isna()
     numbers = pd.to_numeric(text.where(~missing), errors="coerce")
     bad = text[numbers.isna() & ~missing]
@@ -121,7 +149,9 @@ def _to_number(values: pd.Series, column: str) -> pd.Series:
 
 
 def _find(columns: list[str], aliases: list[str]) -> str | None:
-    return next((c for c in aliases if c in columns), None)
+    """ The first column named as an alias; else one that adds a currency or unit, e.g. "NAV (GBP)" -> nav_gbp """
+    exact = next((c for c in aliases if c in columns), None)
+    return exact or next((c for a in aliases for c in columns if c.startswith(f"{a}_")), None)
 
 
 def _read_csv(path: Path, log: list[str]) -> pd.DataFrame:
@@ -129,7 +159,10 @@ def _read_csv(path: Path, log: list[str]) -> pd.DataFrame:
     (pandas would otherwise shift every column by one, or drop the field without saying so.) """
     with open(path, newline="", encoding="utf-8-sig") as f:
         rows = [r for r in csv.reader(f) if any(cell.strip() for cell in r)]
-    header, body = rows[0], rows[1:]
+    start = _header_row(rows)
+    if start:
+        log.append(f"Skipped {start} title row(s) above the column names")
+    header, body = rows[start], rows[start + 1:]
     while header and not header[-1].strip():
         header = header[:-1]
     width = len(header)
@@ -141,10 +174,31 @@ def _read_csv(path: Path, log: list[str]) -> pd.DataFrame:
     return pd.DataFrame([(r + [""] * width)[:width] for r in body], columns=header, dtype=str)
 
 
+def _header_row(rows: list[list]) -> int:
+    """ The row with the column names: the first (of the first 30) naming a date and a NAV column; 0 if none does """
+    for i, row in enumerate(rows[:30]):
+        names = [_normalise(c) for c in row if c is not None and str(c).strip() and str(c) != "nan"]
+        if _find(names, DATE_ALIASES) and _find(names, NAV_ALIASES):
+            return i
+    return 0
+
+
+def _read_excel(path: Path, log: list[str]) -> pd.DataFrame:
+    """ The first sheet; title rows above the column names and empty rows are skipped (and logged) """
+    raw = pd.read_excel(path, header=None, dtype=object)
+    rows = raw.where(raw.notna(), None).values.tolist()
+    start = _header_row(rows)
+    if start:
+        log.append(f"Skipped {start} title row(s) above the column names")
+    header = ["" if c is None else str(c) for c in rows[start]]
+    body = [r for r in rows[start + 1:] if any(c is not None and str(c).strip() for c in r)]
+    return pd.DataFrame(body, columns=header, dtype=object)
+
+
 def _read_table(path: Path, log: list[str] | None = None) -> pd.DataFrame:
     if path.suffix.lower() == ".csv":
         return _read_csv(path, log if log is not None else [])
-    return pd.read_excel(path, dtype=object)
+    return _read_excel(path, log if log is not None else [])
 
 
 def read_prices(path: str | Path) -> PriceData:
@@ -226,9 +280,15 @@ def read_json(path: str | Path) -> FactsheetPerformance | FundProfile | Peer:
 
 
 def read_peers(path: str | Path) -> list[Peer]:
-    """ peer.json: one peer, or a list of peers """
+    """ peer.json: one peer, or a list of peers. A peer with a minimum investment but no share class type gets its
+    type from code, as an uploaded factsheet does (£1m or more: institutional) """
+    from fund_performance.peers import investor_type
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    return [Peer.model_validate(d) for d in (data if isinstance(data, list) else [data])]
+    peers = [Peer.model_validate(d) for d in (data if isinstance(data, list) else [data])]
+    for peer in peers:
+        if peer.investor_type is None and peer.minimum_investment:
+            peer.investor_type = investor_type(peer.share_class, peer.minimum_investment)
+    return peers
 
 
 def read_document(path: str | Path) -> str:

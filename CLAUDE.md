@@ -34,8 +34,9 @@ Instructions for Claude Code in this project. The build specification is
   `risk_3y_nav`. Risk figures carry `basis` (`nav`/`pnav`) and the two sets are never mixed.
 - Prices before `launch_date` get an info flag "pre-launch (likely simulated)" and are left out of
   risk statistics and since-launch figures. Repeated prices in that period are info, not warning.
-- Ambiguous dates: use the format that gives one price per month in date order; if both formats
-  do, stop and ask the user.
+- Ambiguous dates: use the format that gives one price per month in date order (oldest or newest first, one
+  direction, every step a month apart, with an info flag naming the order chosen and the dates); if both formats
+  do, or neither does, stop and ask the user.
 - Benchmark-relative risk (TE, beta, R², information ratio, alpha) is calculated only from an index
   price series. Without one: "not available: no index price series", factsheet figures reported with
   `source: "factsheet"`, never approximated.
@@ -91,8 +92,10 @@ Instructions for Claude Code in this project. The build specification is
   market. v2: MCP Fetch for agent-chosen URLs.
 - Risk-free rate: 0 for v1, with a flag. Prefer the factsheet Sharpe ratios where supplied.
 - Charts are built in step 9 with the report.
-- Report (step 9, updated): 4 main pages plus an appendix, 5 pages at most. Over 5: shorten the appendix first; a main page running over is an
-  error. Saved to `runs/<timestamp>/` with `facts.json` and `run_log.txt`; `--offline` skips AI steps.
+- Reports (step 9, redesigned in UX stage 3): `report_executive.pdf` (exactly 2 pages: Overview; Comparisons and
+  decision) and `report.pdf` (Detailed: the executive pages + Appendices A-D, free length). Material warnings are
+  never shortened; executive content that cannot fit is a layout error (the run warns and keeps the Detailed
+  Report), never a silent cut. Saved to `runs/<timestamp>/` with `facts.json` and `run_log.txt`; `--offline` skips AI steps.
   Plain wording (decision path, fee note) is for the report only; facts.json and the Analyst keep the codes.
 - Emailing the report is a plain code function (`emailer.py`, not an AI agent), off by default
   (`config/settings.yaml`). Resend over HTTPS, as in the old app (RESEND_API_KEY, EMAIL_FROM in .env).
@@ -118,6 +121,16 @@ Instructions for Claude Code in this project. The build specification is
   Main route = documents (price file + factsheet, optional KID and peer factsheets) read by the Extractor and
   Mandate agents, then run straight on: no confirmation table. Code checks itself (`intake.self_check`): values
   not found in the documents are warnings; a required value nobody could read stops the run. JSON = "Advanced".
+- Input page (UX stage 1): review-type cards (fill in the question only; all ratings always calculated), review
+  question, two required uploads with check lines, audience (recorded only for now), "Additional options" (KID,
+  peers, JSON), "Run Fund Review" + "Use Demo Files", public-data note, "Help & methodology". No Offline switch:
+  the unchanged demo runs offline; `FUND_REVIEW_OFFLINE=1` for development. `tests/test_golden_facts.py` guards
+  every figure and rating (baselines: tests/golden/, data/test1/golden/).
+- Results dashboard (UX stage 2, `dashboard.py`, presentation only): investment assessment and evidence quality
+  shown separately (evidence from code's checks and all run flags; never "verified"; "Not final" while data issues
+  remain); 3 headline figures from the facts with period/unit/source ("Not available", never zero); items needing
+  attention; four ratings; collapsible detail; Technical details (plan, drafts, Judge, info flags, log.json). The
+  audience changes the view only (Analyst: detail open; Management: key decisions). RunResult carries every flag.
 - Peers: approved peers per benchmark in `config/peers.yaml` (factsheets in `data/peers/`, found by ISIN), used when
   no peer is given. Peer checks in `peers.py`: returns only in the fund's currency (else fees only, info flag);
   noon vs noon NAV, market close vs PNAV; share class type and minimum investment (institutional note);
@@ -126,8 +139,16 @@ Instructions for Claude Code in this project. The build specification is
   facts.json and the scorecard). Page 1: suggested conclusion, points for judgement (max 4) and questions for the
   manager (2-4), all code-built (`conclusion.py`); the conclusion passes the number/label/rating checks. Approval
   box has "Analyst's comments" and "If you disagree with the suggested verdict, why?".
-- Report: 5 pages (Summary; Evidence dashboard; Mandate and performance; Value, fees and AoV; Appendix).
-  Dashboard is code only (`evidence.py`, charts): t-test level and min points in `config/settings.yaml`.
+- Shared presentation helpers (`presentation.py`): headline figures, evidence quality, caveat, risk rows, chart
+  choice, insufficient evidence vs performance concerns; used by the dashboard and both PDFs (consistency tested).
+  Email attaches the Executive Report by default (`email.attachment: detailed` for report.pdf). Downloads and attachments are
+  named `{Fund_Name}_{Executive|Detailed}_Report_{YYYY-MM-DD}.pdf`; the run folder keeps report.pdf/report_executive.pdf.
+  A blocking currency or benchmark mismatch (`presentation.comparison_invalid`) replaces the executive chart with an
+  explanation, and no fund-vs-index figure is presented as reliable: findings, points and questions drop the data-note
+  comparisons; dashboard and Executive Report replace the gap, index and tracking figures with "Not reliable"; the
+  Detailed Report keeps them for audit, marked "not reliable: data check". The web page offers
+  both PDFs: Analyst view = Detailed primary, Management view = Executive primary (no rerun). Evidence dashboard
+  (Appendix A) is code only (`evidence.py`, charts): t-test level and min points in `config/settings.yaml`.
 - Agent team (spec 8.6): Task Planner (menu choices only; code keeps all four ratings; default plan offline or on
   failure), Reporting Agents (one draft per angle: board, analyst, manager meeting; facts only; must end with code's
   verdict sentence; code's checks), Judge (5 checklist items true/false + preferred; no text, numbers or ratings).
@@ -135,3 +156,24 @@ Instructions for Claude Code in this project. The build specification is
   else code's conclusion with a flag. Unit tests can never reach OpenAI (conftest blocks the real client).
 - Value and Fees reasons (findings, report, page) give the peer return gap and the fee gap (`plain.py`,
   from the figures the scorecard keeps in `Pillar.values`).
+- Real-fund demo library (Stage 4B, `demos.py`): metadata in `demo/library/*.yaml` (no document figures); inputs and
+  documents private in `data/demos/<id>/` (gitignored, never on Render); a demo with missing files is not shown.
+  "Try a demo" cards (Fidelity + HSBC Acc C peer; Vanguard FTSE Global All Cap): Quick Demo (default) = prevalidated
+  quick inputs, offline; Live AI Demo only where AI runs are on (key, login on servers), within the run limit. The
+  made-up fund stays for CI and the example input files. Code checks each demo's NAV 1/3/5y returns against the
+  factsheet (0.05 pp). Golden baselines in `data/demos/golden/`.
+- Price files: title rows above the column names, month names ("Sept"), currency-formatted values and newest-first
+  order are read; prices after the review date are left out with an info flag (`review_date_cutoff`).
+- Return basis: a `series` declared `annualised` stays annualised (its cumulative return derived by code; an
+  annualised since-launch figure is never read as cumulative); the cross-check compares like with like.
+- Peer `benchmark_name` (optional): a different variant from the fund's gets an information note only.
+- Fund profile `pricing_point`: must be given; `null` = not stated in the documents (info flag: a timing
+  difference cannot be ruled out; the fund's NAV is compared as published). Never guessed.
+- Ratings waiting for figures the documents do not give are "missing evidence" in the wording (evidence quality
+  "Evidence missing", "obtain the evidence missing for ..."), not a data check; ratings and verdict codes unchanged.
+- Deployment safety (Stage 6B): AI runs only when `AI_RUNS_ENABLED` is true (default off) and, on a server, the
+  login is set; the login alone never turns AI on. Each review gets its own folder (`<time>-<random id>`); on a server
+  run folders and Gradio's cached files older than `web.keep_runs_hours` (24) are deleted. Where no real-fund demo is
+  installed (Render), the made-up fund is the Quick Demo (`demo/library/sample_index_fund.yaml`, fallback).
+- Executive summary: AI drafts over `drafting.max_summary_chars` (700) fail code's checks; if page 1 still overflows
+  with an AI summary, the Executive Report uses code's summary (info flag) and the Detailed Report keeps the AI text.

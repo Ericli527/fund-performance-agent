@@ -252,3 +252,21 @@ def test_live_test1_analyst():
     print("Log:", *result.log, sep="\n  ")
     print("Flags:", [f.message for f in result.flags])
     assert result.source == "ai"
+
+
+def test_a_mismatch_draws_no_finding_from_the_fund_vs_index_comparison():
+    """ Stage 3.1 follow-up: data-note findings rest on the comparison, so they are replaced by one sentence, and
+    the shared data issue of Mandate and Performance is said once """
+    import json
+    from pathlib import Path
+    from fund_performance.agents.analyst import code_findings
+    from fund_performance.presentation import COMPARISON_FINDING
+    facts = json.loads((Path(__file__).parent / "golden" / "demo_facts.json").read_text())
+    message = "CHECK DATA: currency mismatch (fund GBP, index USD); fund and index are not compared"
+    facts["data_flags"] = [{"check": "currency_match", "level": "blocking", "message": message}]
+    for p in facts["scorecard"]["pillars"][:2]:
+        p.update(rating="CHECK DATA", reason=message)
+    findings = code_findings(facts)
+    assert findings[0].startswith("Mandate and Performance need a data check: ") and findings[0].count("CHECK DATA") == 1
+    assert COMPARISON_FINDING in findings
+    assert not any("behind its index" in x or "match its index" in x or "would" in x for x in findings)

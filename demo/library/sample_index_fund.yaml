@@ -1,0 +1,28 @@
+# The made-up fund (Stage 6B): shown as the Quick Demo only where no real-fund demo is installed (e.g. on Render,
+# until the real-fund data rights are resolved). Its files are in the repository (demo/sample_index_fund/): every
+# figure is invented, so nothing restricted is published.
+id: sample_index_fund
+order: 99
+fallback: true
+location: demo/sample_index_fund
+title: "Sample World Index Fund (made up)"
+subtitle: "A fictional tracker: try the review in seconds"
+fund_name: "Sample World Index Fund A Acc"
+share_class: "A Acc (GBP)"
+isin: XX0000000001
+benchmark: "Sample World Index (fictional)"
+peer: "Sample World Index Tracker B (fictional)"
+review_date: 2026-09-30
+notice: "A made-up fund: every figure is invented for demonstration. Not investment advice."
+quick:
+  prices: prices.csv
+  json: [fund_profile.json, factsheet_performance.json, peer.json]
+live:
+  prices: prices.csv
+  factsheet: factsheet.pdf
+  peers: [peer_factsheet.pdf]
+return_check_tolerance_pp: 0.05
+sources:
+  - {publisher: "This project", title: "Made-up factsheet, prices and peer (demo/sample_index_fund)", date: "30 Sep 2026", used: "all figures (fictional)"}
+disclosures:
+  - "Fictional data, published with the project's code; the real-fund demos (Fidelity, Vanguard) are kept private until their data rights are resolved."

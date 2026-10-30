@@ -15,6 +15,7 @@ from fund_performance.agents.analyst import sentences
 from fund_performance.conclusion import text_problems
 
 MAX_SENTENCES = 5
+MAX_SUMMARY_CHARS = 700     # what Executive page 1 holds with room to spare (settings.yaml drafting)
 ANGLE_BRIEFS = {
     "board": "For the board: the outcome in plain words, whether the fund did what it promised, and whether any "
              "action is needed. Short; no technical terms.",
@@ -30,7 +31,7 @@ Rules:
 - Use only the facts JSON. Quote a figure only if it is in the facts, exactly as shown there (same rounding and
   unit). Never calculate a new figure.
 - Never state a rating or verdict different from the scorecard. Do not use the words Green, Amber or Red.
-- Plain English, 3 to 5 short sentences, written as evidence ("The evidence suggests ...").
+- Plain English, 3 to 5 short sentences, written as evidence ("The evidence suggests ..."); keep it short: code checks the length.
 - Write a gap to the index as "0.10% a year behind its index", never with a minus sign after "behind".
 - No web addresses, no citations, no headings, no lists.
 - End with the verdict sentence you are given, word for word.
@@ -67,13 +68,16 @@ def verdict_sentence(facts: dict) -> str:
     return text[i:].strip() if i >= 0 else ""
 
 
-def draft_problems(text: str, facts: dict) -> list[str]:
-    """ Code's checks on a draft """
+def draft_problems(text: str, facts: dict, max_chars: int = MAX_SUMMARY_CHARS) -> list[str]:
+    """ Code's checks on a draft. Its length is checked too: the chosen draft is page 1's summary, and a summary
+    that does not fit would stop the Executive Report being made """
     found = [f"check: {p}" for p in text_problems(text, facts)]
     found += ["style: no web addresses" for _ in _URL.findall(text)][:1]
     found += [f"style: minus sign after '{m.group(1)}'; write 'behind by 0.10%'" for m in _MINUS_AFTER.finditer(text)]
     if sentences(text) > MAX_SENTENCES:
         found.append(f"style: {sentences(text)} sentences; use at most {MAX_SENTENCES}")
+    if len(text) > max_chars:
+        found.append(f"style: {len(text)} characters; use at most {max_chars} (shorter sentences)")
     ending = verdict_sentence(facts)
     if ending and not text.strip().endswith(ending):
         found.append(f"verdict: end with this sentence, word for word: {ending}")
@@ -98,10 +102,11 @@ def reporter_input(facts: dict, angle: str, focus: list[str], issues: list[str] 
 
 
 async def write_draft(facts: dict, angle: str, focus: list[str], run: RunFn | None = None,
-                      issues: list[str] | None = None, previous: str | None = None) -> Draft:
+                      issues: list[str] | None = None, previous: str | None = None,
+                      max_chars: int = MAX_SUMMARY_CHARS) -> Draft:
     result = await run_structured(reporter_agent(), reporter_input(facts, angle, focus, issues, previous),
                                   DraftOutput, run=run)
     if not result.ok:
         return Draft(angle, error="; ".join(result.errors)[:300], rewritten=bool(issues))
     text = " ".join(result.output.text.split())
-    return Draft(angle, text, draft_problems(text, facts), rewritten=bool(issues))
+    return Draft(angle, text, draft_problems(text, facts, max_chars), rewritten=bool(issues))

@@ -173,6 +173,9 @@ def _fund_return(reported: ReportedFigures, series: str, years: int) -> float | 
 def _basis(peer: Peer, profile: FundProfile, reported: ReportedFigures, years: int) -> tuple[str, str, list[str]]:
     """ (fund series, basis in words, notes): noon with noon, market close with the fund's PNAV """
     fund_time, peer_time = profile.pricing_point, peer.pricing_point
+    if fund_time is None:
+        return PRICE_SERIES, "fund pricing time not stated", ["the fund's pricing time is not stated, so the timing "
+                                                              "may differ"]
     if peer_time is None:
         return PRICE_SERIES, f"fund {PRICING_WORDS[fund_time]} NAV; peer pricing time not stated", [
             "pricing time not stated, so the timing may differ"]
@@ -210,8 +213,15 @@ def compare_peers(peers: list[Peer], profile: FundProfile, reported: ReportedFig
             row.notes.append(INSTITUTIONAL_NOTE)
         if peer.distribution and peer.distribution != profile.distribution:
             row.notes.append(f"{peer.distribution} share class: compared on a total-return basis")
+        if peer.benchmark_name and _plain_name(peer.benchmark_name) != _plain_name(profile.benchmark_name):
+            row.notes.append(f"follows {peer.benchmark_name}, a different benchmark variant from the fund's "
+                             f"{profile.benchmark_name} (for information: the comparison and ratings are unchanged)")
         out.rows.append(row)
     return out
+
+
+def _plain_name(name: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (name or "").lower()).strip()
 
 
 def as_list(peers) -> list[Peer]:

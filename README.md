@@ -7,7 +7,7 @@ sdk_version: 6.30.0
 
 # Fund Performance Review
 
-A web app that drafts an **investment oversight review** of a fund as a 5-page PDF: is the fund doing what it
+A web app that drafts an **investment oversight review** of a fund as a two-page Executive Report and a Detailed Report: is the fund doing what it
 promised, how did it do against its index, did investors get a fair outcome, and is its fee justified? It gives
 a **suggested verdict** (Satisfied / Monitor / Action needed) and a suggested conclusion, with an evidence
 dashboard; the analyst makes the judgement and signs.
@@ -38,11 +38,11 @@ Upload: price file (CSV/Excel) + factsheet (PDF/Word) [+ KID, peer factsheets] +
    ├─ Reporting Agents (AI)   draft the conclusion for the board, the analyst and the manager meeting, in parallel
    ├─ Judge (AI) + code       code checks every figure; the Judge marks a checklist; code scores and picks the best,
    │                          or sends the drafts back once; code's own conclusion is the fallback
-   └─ Report (code)           5-page PDF: summary, evidence dashboard, mandate and performance, value and fees,
-                              appendix; optional email (Resend)
+   └─ Reports (code)          report_executive.pdf (2 pages) and report.pdf (Detailed: the executive pages plus
+                              Appendices A–D); optional email (Resend, Executive Report by default)
 ```
 
-Every run is saved in `runs/<timestamp>/`: `report.pdf`, `facts.json`, `run_log.txt` and `log.json` (each step,
+Every run is saved in `runs/<timestamp>/`: `report.pdf` (Detailed), `report_executive.pdf`, `facts.json`, `run_log.txt` and `log.json` (each step,
 its inputs and its outputs).
 
 ## Run it on your computer
@@ -53,12 +53,22 @@ cp .env.example .env            # add your OPENAI_API_KEY
 python app.py                   # opens on http://127.0.0.1:7860
 ```
 
-Click **Use the demo files (made-up fund)** and **Run the review** to try it without any AI calls. With
+Pick a demo under **Try a demo** (Fidelity Index US, or Vanguard FTSE Global All Cap) and click **Run Fund Review**.
+The **Quick Demo** runs prevalidated inputs without AI in seconds; the **Live AI Demo** (offered only where AI runs are
+on) lets the agents read the documents. The demos' files are private (`data/demos/`, see `data/README.md`): without
+them the cards are not shown, and the example input files (a made-up fund) are under Help & methodology. With
 `APP_USERNAME` and `APP_PASSWORD` set in `.env`, the page asks for them before it opens; on your own computer you
 can leave them blank (no login).
 
+AI is off unless `AI_RUNS_ENABLED=true` (in `.env` locally; on a server the login must be set as well). Without
+the private demo files (as on Render), the demo is a made-up fund.
+
 For a real fund: add the price file and the factsheet (KID and peer factsheets optional; for an S&P 500 fund the
-approved peers are used), untick **Offline** and click **Run the review**; code checks every value the agent read.
+approved peers are used) and click **Run Fund Review**; code checks every value the agent read. The KID, peer
+factsheets and JSON inputs are under **Additional options**. When the review finishes, the page shows a dashboard (assessment, evidence quality, headline figures, items
+needing attention, the four ratings, details) and the PDF to download; choose **Management** for a short view or
+**Investment Analyst** for the full detail. There is no Offline switch on the page: the demo runs
+without AI, and for development `FUND_REVIEW_OFFLINE=1 python app.py` runs every review without AI.
 Put the approved peers' factsheets in `data/peers/` (gitignored; found by the ISIN).
 
 From the command line:

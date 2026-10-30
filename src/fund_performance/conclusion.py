@@ -6,6 +6,7 @@ and rating checks as AI text; a sentence that fails is left out (the verdict sen
 """
 from fund_performance.number_guard import check_labels, check_numbers, check_ratings
 from fund_performance.plain import VERDICT_NAMES, verdict_meaning
+from fund_performance.presentation import comparison_invalid, missing_evidence
 
 MAX_POINTS = 4
 MIN_QUESTIONS, MAX_QUESTIONS = 2, 4
@@ -110,6 +111,10 @@ def _verdict_sentence(facts: dict) -> str:
         return f"Suggested verdict: {name}, {meaning} about {_join(red)}." if red else f"Suggested verdict: {name}, {meaning}."
     if code.startswith("Pending"):
         checks = [SHORT[n] for n, p in pillars.items() if p["rating"] == "CHECK DATA"]
+        missing = missing_evidence(facts)
+        if missing and all(n in missing for n, p in pillars.items() if p["rating"] == "CHECK DATA"):
+            return (f"Suggested verdict: {name}: obtain the evidence missing for {_join(checks)} (not in the documents "
+                    "provided) before deciding.")
         return f"Suggested verdict: {name}: resolve the data check on {_join(checks)} before deciding."
     if code.startswith("Monitor (data check"):
         checks = [SHORT[n] for n, p in pillars.items() if p["rating"] == "CHECK DATA"]
@@ -209,7 +214,8 @@ def judgement_points(facts: dict) -> list[str]:
             minimum = f" (minimum {row['minimum_investment']})" if row.get("minimum_investment") else ""
             points.append(f"{row['name']} is an institutional share class{minimum}: its fee is lower than retail "
                           "investors could get.")
-    test = (facts.get("evidence") or {}).get("test")
+    invalid = comparison_invalid(facts)       # a currency or benchmark mismatch: no point rests on the gap to the index
+    test = None if invalid else (facts.get("evidence") or {}).get("test")
     if test and test.get("significant") and facts["fund"].get("objective_type") == "index_tracker":
         points.append("The gap to the index after the fee is statistically significant: it is unlikely to be chance.")
     elif test and test.get("result", "").startswith("Not reliable"):
@@ -235,19 +241,34 @@ def manager_questions(facts: dict) -> list[str]:
     if perf in ("RED", "AMBER"):
         found.append(f"What caused the gap to the {'index' if index_fund else 'benchmark'} over {n} years, and what "
                      "is being done about it?")
-    if pillars.get("Fees", {}).get("rating") in ("RED", "AMBER"):
+    fees = pillars.get("Fees", {})
+    if fees.get("summary") == "Add peer":
+        # No valid peer comparison: never claim the fee is higher; ask for the peers that would settle it
+        found.append("Which comparable funds (same index, currency and share class type) do you consider the fund's "
+                     "peers, and can you share their factsheets so fees and returns can be compared?")
+    elif fees.get("rating") in ("RED", "AMBER"):
         found.append("Why is the fee higher than comparable funds', and is a cheaper share class available?")
     if pillars.get("Value for investors", {}).get("rating") in ("RED", "AMBER") and \
             pillars["Value for investors"].get("summary") != "Add peer":
         found.append(f"Why did the fund return less than comparable funds over {n} years?")
-    fee = _note(facts, "fee")
+    missing = missing_evidence(facts)
+    if missing:                               # ask for what the documents do not give, so the ratings can be made
+        wanted = [w for key, w in (("Performance", "tracking error"), ("Mandate", "R² and beta")) if key in missing]
+        found.append(f"Can you provide the fund's {', '.join(wanted) or 'missing figures'} against its "
+                     f"{'index' if index_fund else 'benchmark'} (3 or 5 years, in the fund's currency), or a price "
+                     "series for the benchmark?")
+    invalid = comparison_invalid(facts)
+    if invalid:                               # ask about the mismatch, not about a gap that cannot be measured yet
+        found.append(f"Which {'index' if index_fund else 'benchmark'} series and currency should the fund be compared "
+                     "with, so the gap can be measured on the same basis?")
+    fee = None if invalid else _note(facts, "fee")
     if fee and not fee["note"].startswith("Most"):
         found.append("What explains the part of the yearly gap to the index that the fee does not?")
-    test = (facts.get("evidence") or {}).get("test")
+    test = None if invalid else (facts.get("evidence") or {}).get("test")
     if index_fund and test and test.get("significant"):
         found.append("The gap after the fee is statistically significant: what are its main causes (for example tax "
                      "on dividends, cash held or sampling)?")
-    if _note(facts, "timing"):
+    if not invalid and _note(facts, "timing"):
         found.append("Can you publish market-close (PNAV) returns, so the gap to the index can be measured fairly?")
     if facts["fund"].get("transaction_cost_pct", 0) is None:
         found.append("What were the fund's transaction costs over the last year?")

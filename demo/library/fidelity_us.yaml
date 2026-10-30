@@ -1,0 +1,31 @@
+# Real-fund demo (Stage 4B): metadata only, safe to publish. The inputs and documents are not in this repository:
+# they live in the private demo folder (data/demos/fidelity_us/, gitignored), and the demo is hidden when they are
+# missing. No figure from a document is written here.
+id: fidelity_us
+order: 1
+title: "Fidelity Index US"
+subtitle: "S&P 500 tracker, compared with an HSBC peer"
+fund_name: "Fidelity Index US Fund P Accumulation"
+share_class: "P Accumulation (GBP)"
+isin: GB00BJS8SH10
+benchmark: "S&P 500 (NUK)"
+peer: "HSBC American Index Fund Acc C (GB00B80QG615)"
+review_date: 2026-09-30
+quick:                      # prevalidated inputs, typed from the documents and checked by code (no AI)
+  prices: quick/Fidelity_Index_US_P_Acc.csv
+  json: [quick/fund_profile.json, quick/factsheet_performance.json, quick/peer.json]
+live:                       # the documents, read by the AI agents
+  prices: quick/Fidelity_Index_US_P_Acc.csv
+  factsheet: documents/Monthly_FactSheet.pdf
+  kid: documents/Key_Investor_Info.pdf
+  peers: [documents/HSBC_American_Index_Fund_Acc_C.pdf]
+return_check_tolerance_pp: 0.05
+sources:
+  - {publisher: "Fidelity International", title: "Fidelity Index US Fund P Acc monthly factsheet", date: "30 Sep 2026", used: "returns, fees, risk figures"}
+  - {publisher: "Fidelity International", title: "Key Investor Information (P Acc)", date: "as published", used: "objective, risk indicator"}
+  - {publisher: "Fidelity International", title: "Monthly NAV history, P Acc (CSV)", date: "to 30 Sep 2026", used: "prices: risk and cross-checks"}
+  - {publisher: "HSBC Asset Management", title: "HSBC American Index Fund Acc C monthly report", date: "30 Sep 2026", used: "peer: fee and returns"}
+disclosures:
+  - "Peer share class: HSBC Acc C has a minimum initial investment of GBP 1,000,000 (an institutional class), so its fee may be lower than retail investors can get."
+  - "Benchmark variants differ: Fidelity follows the S&P 500 (NUK); HSBC's reference benchmark is the S&P 500 Index in GBP. Shown for information; it does not change the comparison or the ratings."
+  - "Both funds are GBP accumulation classes priced at noon UK time, so their returns are compared noon NAV with noon NAV."

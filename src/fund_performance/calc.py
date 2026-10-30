@@ -52,6 +52,11 @@ def annualise(cumulative_pct: float, years: float) -> float:
     return ((1 + cumulative_pct / 100) ** (1 / years) - 1) * 100
 
 
+def cumulate(annualised_pct: float, years: float) -> float:
+    """ R_cum = (1 + R_ann)^n - 1, in percent: the inverse of annualise """
+    return ((1 + annualised_pct / 100) ** years - 1) * 100
+
+
 def discrete_12m(levels: pd.Series, as_of: pd.Timestamp, windows: int = 5) -> dict[date, float | None]:
     """ Cumulative return for each 12-month window ending on as_of, as_of - 1y, ... (spec 4.1).
     A window whose start or end price is missing is None """
