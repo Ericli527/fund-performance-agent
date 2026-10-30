@@ -1,0 +1,349 @@
+""" Documents in, inputs out (step 11 update): the main route on the page
+
+The user uploads a price file and the fund's factsheet (and, optionally, the KID or prospectus and a peer fund's
+factsheet). The Extractor Agent reads the documents, the Mandate Agent reads the objective, and code turns their
+answers into a table of values for a person to check. Each value shows where it was found (document and page,
+found by code) and is marked "AI-extracted (please verify)". The person corrects anything wrong and confirms;
+code then writes fund_profile.json, factsheet_performance.json and peer.json, marking corrected values "entered by
+user". A required value that is missing blocks the run until it is filled in.
+
+AI agents read; code decides where each value was found, what is missing, and what was changed.
+"""
+from dataclasses import dataclass, field
+from datetime import date
+import json
+from pathlib import Path
+import re
+from fund_performance.agents.base import RunFn, run_structured
+from fund_performance.agents.extractor import ExtractionResult, extract
+from fund_performance.agents.mandate import MandateOutput, mandate_agent
+from fund_performance.io import read_document_pages
+from fund_performance.models import FactsheetPerformance, FundProfile, Peer
+
+AI = "AI-extracted (please verify)"
+CODE = "Derived by code (please verify)"
+MISSING = "⚠ Missing: please fill in"
+OPTIONAL = "Not found (optional)"
+USER = "Entered by user"
+NOT_FOUND = "not found in the documents"
+
+
+@dataclass(frozen=True)
+class FieldSpec:
+    key: str
+    label: str
+    kind: str                 # text, number, int, date, bool, choice
+    required: bool = True
+    choices: tuple[str, ...] = ()
+
+
+PROFILE_FIELDS = (
+    FieldSpec("fund_name", "Fund name", "text"),
+    FieldSpec("isin", "ISIN", "text"),
+    FieldSpec("share_class", "Share class", "text"),
+    FieldSpec("currency", "Currency (e.g. GBP)", "text"),
+    FieldSpec("benchmark_name", "Benchmark", "text"),
+    FieldSpec("objective_type", "Objective type", "choice",
+              choices=("index_tracker", "active_target", "active_comparator", "active_constraint", "income_target",
+                       "absolute_return")),
+    FieldSpec("time_horizon_years", "Time horizon (years)", "int"),
+    FieldSpec("ocf_pct", "Ongoing charge (OCF), % a year", "number"),
+    FieldSpec("as_of_date", "Figures to (YYYY-MM-DD)", "date"),
+    FieldSpec("launch_date", "Share class launch date (YYYY-MM-DD)", "date"),
+    FieldSpec("pricing_point", "Pricing point", "choice", choices=("midday", "market_close")),
+    FieldSpec("distribution", "Distribution", "choice", choices=("accumulation", "income")),
+    FieldSpec("hedged", "Currency hedged (yes / no)", "bool"),
+    FieldSpec("benchmark_role", "Benchmark role", "choice", choices=("target", "comparator", "constraint", "none")),
+    FieldSpec("performance_fee", "Performance fee (yes / no)", "bool"),
+    FieldSpec("objective_text", "Objective (as written)", "text"),
+)
+SERIES = (("fund_nav", "Fund (NAV)", True), ("fund_pnav", "Fund (PNAV, market close)", False), ("index", "Index", True))
+RETURN_FIELDS = tuple(FieldSpec(f"series.{name}.{p}", f"{label}: {p[:-1]}-year return, cumulative %", "number", required)
+                      for name, label, required in SERIES for p in ("1y", "3y", "5y"))
+PEER_FIELDS = (
+    FieldSpec("peer.name", "Peer fund name", "text"),
+    FieldSpec("peer.share_class", "Peer share class", "text"),
+    FieldSpec("peer.currency", "Peer currency", "text"),
+    FieldSpec("peer.ocf_pct", "Peer ongoing charge (OCF), % a year", "number"),
+    FieldSpec("peer.1y", "Peer 1-year return, cumulative %", "number", False),
+    FieldSpec("peer.3y", "Peer 3-year return, cumulative %", "number", False),
+    FieldSpec("peer.5y", "Peer 5-year return, cumulative %", "number"),
+)
+COLUMNS = ["Field", "Value", "Status", "Source"]
+
+
+@dataclass
+class Built:
+    """ The inputs written from the confirmed table, or the problems that stop the run """
+    problems: list[str] = field(default_factory=list)
+    profile: dict | None = None
+    factsheet: dict | None = None
+    peer: dict | None = None
+    user_entered: list[str] = field(default_factory=list)
+    rows: list[dict] = field(default_factory=list)       # the confirmed table, with final statuses (for the log)
+
+
+# --- Where a value was found (code) ---------------------------------------------------------------------------
+
+def _number_pattern(value: float) -> re.Pattern:
+    variants = {f"{abs(value):.2f}", f"{abs(value):.1f}", f"{abs(value):g}"}
+    alts = "|".join(re.escape(v) for v in sorted(variants, key=len, reverse=True))
+    return re.compile(rf"(?<![\d.])(?:{alts})(?![\d])")
+
+
+def locate(value, pages: dict[str, list[str]]) -> str:
+    """ "factsheet.pdf, page 2": the first page that shows the value, or "not found in the documents" """
+    if value is None or value == "":
+        return ""
+    if isinstance(value, bool):
+        return "read from the documents"
+    if isinstance(value, (int, float)):
+        pattern = _number_pattern(float(value))
+        match = lambda text: pattern.search(text.replace("−", "-"))          # noqa: E731
+    else:
+        needle = str(value).strip().lower()[:40]
+        match = lambda text: needle and needle in " ".join(text.lower().split())  # noqa: E731
+    for name, doc_pages in pages.items():
+        for i, text in enumerate(doc_pages, start=1):
+            if match(text):
+                return f"{name}, page {i}" if len(doc_pages) > 1 or name.lower().endswith(".pdf") else name
+    return NOT_FOUND
+
+
+# --- Reading the documents (AI) and building the table (code) -------------------------------------------------
+
+def _shown(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, float):
+        return f"{value:g}"
+    return str(value)
+
+
+def _row(spec: FieldSpec, value, status: str, source: str) -> dict:
+    shown = _shown(value)
+    if not shown:
+        status = MISSING if spec.required else OPTIONAL
+    return {"key": spec.key, "label": spec.label, "value": shown, "status": status, "source": source,
+            "required": spec.required, "kind": spec.kind, "choices": list(spec.choices)}
+
+
+async def read_documents(factsheet: Path, kid: Path | None = None, peer_factsheet: Path | None = None,
+                         run_extractor: RunFn | None = None, run_mandate: RunFn | None = None,
+                         run_peer: RunFn | None = None) -> dict:
+    """ Read the documents with the Extractor and Mandate agents; return the table to confirm and what else the run
+    needs (a plain dict, so the page can keep it between the two clicks) """
+    docs = {p.name: read_document_pages(p) for p in (factsheet, kid) if p}
+    text = "\n\n".join(f"=== Document: {name} ===\n" + "\n".join(pages) for name, pages in docs.items())
+    extracted: ExtractionResult = await extract(text, run_extractor)
+    fs = extracted.factsheet
+    draft = dict(extracted.profile_draft)
+    log = [f"Extractor Agent read: {', '.join(docs)}"]
+
+    mandate: MandateOutput | None = None
+    objective = draft.get("objective_text")
+    if objective:
+        result = await run_structured(mandate_agent(), f"Objective text:\n{objective}", MandateOutput, run=run_mandate)
+        mandate = result.output if result.ok else None
+        log.append("Mandate Agent read the objective" if mandate else
+                   "Mandate Agent gave no valid answer: " + "; ".join(result.errors))
+
+    rows = []
+    objective_source = locate(objective, docs) if objective else ""
+    values = draft | {"as_of_date": fs.as_of_date.isoformat() if fs else None}
+    if fs and not values.get("currency"):
+        values["currency"] = fs.currency
+    if mandate:
+        values |= {"objective_type": mandate.objective_type, "time_horizon_years": mandate.time_horizon_years,
+                   "benchmark_role": mandate.benchmark_role}
+    for spec in PROFILE_FIELDS:
+        value = values.get(spec.key)
+        status, source = AI, locate(value, docs)
+        if spec.key in ("objective_type", "time_horizon_years", "benchmark_role") and value is not None:
+            source = f"Mandate Agent, from the objective ({objective_source})"
+        if spec.key == "distribution" and value is None and draft.get("share_class"):
+            # Code reads it from the share class name: "Acc" = accumulation, "Inc" = income
+            name = draft["share_class"].lower()
+            value = "accumulation" if "acc" in name else "income" if "inc" in name else None
+            status, source = CODE, f"from the share class name '{draft['share_class']}'"
+        if spec.key == "hedged" and value is None:
+            mentions = any("hedged" in t.lower() for pages in docs.values() for t in pages)
+            value, status = (None, MISSING) if mentions else (False, CODE)
+            source = "the documents mention hedging: please check" if mentions else "no hedging mentioned in the documents"
+        if spec.key == "pricing_point" and value is None and fs:
+            value = next((s.pricing for s in fs.series.values() if s.pricing), None)
+        rows.append(_row(spec, value, status, source))
+    for spec in RETURN_FIELDS:
+        _, name, period = spec.key.split(".")
+        series = fs.series.get(name) if fs else None
+        value = getattr(series, f"y{period[0]}") if series else None
+        rows.append(_row(spec, value, AI, locate(value, docs)))
+
+    peer_extra: dict = {}
+    if peer_factsheet:
+        peer_pages = {peer_factsheet.name: read_document_pages(peer_factsheet)}
+        peer = await extract("\n".join(peer_pages[peer_factsheet.name]), run_peer)
+        peer_draft, peer_fs = peer.profile_draft, peer.factsheet
+        cumulative = peer_fs.series.get("fund_nav") if peer_fs else None
+        peer_values = {"peer.name": peer_draft.get("fund_name"), "peer.share_class": peer_draft.get("share_class"),
+                       "peer.currency": peer_draft.get("currency") or (peer_fs.currency if peer_fs else None),
+                       "peer.ocf_pct": peer_draft.get("ocf_pct")}
+        for p in ("1y", "3y", "5y"):
+            peer_values[f"peer.{p}"] = getattr(cumulative, f"y{p[0]}") if cumulative else None
+        for spec in PEER_FIELDS:
+            rows.append(_row(spec, peer_values[spec.key], AI, locate(peer_values[spec.key], peer_pages)))
+        peer_extra = {"flags": [f.model_dump() for f in peer.flags]}
+        log.append(f"Extractor Agent read the peer factsheet: {peer_factsheet.name}")
+
+    return {"rows": rows, "documents": list(docs) + ([peer_factsheet.name] if peer_factsheet else []),
+            "factsheet": fs.model_dump(mode="json", by_alias=True) if fs else None,
+            "promises": mandate.promises if mandate else [],
+            "secondary_objective": mandate.secondary_objective if mandate else None,
+            "flags": [f.model_dump() for f in extracted.flags] + peer_extra.get("flags", []),
+            "log": log}
+
+
+def table(intake: dict) -> list[list[str]]:
+    """ The rows as shown on the page: Field, Value, Status, Source """
+    return [[r["label"], r["value"], r["status"], r["source"]] for r in intake["rows"]]
+
+
+def missing(intake: dict, values: list[str] | None = None) -> list[str]:
+    """ Labels of required values that are still empty """
+    values = values if values is not None else [r["value"] for r in intake["rows"]]
+    return [r["label"] for r, v in zip(intake["rows"], values) if r["required"] and not str(v or "").strip()]
+
+
+# --- From the confirmed table to the input files (code) -------------------------------------------------------
+
+def _parse(row: dict, text: str):
+    text = text.strip()
+    kind = row["kind"]
+    if kind == "number":
+        return float(text.replace("%", "").replace("−", "-").replace(",", ""))
+    if kind == "int":
+        return int(float(text))
+    if kind == "date":
+        return date.fromisoformat(text).isoformat()
+    if kind == "bool":
+        if text.lower() in ("yes", "y", "true"):
+            return True
+        if text.lower() in ("no", "n", "false"):
+            return False
+        raise ValueError("write yes or no")
+    if kind == "choice":
+        if text not in row["choices"]:
+            raise ValueError(f"one of {', '.join(row['choices'])}")
+        return text
+    return text
+
+
+def build_inputs(intake: dict, values: list[str]) -> Built:
+    """ Check and convert the confirmed values; corrected values are marked "entered by user" """
+    out = Built()
+    parsed: dict = {}
+    for row, text in zip(intake["rows"], values):
+        text = str(text or "").strip()
+        changed = text != row["value"]
+        status = USER if changed and text else row["status"] if text else (MISSING if row["required"] else OPTIONAL)
+        out.rows.append({"key": row["key"], "label": row["label"], "value": text, "status": status,
+                         "source": "entered on the page" if changed and text else row["source"]})
+        if not text:
+            if row["required"]:
+                out.problems.append(f"{row['label']}: required, please fill it in")
+            continue
+        try:
+            parsed[row["key"]] = _parse(row, text)
+        except ValueError as e:
+            out.problems.append(f"{row['label']}: '{text}' is not valid ({e})")
+            continue
+        if changed:
+            out.user_entered.append(row["key"])
+    if out.problems:
+        return out
+
+    profile_keys = [s.key for s in PROFILE_FIELDS]
+    profile = {k: parsed[k] for k in profile_keys if k in parsed}
+    status = {r["key"]: r["status"] for r in intake["rows"]}
+    profile["field_sources"] = {k: "user" if k in out.user_entered else "code" if status[k] == CODE else "ai_extracted"
+                                for k in list(profile)}
+    profile["secondary_objective"] = intake.get("secondary_objective")
+
+    fs = dict(intake.get("factsheet") or {})
+    series = {}
+    for name, _, _ in SERIES:
+        returns = {p: parsed.get(f"series.{name}.{p}") for p in ("1y", "3y", "5y")}
+        if any(v is not None for v in returns.values()):
+            old = (fs.get("series") or {}).get(name, {})
+            series[name] = {**returns, "since_launch": old.get("since_launch"), "basis": "cumulative",
+                            "pricing": old.get("pricing")}
+    annualised = dict(fs.get("series_annualised") or {})
+    for key in out.user_entered:
+        if key.startswith("series."):
+            annualised.pop(key.split(".")[1], None)    # a corrected cumulative return: code derives the annualised one
+    factsheet = {**fs, "as_of_date": profile.get("as_of_date"), "currency": profile.get("currency"),
+                 "series": series, "series_annualised": annualised, "source": "ai_extracted", "entered_by": "extractor",
+                 "user_entered": [k.removeprefix("series.") for k in out.user_entered if k.startswith("series.")]}
+
+    peer = None
+    if any(r["key"].startswith("peer.") for r in intake["rows"]):
+        peer = {"name": parsed.get("peer.name"), "ocf_pct": parsed.get("peer.ocf_pct"),
+                "currency": parsed.get("peer.currency"), "share_class": parsed.get("peer.share_class"),
+                "returns": {"1y": parsed.get("peer.1y"), "3y": parsed.get("peer.3y"), "5y": parsed.get("peer.5y"),
+                            "basis": "cumulative"}}
+    try:
+        FundProfile.model_validate(profile)
+        FactsheetPerformance.model_validate(factsheet)
+        if peer:
+            Peer.model_validate(peer)
+    except ValueError as e:
+        out.problems.append(f"The values do not fit together: {str(e)[:300]}")
+        return out
+    out.profile, out.factsheet, out.peer = profile, factsheet, peer
+    return out
+
+
+def write_inputs(built: Built, folder: Path) -> list[str]:
+    """ Write the confirmed inputs as the JSON files the controller reads """
+    folder.mkdir(parents=True, exist_ok=True)
+    files = {"fund_profile.json": built.profile, "factsheet_performance.json": built.factsheet, "peer.json": built.peer}
+    written = []
+    for name, data in files.items():
+        if data is not None:
+            (folder / name).write_text(json.dumps(data, indent=1, ensure_ascii=False, default=str), encoding="utf-8")
+            written.append(name)
+    return written
+
+
+# --- Checking the reading step against typed files (live test, CLI) --------------------------------------------
+
+def _same(extracted: str, typed) -> bool:
+    if typed is None:
+        return extracted == ""
+    if isinstance(typed, bool):
+        return extracted == ("yes" if typed else "no")
+    if isinstance(typed, (int, float)):
+        try:
+            return abs(float(extracted) - float(typed)) < 0.005
+        except ValueError:
+            return False
+    return " ".join(str(extracted).lower().split()) == " ".join(str(typed).lower().split())
+
+
+def differences(intake: dict, profile: dict, factsheet: dict) -> list[tuple[str, str, str]]:
+    """ (field, what the agents read, what was typed) for every value that differs from the typed JSON files """
+    out = []
+    for row in intake["rows"]:
+        key = row["key"]
+        if key.startswith("series."):
+            _, name, period = key.split(".")
+            typed = (factsheet.get("series", {}).get(name) or {}).get(period)
+        elif key.startswith("peer."):
+            continue
+        else:
+            typed = profile.get(key)
+        if not _same(row["value"], typed):
+            out.append((row["label"], row["value"] or "(empty)", "" if typed is None else str(typed)))
+    return out

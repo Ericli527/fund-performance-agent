@@ -223,12 +223,34 @@ def read_json(path: str | Path) -> FactsheetPerformance | FundProfile | Peer:
 
 def read_document(path: str | Path) -> str:
     """ Plain text from a PDF, Word or text document """
+    return "\n".join(read_document_pages(path))
+
+
+def _docx_text(path: Path) -> str:
+    """ A Word document's paragraphs and tables, in document order (factsheets keep their figures in tables) """
+    doc = Document(path)
+    parts = []
+    for block in doc.element.body.iterchildren():
+        tag = block.tag.rsplit("}", 1)[-1]
+        if tag == "p":
+            parts.append("".join(t.text or "" for t in block.iter() if t.tag.endswith("}t")))
+        elif tag == "tbl":
+            for row in block.iter():
+                if row.tag.endswith("}tr"):
+                    cells = ["".join(t.text or "" for t in cell.iter() if t.tag.endswith("}t"))
+                             for cell in row if cell.tag.endswith("}tc")]
+                    parts.append(" | ".join(c.strip() for c in cells))
+    return "\n".join(p for p in parts if p.strip())
+
+
+def read_document_pages(path: str | Path) -> list[str]:
+    """ The text of each page (a PDF), or of the whole document as one page (Word, text) """
     path = Path(path)
     suffix = path.suffix.lower()
     if suffix == ".pdf":
-        return "\n".join(page.extract_text() or "" for page in PdfReader(path).pages)
+        return [page.extract_text() or "" for page in PdfReader(path).pages]
     if suffix == ".docx":
-        return "\n".join(p.text for p in Document(path).paragraphs)
+        return [_docx_text(path)]
     if suffix in (".txt", ".md"):
-        return path.read_text(encoding="utf-8", errors="ignore")
-    raise ValueError(f"{path.name}: not a supported document type")
+        return [path.read_text(encoding="utf-8", errors="ignore")]
+    raise ValueError(f"{path.name}: not a supported document type (PDF, Word .docx or text)")

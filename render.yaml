@@ -14,10 +14,6 @@ services:
       # Secrets: Render asks for these when you create the Blueprint; they never go in the repo
       - key: OPENAI_API_KEY
         sync: false
-      - key: APP_USERNAME                # optional: password-protect the page (recommended for a public link)
-        sync: false
-      - key: APP_PASSWORD
-        sync: false
       - key: RESEND_API_KEY              # optional: email the report (off by default in config/settings.yaml)
         sync: false
       - key: EMAIL_FROM

@@ -17,6 +17,7 @@ The extractor runs before the data checks because the repeated-price check compa
 """
 import asyncio
 from dataclasses import asdict, dataclass, field
+from typing import Callable
 from datetime import datetime
 from functools import partial
 import json
@@ -64,6 +65,13 @@ class Runners:
     email_post: PostFn | None = None
 
 
+ProgressFn = Callable[[str], None]
+PROGRESS = {"read_files": "Checking the files…", "extractor": "Reading the documents…",
+            "data_checks": "Checking the data…", "mandate": "Reading the objective…",
+            "calculator": "Measuring performance…", "scorecard": "Scoring…", "research": "Researching…",
+            "narrative": "Writing the market context…", "report": "Writing the report…"}
+
+
 @dataclass
 class StepRecord:
     step: str
@@ -79,13 +87,16 @@ class StepRecord:
 class RunLog:
     """ What each step did, for log.json and the report's sources list """
 
-    def __init__(self, folder: Path, question: str, offline: bool):
+    def __init__(self, folder: Path, question: str, offline: bool, on_step: ProgressFn | None = None):
         self.run = {"folder": str(folder), "question": question, "offline": offline,
                     "started": _now(), "ended": None, "status": "running", "message": None}
         self.steps: list[StepRecord] = []
         self._clock: dict[str, float] = {}
+        self.on_step = on_step                   # gets a short progress message as each step starts
 
     def start(self, step: str, inputs: list[str] | None = None) -> StepRecord:
+        if self.on_step and step in PROGRESS:
+            self.on_step(PROGRESS[step])
         record = StepRecord(step, _now(), inputs=list(inputs or []))
         self._clock[step] = time.monotonic()
         self.steps.append(record)
@@ -154,17 +165,21 @@ async def _timed(coro, seconds: float):
 
 async def run_review(folder: Path, question: str = DEFAULT_QUESTION, out_root: Path | None = None,
                      offline: bool = False, thresholds: Thresholds | None = None,
-                     settings: RunSettings | None = None, runners: Runners | None = None) -> RunResult:
+                     settings: RunSettings | None = None, runners: Runners | None = None,
+                     intake: dict | None = None, on_step: ProgressFn | None = None) -> RunResult:
+    """ One review. `intake` is the documents route's confirmation (intake.read_documents + the confirmed table):
+    the Extractor and Mandate agents have already run, so they are not run again. `on_step` gets a short message
+    as each step starts, for the page's progress line """
     t = thresholds or load_thresholds()
     s = settings or load_settings()
     r = runners or Runners()
     folder = Path(folder)
     run_dir = Path(out_root or Path(__file__).resolve().parents[2] / "runs") / datetime.now().strftime("%Y%m%d-%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
-    log = RunLog(folder, question, offline)
+    log = RunLog(folder, question, offline, on_step)
     text_log: list[str] = []
     try:
-        result = await _run(folder, question, run_dir, offline, t, s, r, log, text_log)
+        result = await _run(folder, question, run_dir, offline, t, s, r, log, text_log, intake)
         log.finish("ok")
         return result
     except RunStopped as e:
@@ -182,8 +197,15 @@ def _stop(log: RunLog, record: StepRecord, message: str):
 
 
 async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thresholds, s: RunSettings,
-               r: Runners, log: RunLog, text_log: list[str]) -> RunResult:
-    flags: list[DataFlag] = []
+               r: Runners, log: RunLog, text_log: list[str], intake: dict | None = None) -> RunResult:
+    flags: list[DataFlag] = [DataFlag(**f) for f in (intake or {}).get("flags", [])]
+
+    # 0. The documents route: what the agents read and what the person confirmed, before the run
+    if intake:
+        step = log.start("confirmation", intake.get("documents", []))
+        changed = [r["label"] for r in intake.get("rows", []) if r.get("status") == "Entered by user"]
+        text_log += intake.get("log", []) + [f"Entered by user on the page: {', '.join(changed) or 'nothing'}"]
+        log.end(step, outputs={"values": intake.get("rows", []), "entered_by_user": changed})
 
     # 1. Read files
     step = log.start("read_files", [str(folder)])
@@ -204,11 +226,16 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     structured = [p.name for k, p in files.items() if k != "documents"]
     documents_read = factsheet is None and bool(files["documents"]) and not offline
     input_files = structured + [p.name if documents_read else f"{p.name} {NOT_READ}" for p in files["documents"]]
+    if intake:
+        input_files = [f for f in structured if not f.endswith(".json")] + [
+            f"{name} (read by the Extractor Agent; values confirmed on the page)" for name in intake.get("documents", [])]
     log.end(step, outputs={"input_files": input_files})
 
     # 2. Extractor (only when no factsheet_performance.json was supplied)
     step = log.start("extractor", [p.name for p in files["documents"]])
-    if factsheet is not None:
+    if intake:
+        log.end(step, "skipped", notes=["documents read before the run; values confirmed on the page"])
+    elif factsheet is not None:
         log.end(step, "skipped", notes=["factsheet_performance.json supplied"])
     elif offline or not files["documents"]:
         why = "offline run" if offline else "no factsheet or KID document"
@@ -248,6 +275,10 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     if offline:
         flags.append(DataFlag(check="run", level="info", message=OFFLINE_NOTE))
         log.end(step, "skipped", notes=["offline run"])
+    elif intake:
+        promises = list(intake.get("promises", []))
+        log.end(step, outputs={"promises": len(promises)},
+                notes=["Mandate Agent read the objective before the run; its answer was confirmed on the page"])
     else:
         mandate = await _timed(read_mandate(profile, r.mandate), s.timeouts_seconds.mandate)
         if mandate is None:
@@ -333,7 +364,9 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     inputs = ReportInputs(profile=profile, question=question, reported=reported, card=card, facts=facts,
                           narrative=narrative, thresholds=t, flags=flags, promises=promises, peer=peer,
                           prices=checked.prices, run_note=OFFLINE_NOTE if offline else None,
-                          input_files=input_files, web_sources=web_sources)
+                          input_files=input_files, web_sources=web_sources,
+                          entered_by_user=[r["label"] for r in (intake or {}).get("rows", [])
+                                           if r.get("status") == "Entered by user"])
     try:
         pdf = build_report(inputs, run_dir)
     except ReportLayoutError as e:

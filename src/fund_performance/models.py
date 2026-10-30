@@ -3,7 +3,7 @@ from datetime import date
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-Source = Literal["factsheet", "calculated", "ai_extracted", "web"]
+Source = Literal["factsheet", "calculated", "ai_extracted", "user", "web"]   # "user": corrected on the page
 ObjectiveType = Literal["index_tracker", "active_target", "active_comparator", "active_constraint",
                         "income_target", "absolute_return"]
 BenchmarkRole = Literal["target", "comparator", "constraint", "none"]
@@ -41,6 +41,8 @@ class FundProfile(_Strict):
     pricing_point: PricingPoint
     as_of_date: date
     asset_class: str = "equity"
+    # Documents route (step 11 update): who gave each field, e.g. {"ocf_pct": "user", "isin": "ai_extracted"}
+    field_sources: dict[str, Literal["ai_extracted", "user", "code"]] = Field(default_factory=dict)
 
 
 class SeriesReturns(_Strict):
@@ -80,6 +82,8 @@ class FactsheetPerformance(_Strict):
     series_annualised: dict[str, SeriesReturns] = Field(default_factory=dict)
     discrete_12m: dict[str, dict[date, float]] = Field(default_factory=dict)
     risk_3y_nav: Risk3y | None = None
+    # Figures a person corrected on the page before the run, e.g. ["index.5y"] (reported as "Entered by user")
+    user_entered: list[str] = Field(default_factory=list)
 
     @field_validator("series_annualised")
     @classmethod

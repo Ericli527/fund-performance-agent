@@ -33,6 +33,7 @@ RATING_COLOURS = {GREEN: "#2e7d32", AMBER: "#d18f00", RED: "#c62828", CHECK_DATA
 VERDICT_COLOURS = {"Retain": GREEN, "Monitor": AMBER, "Review": RED, "Pending": CHECK_DATA}
 RATING_WORDS = {GREEN: "Green", AMBER: "Amber", RED: "Red", CHECK_DATA: "Check data", MANUAL_CHECK: "Manual check"}
 SOURCE_WORDS = {"factsheet": "Factsheet", "calculated": "Calculated", "ai_extracted": "AI-extracted (please verify)",
+                "user": "Entered by user",
                 "web": "Web"}
 AOV_DISCLAIMER = ("This is an indicative assessment from public data. It does not replace the AFM's formal "
                   "Assessment of Value.")
@@ -67,6 +68,7 @@ class ReportInputs:
     flags: list[DataFlag] = field(default_factory=list)
     input_files: list[str] = field(default_factory=list)
     web_sources: list[dict] | None = None   # numbered sources from the run log (step 10); else the narrative's
+    entered_by_user: list[str] = field(default_factory=list)   # documents route: figures corrected on the page
     promises: list[str] = field(default_factory=list)
     peer: Peer | None = None
     prices: pd.DataFrame | None = None
@@ -110,6 +112,12 @@ def _years(inp: ReportInputs) -> int:
 
 
 # --- Plain-English one-line reasons for page 1 ---------------------------------------------------------------
+
+def _profile_source(p: FundProfile, key: str, default: str) -> str:
+    """ Documents route: who gave a profile value (AI-extracted, entered by user, derived by code) """
+    return {"ai_extracted": "AI-extracted (please verify)", "user": "Entered by user",
+            "code": "Derived by code (please verify)"}.get(p.field_sources.get(key, ""), default)
+
 
 def plain_reason(inp: ReportInputs, name: str) -> str:
     pillar = inp.card.pillars[name]
@@ -451,7 +459,8 @@ def _page3(inp: ReportInputs) -> str:
                 f"<tr><td class='l'>{escape(inp.peer.name)}</td><td>{inp.peer.ocf_pct:.2f}%</td>"
                 f"<td>{'–' if peer_ret is None else f'{peer_ret:.1f}%'}</td><td class='src'>Peer file</td></tr></table>")
     fees = (f"<table class='grid'><tr><th class='l'>Charge</th><th class='l'>This fund</th><th class='l'>Source</th></tr>"
-            f"<tr><td class='l'>Ongoing charge (OCF)</td><td class='l'>{p.ocf_pct:.2f}% a year</td><td class='l src'>Factsheet / KID (profile)</td></tr>"
+            f"<tr><td class='l'>Ongoing charge (OCF)</td><td class='l'>{p.ocf_pct:.2f}% a year</td><td class='l src'>"
+            f"{_profile_source(p, 'ocf_pct', 'Factsheet / KID (profile)')}</td></tr>"
             f"<tr><td class='l'>Transaction costs</td><td class='l'>"
             f"{'Not disclosed in the documents provided' if p.transaction_cost_pct is None else f'{p.transaction_cost_pct:.2f}%'}"
             f"</td><td class='l src'>Profile</td></tr>"
@@ -527,6 +536,10 @@ def _appendix(inp: ReportInputs, compact: bool, main_text: str = "") -> str:
                          + "".join(f"<li>{escape(f.message)}</li>" for f in items)
                          + (f"<li>… and {more} more (full list in run_log.txt)</li>" if more > 0 else "") + "</ul>")
     sources = "".join(f"<li>Input file: {escape(x)}</li>" for x in inp.input_files)
+    if inp.profile.field_sources:
+        sources += ("<li>Fund details and factsheet figures were read by the Extractor Agent (AI-extracted, please "
+                    "verify) and confirmed on the page. Entered by user: "
+                    + (escape(", ".join(inp.entered_by_user)) or "nothing") + ".</li>")
     sources += "".join(
         f"<li>[{s['number']}] {escape(s['query'])} · {'as at' if s.get('date_basis') == 'as_at' else 'published'} "
         f"{s['date']} · {escape(s['url'])}</li>"

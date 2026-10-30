@@ -4,7 +4,7 @@ from pathlib import Path
 import os
 from typing import Literal, get_args
 import yaml
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 DEFAULT_PATH = Path(__file__).resolve().parents[2] / "config" / "thresholds.yaml"
 
@@ -222,8 +222,14 @@ class EmailSettings(_Section):
     subject: str
 
 
+class WebSettings(_Section):
+    max_ai_runs_per_day: int = Field(gt=0)
+    max_ai_runs_at_once: int = Field(gt=0)
+
+
 class RunSettings(_Section):
     timeouts_seconds: Timeouts
+    web: WebSettings
     email: EmailSettings
 
 
