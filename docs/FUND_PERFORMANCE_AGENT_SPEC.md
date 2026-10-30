@@ -582,15 +582,21 @@ dashboard also uses, so all three show the same verdict, ratings and headline fi
    ("Not available", never zero); the suggested conclusion (who wrote it: code, or the AI draft the Judge chose);
    two or three key findings that add to the ratings (the data-note findings, then points for judgement); one
    chart chosen by mandate and data: yearly gap to the index with the Green/Amber bands (index funds), yearly
-   return above the benchmark (other funds), 12-month returns fund vs index or benchmark, or none with a note; the
+   return above the benchmark (other funds), 12-month returns fund vs index or benchmark, or none with a note. When a
+   blocking currency or benchmark mismatch (`currency_match`, `implausible_tracker_gap`) makes the fund-vs-index
+   comparison unreliable, the chart is replaced by a box that says why (the Detailed Report keeps the original
+   charts, marked "Read with care … not reliable"); the
    four ratings (a rating waiting for a data check says so instead of repeating the data issue).
-2. **Comparisons and decision:** fund vs index vs peers (1, 3, 5 years; fee; what each peer is used for); fees
+2. **Comparisons and decision:** fund vs index vs peers (1, 3, 5 years; fee; what each peer is used for; a second
+   fund row on the price basis the peers were compared with, when it differs; one line per peer with share class,
+   currency, minimum investment, pricing basis and the peer checks' notes, e.g. institutional class); fees
    (OCF, transaction costs, performance fee, peers' fees, peer return gap); selected risk measures with sources;
    material issues: performance concerns, kept apart from "not enough evidence to judge" (data check, no peer),
    then data issues: every blocking check in full, the first three warnings in full and "… and N more data
    warnings, listed in full in the Detailed Report (Appendix D)"; recommended actions; up to three questions for
-   the manager; analyst approval (decision tick boxes Satisfied / Monitor / Action needed, comments, "If you
-   disagree with the suggested assessment, why?", name, date, signature, a tick box per Manual check item).
+   the manager (with no peer comparison, a question asking for suitable peers, never "why is the fee higher");
+   analyst sign-off (the suggested assessment, decision tick boxes Satisfied / Monitor / Action needed, a tick box
+   per Manual check item, comments, "If you disagree with the suggested assessment, why?", name, date, signature).
    Material warnings are never shortened. If the content cannot fit two pages without losing information,
    `ReportLayoutError` is raised: the controller then adds the warning "Executive Report not produced: …; nothing
    was cut" and still builds the Detailed Report.
@@ -611,6 +617,10 @@ page, of any length (nothing is shortened):
   and input files, the plan and the drafts with the Judge's checklist, the calculated Sharpe ratio note,
   thresholds, glossary of the terms used, known limitations, the public-data note and the disclaimer.
 Code checks the order after every render; a missing or misplaced section is a `ReportLayoutError`.
+
+File names people see: downloads and email attachments are named
+`{Fund_Name}_{Executive|Detailed}_Report_{YYYY-MM-DD}.pdf` (the end of the review period); the run folder keeps
+`report.pdf` and `report_executive.pdf` (the web page serves copies from `download/` next to them).
 
 Email (`config/settings.yaml`, `email.attachment`): the Executive Report by default, `detailed` for report.pdf;
 the Detailed Report is attached when the Executive Report could not be produced (said in the run log). The web

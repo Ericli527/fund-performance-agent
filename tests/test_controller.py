@@ -72,7 +72,8 @@ def test_test1_offline_run_logs_every_step(tmp_path):
     assert log["run"]["status"] == "ok" and all(s["ended"] for s in log["steps"])
     assert log["steps"][7]["outputs"]["verdict"] == "Monitor until a peer is added"
     assert "fund_profile.json" in log["sources"]["input_files"] and log["sources"]["web"] == []
-    appendix = page_texts(result.pdf)[-1]
+    texts = page_texts(result.pdf)
+    appendix = " ".join(texts[next(i for i, x in enumerate(texts) if "Appendix D" in x):])
     assert all(name.split(" (")[0] in appendix for name in log["sources"]["input_files"])
     assert OFFLINE_NOTE in (result.run_dir / "run_log.txt").read_text()
     assert (result.run_dir / "facts.json").exists()
@@ -225,10 +226,14 @@ def test_email_when_switched_on_goes_through_resend_and_is_logged(tmp_path, monk
                                     runners=Runners(email_post=post)))
     email = result.log.step("email")
     assert email.status == "ok" and email.notes == ["Email: sent to 1 recipient(s) from EMAIL_TO"]
-    assert post.calls[0]["json"]["attachments"][0]["filename"] == "report_executive.pdf"     # the default (stage 3)
+    assert post.calls[0]["json"]["attachments"][0]["filename"] == \
+        "Fidelity_Index_US_Fund_P_Accumulation_Executive_Report_2026-09-30.pdf"     # the default (stage 3), readable name
     s.email = s.email.model_copy(update={"attachment": "detailed"})                      # the option kept
-    asyncio.run(run_review(TEST1, out_root=tmp_path, offline=True, settings=s, runners=Runners(email_post=post)))
-    assert post.calls[1]["json"]["attachments"][0]["filename"] == "report.pdf"
+    detailed = asyncio.run(run_review(TEST1, out_root=tmp_path, offline=True, settings=s,
+                                      runners=Runners(email_post=post)))
+    assert post.calls[1]["json"]["attachments"][0]["filename"] == \
+        "Fidelity_Index_US_Fund_P_Accumulation_Detailed_Report_2026-09-30.pdf"
+    assert (result.executive_pdf.name, detailed.pdf.name) == ("report_executive.pdf", "report.pdf")   # kept inside
 
 
 # Task Planner, Reporting Agents and the Judge in the run

@@ -25,6 +25,7 @@ from fund_performance.models import DataFlag, Figure, FundProfile, Peer
 from fund_performance.evidence import Evidence
 from fund_performance.peers import PeerComparison, as_list
 from fund_performance.plain import plain_peer_reason
+from fund_performance.presentation import NOT_RELIABLE, comparison_problems
 from fund_performance.precedence import ReportedFigures
 from fund_performance.scorecard import AMBER, CHECK_DATA, GREEN, MANUAL_CHECK, RED, Scorecard
 
@@ -286,7 +287,7 @@ def _chart_images(inp: ReportInputs, out_dir: Path) -> tuple[Path | None, Path |
 def _img(path: Path | None) -> str:
     if path is None:
         return "<p class='small'>Not enough data for this chart.</p>"
-    return f'<img src="data:image/png;base64,{base64.b64encode(path.read_bytes()).decode()}" width="245"/>'
+    return f'<img src="data:image/png;base64,{base64.b64encode(path.read_bytes()).decode()}" width="280"/>'
 
 
 OBJECTIVE_WORDS = {
@@ -478,6 +479,13 @@ def inp_level(inp: ReportInputs) -> float:
     return load_settings().statistics.significance_level
 
 
+def _not_reliable(inp: ReportInputs) -> str:
+    """ A warning above charts that compare the fund with an index the data checks found mismatched """
+    if not comparison_problems(inp.flags):
+        return ""
+    return f"<table class='callout'><tr><td><b>Read with care.</b> {escape(NOT_RELIABLE)}</td></tr></table>"
+
+
 def _dashboard(inp: ReportInputs, out_dir: Path) -> str:
     out_dir.mkdir(parents=True, exist_ok=True)
     cells, left_out = [], []
@@ -485,7 +493,7 @@ def _dashboard(inp: ReportInputs, out_dir: Path) -> str:
         if chart is None:
             left_out.append(caption)
             continue
-        image = f'<img src="data:image/png;base64,{base64.b64encode(chart.read_bytes()).decode()}" width="250"/>'
+        image = f'<img src="data:image/png;base64,{base64.b64encode(chart.read_bytes()).decode()}" width="290"/>'
         cells.append(f"<td width='50%' valign='top' align='center'>{image}<p class='small'>{escape(caption)}</p></td>")
     if len(cells) % 2:
         cells.append("<td width='50%'></td>")
@@ -494,6 +502,7 @@ def _dashboard(inp: ReportInputs, out_dir: Path) -> str:
     return f"""
 <h1>Appendix A: Evidence dashboard</h1>
 <p class="small">Charts and statistics are calculated by code from the sources shown under each one. No AI.</p>
+{_not_reliable(inp)}
 <table width="100%">{grid}</table>
 {_statistics(inp)}
 """
@@ -516,6 +525,7 @@ def _page2(inp: ReportInputs, out_dir: Path) -> str:
 <h3>Calendar-year returns</h3>{_calendar_table(inp)}
 <h3>Risk</h3>{_risk_table(inp)}
 <h3>Below the surface</h3><ul class="tight">{notes or '<li>No data notes.</li>'}</ul>
+{_not_reliable(inp) if growth or yearly else ''}
 <table width="100%"><tr><td align="center">{_img(growth)}</td><td align="center">{_img(yearly)}</td></tr></table>
 <p class="small">{escape(caption)}</p>
 """
@@ -747,12 +757,12 @@ CSS = f"""
 @font-face {{ font-family: DejaVu; src: url("fonts/DejaVuSans-Bold.ttf"); font-weight: bold; }}
 @page {{ size: a4 portrait; margin: 1.3cm 1.5cm 1.7cm 1.5cm;
   @frame footer {{ -pdf-frame-content: footer; left: 1.5cm; width: 18cm; bottom: 0.6cm; height: 0.8cm; }} }}
-body {{ font-family: DejaVu; font-size: 8.2pt; line-height: 1.3; color: #1d2733; }}
-h1 {{ font-size: 13pt; color: {NAVY}; border-bottom: 1.5px solid {NAVY}; padding-bottom: 2px; margin: 4px 0 6px 0; }}
-h2 {{ font-size: 10pt; color: {NAVY}; margin: 8px 0 3px 0; }}
+body {{ font-family: DejaVu; font-size: 8.8pt; line-height: 1.35; color: #1d2733; }}
+h1 {{ font-size: 14pt; color: {NAVY}; border-bottom: 1.5px solid {NAVY}; padding-bottom: 2px; margin: 4px 0 7px 0; }}
+h2 {{ font-size: 10.8pt; color: {NAVY}; margin: 10px 0 4px 0; }}
 h3 {{ font-size: 9pt; color: {NAVY}; margin: 7px 0 3px 0; }}
 p {{ margin: 0 0 3px 0; }} ul, ol {{ margin: 0 0 3px 0; }} li {{ margin-bottom: 1px; }}
-.small {{ font-size: 7pt; color: #4c5966; }}
+.small {{ font-size: 7.6pt; color: #4c5966; }}
 .banner td {{ background-color: {NAVY}; color: white; padding: 7px 9px; }}
 .kicker {{ font-size: 6.8pt; color: #b9cbe0; }} .fund {{ font-size: 14pt; font-weight: bold; }} .meta {{ font-size: 7.5pt; color: #dce6f1; }}
 .facts td {{ padding: 2px 4px; vertical-align: top; }} .facts .label {{ width: 18%; color: #4c5966; font-weight: bold; }}
@@ -762,7 +772,7 @@ p {{ margin: 0 0 3px 0; }} ul, ol {{ margin: 0 0 3px 0; }} li {{ margin-bottom: 
 .grid td {{ padding: 2px 3px 1px 3px; border-bottom: 0.5px solid #d5dbe1; vertical-align: top; }}
 .num td, .num th {{ text-align: right; }} .num td.l, .num th.l, .l {{ text-align: left; }}
 .tiny td, .tiny th {{ font-size: 7pt; }}
-.src {{ color: #4c5966; font-size: 6.8pt; }}
+.src {{ color: #4c5966; font-size: 7.4pt; }}
 .total td {{ font-weight: bold; background-color: #f1f4f8; }}
 .chip {{ color: white; font-weight: bold; text-align: center; vertical-align: middle; }}
 .ratings td {{ padding: 4px 4px 3px 4px; }} .q {{ width: 27%; }}
@@ -772,7 +782,7 @@ p {{ margin: 0 0 3px 0; }} ul, ol {{ margin: 0 0 3px 0; }} li {{ margin-bottom: 
 .tight li {{ margin-bottom: 0; }}
 .concl {{ background-color: #f1f4f8; padding: 4px 6px; margin: 4px 0; }}
 .grid td.sub {{ background-color: #e8edf3; color: {NAVY}; font-weight: bold; font-size: 6.8pt; text-align: left; }}
-#footer {{ font-size: 6.8pt; color: #4c5966; border-top: 0.5px solid #d5dbe1; padding-top: 2px; }}
+#footer {{ font-size: 7.2pt; color: #4c5966; border-top: 0.5px solid #d5dbe1; padding-top: 2px; }}
 """
 
 

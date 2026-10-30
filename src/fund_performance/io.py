@@ -226,9 +226,15 @@ def read_json(path: str | Path) -> FactsheetPerformance | FundProfile | Peer:
 
 
 def read_peers(path: str | Path) -> list[Peer]:
-    """ peer.json: one peer, or a list of peers """
+    """ peer.json: one peer, or a list of peers. A peer with a minimum investment but no share class type gets its
+    type from code, as an uploaded factsheet does (£1m or more: institutional) """
+    from fund_performance.peers import investor_type
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    return [Peer.model_validate(d) for d in (data if isinstance(data, list) else [data])]
+    peers = [Peer.model_validate(d) for d in (data if isinstance(data, list) else [data])]
+    for peer in peers:
+        if peer.investor_type is None and peer.minimum_investment:
+            peer.investor_type = investor_type(peer.share_class, peer.minimum_investment)
+    return peers
 
 
 def read_document(path: str | Path) -> str:

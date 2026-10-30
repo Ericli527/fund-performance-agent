@@ -140,7 +140,9 @@ Instructions for Claude Code in this project. The build specification is
   box has "Analyst's comments" and "If you disagree with the suggested verdict, why?".
 - Shared presentation helpers (`presentation.py`): headline figures, evidence quality, caveat, risk rows, chart
   choice, insufficient evidence vs performance concerns; used by the dashboard and both PDFs (consistency tested).
-  Email attaches the Executive Report by default (`email.attachment: detailed` for report.pdf). The web page offers
+  Email attaches the Executive Report by default (`email.attachment: detailed` for report.pdf). Downloads and attachments are
+  named `{Fund_Name}_{Executive|Detailed}_Report_{YYYY-MM-DD}.pdf`; the run folder keeps report.pdf/report_executive.pdf.
+  A blocking currency or benchmark mismatch replaces the executive chart with an explanation (Detailed keeps it, marked). The web page offers
   both PDFs: Analyst view = Detailed primary, Management view = Executive primary (no rerun). Evidence dashboard
   (Appendix A) is code only (`evidence.py`, charts): t-test level and min points in `config/settings.yaml`.
 - Agent team (spec 8.6): Task Planner (menu choices only; code keeps all four ratings; default plan offline or on

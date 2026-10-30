@@ -77,3 +77,15 @@ def test_questions_are_2_to_4_and_follow_the_findings():
     q = manager_questions(facts("Review", ("GREEN", "RED", "AMBER", "AMBER"), fee_note="The fee explains only part"))
     assert q[0].startswith("What caused the gap to the index over 5 years") and len(q) == 4
     assert "What were the fund's transaction costs over the last year?" in manager_questions(facts())
+
+
+def test_without_a_peer_the_question_asks_for_peers_not_why_the_fee_is_higher():
+    """ Stage 3.1: with no valid peer comparison (Fees "Add peer") nothing says the fee is higher than peers' """
+    no_peer = facts("Monitor until a peer is added", ("GREEN", "GREEN", "AMBER", "AMBER"))
+    for p in no_peer["scorecard"]["pillars"][2:]:
+        p["summary"] = "Add peer"
+    q = manager_questions(no_peer)
+    assert not any("higher" in x for x in q)
+    assert q[0].startswith("Which comparable funds (same index, currency and share class type)")
+    rated = manager_questions(facts("Monitor", ("GREEN", "GREEN", "GREEN", "AMBER")))     # a real peer comparison
+    assert "Why is the fee higher than comparable funds', and is a cheaper share class available?" in rated

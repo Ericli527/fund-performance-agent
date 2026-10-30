@@ -186,3 +186,69 @@ def risk_measures(facts: dict) -> list[tuple[str, str, str]]:
               (f"Largest fall, {n} years (fund)", f"fund_nav.mdd.{n}y"), ("12-month windows within the fee + margin",
                                                                           "comparison.hit_rate")]
     return [(label, _shown(figs[name]), _source(figs[name])) for label, name in wanted if name in figs]
+
+
+# --- File names people see (downloads and email); the run folder keeps report.pdf and report_executive.pdf -------
+
+REPORT_KINDS = {"report.pdf": "Detailed", "report_executive.pdf": "Executive"}
+
+
+def report_filename(fund_name: str, kind: str, as_of) -> str:
+    """ {Fund_Name}_{Executive|Detailed}_Report_{YYYY-MM-DD}.pdf, dated at the end of the review period """
+    import re
+    name = re.sub(r"[^A-Za-z0-9]+", "_", fund_name or "Fund").strip("_") or "Fund"
+    return f"{name}_{kind}_Report_{as_of:%Y-%m-%d}.pdf"
+
+
+def download_copy(pdf, fund_name: str, as_of):
+    """ A copy of report.pdf or report_executive.pdf under its readable name, in a 'download' folder next to it (the
+    browser saves a file under its own name); the original stays where the run log and tests expect it """
+    import shutil
+    from pathlib import Path
+    pdf = Path(pdf)
+    target = pdf.parent / "download" / report_filename(fund_name, REPORT_KINDS.get(pdf.name, "Detailed"), as_of)
+    target.parent.mkdir(exist_ok=True)
+    shutil.copyfile(pdf, target)
+    return target
+
+
+# --- A mismatch that makes the fund-vs-index comparison unreliable ------------------------------------------------
+
+# Blocking data checks that mean the fund and its index (or benchmark) are not on the same footing: a chart of the
+# gap between them would mislead until the check is resolved
+COMPARISON_CHECKS = ("currency_match", "implausible_tracker_gap")
+
+
+def comparison_problems(flags) -> list[str]:
+    """ The blocking messages that invalidate the fund-vs-index comparison (empty when there are none) """
+    return [f["message"] for f in flag_dicts(flags) if f["level"] == "blocking" and f["check"] in COMPARISON_CHECKS]
+
+
+CHART_LEFT_OUT = ("A data check found a currency or benchmark mismatch between the fund and its index (see the data "
+                  "issues on page 2), so a chart of the gap between them would mislead. Resolve the data check first. "
+                  "The original charts are kept in the Detailed Report (Appendix A), marked as not reliable.")
+NOT_RELIABLE = ("Not reliable until the data check is resolved: a currency or benchmark mismatch means the fund and "
+                "its index are not on the same footing. These charts are kept as the original evidence only.")
+
+
+def merge_same_ending(items: list[str], ending: str, joiner: str = "and") -> list[str]:
+    """ "Mandate: X" and "Performance: X" -> "Mandate and Performance: X" (same wording, said once) """
+    same = [i for i in items if i.endswith(ending)]
+    if len(same) < 2:
+        return items
+    names = [i[: -len(ending)] for i in same]
+    merged = (", ".join(names[:-1]) + f" {joiner} " + names[-1]) + ending
+    out, done = [], False
+    for i in items:
+        if i in same:
+            if not done:
+                out.append(merged)
+                done = True
+        else:
+            out.append(i)
+    return out
+
+
+def report_action(text: str) -> str:
+    """ An action as the PDFs show it: the old page reference points to the Detailed Report's appendices """
+    return text.replace("on pages 2 to 4", "in the Detailed Report (Appendices A to D)")

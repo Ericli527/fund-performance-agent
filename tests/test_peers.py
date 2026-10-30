@@ -26,6 +26,15 @@ VANGUARD = dict(name="Vanguard S&P 500 UCITS ETF (USD) Accumulating", isin="IE00
                 returns_annualised={"1y": 15.46, "3y": 22.57, "5y": 13.48, "basis": "annualised"})
 
 
+# HSBC American Index Fund Acc C, typed from its public factsheet (30 Sep 2026): GBP, accumulation, valued at 12:00 UK,
+# minimum initial investment GBP 1,000,000. The share class type is left out on purpose: code derives it
+HSBC_ACC_C = dict(name="HSBC American Index Fund Acc C", isin="GB00B80QG615", ocf_pct=0.07, currency="GBP",
+                  share_class="Acc C", pricing_point="midday", distribution="accumulation",
+                  minimum_investment="GBP 1,000,000", vol_3y=13.17, origin="uploaded",
+                  returns={"1y": 17.42, "basis": "cumulative"},
+                  returns_annualised={"1y": 17.42, "3y": 19.23, "5y": 13.47, "basis": "annualised"})
+
+
 def test_the_config_lists_the_two_approved_sp500_peers():
     group = load_peers().for_benchmark("S&P 500 Index NUK")
     assert [p.isin for p in group.peers] == ["IE00BFMXXD54", "GB00BYWKBM47"]
@@ -150,3 +159,39 @@ def test_approved_peers_are_read_by_the_extractor_when_no_peer_is_given(tmp_path
     assert step["status"] == "ok" and step["outputs"]["peers"] == ["HSBC American Index Fund"]
     assert any("hsbc.docx (approved peer" in f for f in log["sources"]["input_files"])
     assert result.facts["peers"][0]["investor_type"] == "institutional"
+
+
+def test_a_typed_peer_with_a_1m_minimum_is_institutional(tmp_path):
+    """ Stage 3.1: peer.json gets the share class type from the minimum investment, as an uploaded factsheet does """
+    from fund_performance.io import read_peers
+    path = tmp_path / "peer.json"
+    path.write_text(json.dumps([HSBC_ACC_C, {k: v for k, v in HSBC_ACC_C.items() if k != "minimum_investment"}]))
+    with_minimum, without = read_peers(path)
+    assert with_minimum.investor_type == "institutional" and without.investor_type is None
+
+
+@requires_test1
+def test_fidelity_with_the_hsbc_acc_c_peer(tmp_path):
+    """ Stage 3.1: Fidelity Index US Fund P Acc against HSBC American Index Fund Acc C, both GBP accumulation classes
+    priced at noon UK: returns compared noon NAV with noon NAV over 1, 3 and 5 years; fees 0.06% vs 0.07%; the GBP 1m
+    minimum is flagged as an institutional class. Ratings from the unchanged thresholds """
+    from fund_performance.controller import run_review
+    from fund_performance.report import page_texts
+    folder = tmp_path / "in"
+    shutil.copytree(TEST1, folder, ignore=shutil.ignore_patterns("*.pdf", "golden"))
+    (folder / "peer.json").write_text(json.dumps(HSBC_ACC_C))
+    result = asyncio.run(run_review(folder, out_root=tmp_path / "runs", offline=True))
+    pillars = {p["name"]: p for p in result.facts["scorecard"]["pillars"]}
+    assert (pillars["Value for investors"]["rating"], pillars["Fees"]["rating"]) == ("GREEN", "GREEN")
+    assert result.facts["scorecard"]["verdict"] == "Retain"
+    peer = result.facts["peers"][0]
+    assert peer["used_for_returns"] and peer["basis"] == "noon NAV vs noon NAV" and peer["currency"] == "GBP"
+    assert peer["returns_pct_a_year"] == {"1y": 17.42, "3y": 19.23, "5y": 13.47}
+    assert peer["investor_type"] == "institutional" and peer["notes"] == [INSTITUTIONAL_NOTE]
+    value = pillars["Value for investors"]["values"]
+    assert (value["fund_ann"], value["peer_ann"], value["gap_pp"]) == (13.5, 13.47, -0.03)
+    assert not any("fee higher" in q for q in result.facts["manager_questions"])
+    p2 = " ".join(page_texts(result.executive_pdf)[1].split())
+    assert "This fund, noon price (NAV): compared with peers 17.5% 19.1% 13.5% 0.06%" in p2
+    assert "HSBC American Index Fund Acc C 17.4% 19.2% 13.5% 0.07%" in p2
+    assert "minimum investment GBP 1,000,000; pricing: noon NAV vs noon NAV" in p2

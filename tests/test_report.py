@@ -2,6 +2,7 @@
 executive pages plus Appendices A to D): layout, display rules and content, on made-up data and on Test 1 """
 import asyncio
 import json
+import re
 import numpy as np
 import pandas as pd
 import pytest
@@ -60,7 +61,8 @@ def section(texts: list[str], title: str) -> str:
     starts = [next(i for i, x in enumerate(texts) if name in x) for name in PAGE_TITLES]
     i = PAGE_TITLES.index(title)
     end = starts[i + 1] if i + 1 < len(starts) else len(texts)
-    return " ".join(" ".join(texts[starts[i]:max(end, starts[i] + 1)]).split())
+    pages = [re.sub(r"^.*?Page \d+ of \d+", "", x, count=1, flags=re.S) for x in texts[starts[i]:max(end, starts[i] + 1)]]
+    return " ".join(" ".join(pages).split())          # page footers left out, so a sentence may cross a page break
 
 
 def test_made_up_reports_layout(tmp_path):
@@ -132,7 +134,7 @@ def test_test1_executive_pages_stand_on_their_own(test1_pdf):
         assert text in p1, text
     for text in ("Benchmark and peers", "Fees", "Not disclosed in the documents provided", "Risk",
                  "Tracking error, 3 years", "Material issues", "Not enough evidence to judge", "Recommended actions",
-                 "Questions for the manager", "Analyst approval", "Reviewer name", "Satisfied", "Action needed",
+                 "Questions for the manager", "Analyst sign-off", "Suggested assessment: Monitor until a peer is added", "Reviewer name", "Satisfied", "Action needed",
                  "Analyst's comments", "If you disagree with the suggested assessment, why?", "Signature"):
         assert text in p2, text
 

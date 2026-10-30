@@ -294,7 +294,11 @@ def test_a_finished_demo_fills_the_dashboard_and_the_audience_redraws_it(tmp_pat
     outcome = asyncio.run(start_review("q", d["price"], d["factsheet"], None, [d["peer"]], d["json"], True, limits,
                                        out_root=tmp_path))
     assert outcome.data and outcome.data["facts"]["scorecard"]["verdict"] == "Retain"
-    assert outcome.pdf.endswith("report.pdf") and outcome.executive.endswith("report_executive.pdf")
+    # Downloads carry readable names; the run folder keeps report.pdf and report_executive.pdf
+    assert outcome.pdf.endswith("/download/Sample_World_Index_Fund_A_Acc_Detailed_Report_2026-09-30.pdf")
+    assert outcome.executive.endswith("/download/Sample_World_Index_Fund_A_Acc_Executive_Report_2026-09-30.pdf")
+    run_dir = Path(outcome.pdf).parents[1]
+    assert (run_dir / "report.pdf").is_file() and (run_dir / "report_executive.pdf").is_file()
     data = outcome.data | {"pdf": outcome.pdf, "executive_pdf": outcome.executive}
     redraw = _fn(build_ui(), "on_audience")
     (analyst, a_detailed, a_exec), (management, m_detailed, m_exec) = redraw(data, "analyst"), redraw(data, "management")

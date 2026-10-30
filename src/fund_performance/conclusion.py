@@ -235,7 +235,12 @@ def manager_questions(facts: dict) -> list[str]:
     if perf in ("RED", "AMBER"):
         found.append(f"What caused the gap to the {'index' if index_fund else 'benchmark'} over {n} years, and what "
                      "is being done about it?")
-    if pillars.get("Fees", {}).get("rating") in ("RED", "AMBER"):
+    fees = pillars.get("Fees", {})
+    if fees.get("summary") == "Add peer":
+        # No valid peer comparison: never claim the fee is higher; ask for the peers that would settle it
+        found.append("Which comparable funds (same index, currency and share class type) do you consider the fund's "
+                     "peers, and can you share their factsheets so fees and returns can be compared?")
+    elif fees.get("rating") in ("RED", "AMBER"):
         found.append("Why is the fee higher than comparable funds', and is a cheaper share class available?")
     if pillars.get("Value for investors", {}).get("rating") in ("RED", "AMBER") and \
             pillars["Value for investors"].get("summary") != "Add peer":

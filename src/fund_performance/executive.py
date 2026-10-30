@@ -16,10 +16,12 @@ from html import escape
 from pathlib import Path
 from fund_performance import charts
 from fund_performance.plain import verdict_meaning, verdict_name
-from fund_performance.presentation import (NAVY, NOT_AVAILABLE, RATING_STYLE, VERDICT_STYLE, _figures, _shown,
-                                           _source, assessment_caveat, chart_choice, evidence_quality, flag_dicts,
-                                           conclusion_origin, headline_metrics, issue_groups,
-                                           point_to_data_issues, risk_measures)
+import re
+from fund_performance.presentation import (CHART_LEFT_OUT, NAVY, NOT_AVAILABLE, RATING_STYLE, VERDICT_STYLE, _figures,
+                                           _shown, _source, assessment_caveat, chart_choice, comparison_problems,
+                                           evidence_quality, flag_dicts, conclusion_origin, headline_metrics,
+                                           issue_groups, merge_same_ending, point_to_data_issues, report_action,
+                                           risk_measures)
 
 PAGE1, PAGE2 = "Overview", "Comparisons and decision"
 EXEC_TITLES = (PAGE1, PAGE2)
@@ -34,6 +36,7 @@ class ExecutiveContent:
     data: dict              # facts, reasons, findings, actions, flags (as for the dashboard)
     chart: Path | None
     chart_caption: str
+    chart_left_out: bool = False     # True: a data check makes the fund-vs-index chart misleading, so it is replaced
 
 
 def content_from(inp, out_dir: Path) -> ExecutiveContent:
@@ -44,6 +47,8 @@ def content_from(inp, out_dir: Path) -> ExecutiveContent:
     data = {"facts": facts, "reasons": {name: plain_reason(inp, name) for name in inp.card.pillars},
             "findings": list(out.key_findings) if out else [], "actions": list(out.action_texts) if out else [],
             "flags": flag_dicts(inp.flags)}
+    if comparison_problems(inp.flags):
+        return ExecutiveContent(data, None, CHART_LEFT_OUT, True)
     chart, caption = _chart(inp, out_dir)
     return ExecutiveContent(data, chart, caption)
 
@@ -163,18 +168,24 @@ def page1(inp, content: ExecutiveContent) -> str:
     concl = data["facts"].get("suggested_conclusion") or {}
     findings = key_findings(data)
     import base64
-    chart = (f"<img src='data:image/png;base64,{base64.b64encode(content.chart.read_bytes()).decode()}' width='300'/>"
-             if content.chart else "")
+    if content.chart:
+        chart = (f"<img src='data:image/png;base64,{base64.b64encode(content.chart.read_bytes()).decode()}' width='330'/>"
+                 f"<p class='x-src'>{escape(content.chart_caption)}</p>")
+    elif content.chart_left_out:
+        chart = (f"<table class='x-callout'><tr><td><b>Chart left out: the comparison with the index is not reliable"
+                 f"</b><br/>{escape(content.chart_caption)}</td></tr></table>")
+    else:
+        chart = f"<p class='x-src'>{escape(content.chart_caption)}</p>"
     return f"""
 {_banner(inp)}
 <h1>{PAGE1}</h1>
 {_statuses(data)}
 {_metrics(data['facts'])}
-<table width="100%"><tr><td width="55%" valign="top">
+<table width="100%"><tr><td width="52%" valign="top">
 <h2>Summary</h2><p>{escape(concl.get('text', ''))}</p><p class='x-src'>{escape(conclusion_origin(concl))}; a draft for
 the analyst.</p>
 {'<h2>Key findings</h2>' + _ul(findings) if findings else ''}
-</td><td width="3%"></td><td valign="top" align="center">{chart}<p class='x-src'>{escape(content.chart_caption)}</p></td></tr></table>
+</td><td width="3%"></td><td valign="top" align="center">{chart}</td></tr></table>
 <h2>The four ratings</h2>{_scorecard(data)}
 """
 
@@ -192,6 +203,12 @@ def _comparison(inp, facts: dict) -> str:
     ann = lambda s: [_shown(figs.get(f"{s}.cum.1y")) if figs.get(f"{s}.cum.1y") else "–"] + [  # noqa: E731
         _shown(figs[f"{s}.ann.{k}y"]) if figs.get(f"{s}.ann.{k}y") else "–" for k in (3, 5)]
     rows = row(fund_label, ann(basis), f"{inp.profile.ocf_pct:.2f}%", _source(*(figs.get(f"{basis}.ann.{k}y") for k in (3, 5))), True)
+    peer_series = {"fund_pnav" if "PNAV" in p.get("basis", "") else "fund_nav"
+                   for p in facts.get("peers", []) if p.get("used_for_returns")}
+    for other in sorted(peer_series - {basis}):          # the peers were compared with the other fund series
+        words = "noon price (NAV)" if other == "fund_nav" else "market-close price (PNAV)"
+        rows += row(f"This fund, {words}: compared with peers", ann(other), f"{inp.profile.ocf_pct:.2f}%",
+                    _source(*(figs.get(f"{other}.ann.{k}y") for k in (3, 5))), True)
     rows += row("Index or benchmark", ann("index"), "–", _source(*(figs.get(f"index.ann.{k}y") for k in (3, 5))))
     for p in facts.get("peers", []):
         r = p.get("returns_pct_a_year", {})
@@ -205,9 +222,25 @@ def _comparison(inp, facts: dict) -> str:
             "Returns a year; 1 year is the 1-year return.")
     if not facts.get("peers"):
         note += " No comparable peer was supplied or approved for this benchmark."
+    peer_notes = [_peer_note(p) for p in facts.get("peers", [])]
     return ("<table class='x-grid num'><tr><th class='l' width='34%'>Fund</th><th>1 year</th><th>3 years</th>"
             f"<th>5 years</th><th>Fee</th><th class='l' width='25%'>Source / use</th></tr>{rows}</table>"
-            f"<p class='x-src'>{escape(note)}</p>")
+            f"<p class='x-src'>{escape(note)}</p>" + _ul(n for n in peer_notes if n))
+
+
+def _peer_note(peer: dict) -> str:
+    """ What a reader needs to judge a peer: share class, currency, minimum investment, pricing basis, and the
+    peer checks' notes (e.g. an institutional class) """
+    share_class = peer.get("share_class")
+    facts = [x for x in (None if share_class and share_class in peer["name"] else share_class,
+                         peer.get("distribution"), peer.get("currency")) if x]
+    parts = [", ".join(facts)] if facts else []
+    if peer.get("minimum_investment"):
+        parts.append(f"minimum investment {peer['minimum_investment']}")
+    if peer.get("basis"):
+        parts.append(f"pricing: {peer['basis']}")
+    parts += [n for n in peer.get("notes", []) if n]
+    return f"{peer['name']}: " + "; ".join(parts) + "." if parts else ""
 
 
 def _fees_and_risk(inp, facts: dict) -> str:
@@ -218,15 +251,17 @@ def _fees_and_risk(inp, facts: dict) -> str:
                  else f"{p.transaction_cost_pct:.2f}%"),
                 ("Performance fee", "Yes" if p.performance_fee else "None")]
     if fees.get("peer_ocf") is not None:
-        fee_rows.append(("Peers' average fee", f"{fees['peer_ocf']:.2f}% ({'; '.join(f'{x:.2f}%' for x in fees.get('peer_fees', []))})"))
+        each = fees.get("peer_fees", [])
+        fee_rows.append(("Peer's fee" if len(each) <= 1 else "Peers' average fee", f"{fees['peer_ocf']:.2f}% a year"
+                         + (f" ({'; '.join(f'{x:.2f}%' for x in each)})" if len(each) > 1 else "")))
     if value.get("gap_pp") is not None:
         fee_rows.append((f"Peer return gap, {value['years']} years", f"{value['gap_pp']:+.2f} pp a year".replace("-", "−")))
     fee_html = "".join(f"<tr><td class='l'>{escape(a)}</td><td class='l'>{escape(b)}</td></tr>" for a, b in fee_rows)
     risk = risk_measures(facts)[:6]
-    risk_html = "".join(f"<tr><td class='l'>{escape(a)}</td><td>{escape(b)}</td><td class='l x-src'>{escape(c)}</td></tr>"
+    risk_html = "".join(f"<tr><td class='l' width='58%'>{escape(a)}</td><td>{escape(b)}</td><td class='l x-src'>{escape(c)}</td></tr>"
                         for a, b, c in risk) or "<tr><td class='l' colspan='3'>No risk figures in the documents.</td></tr>"
-    return (f"<table width='100%'><tr><td width='48%' valign='top'><h2>Fees</h2><table class='x-grid'>{fee_html}</table>"
-            "</td><td width='4%'></td><td valign='top'><h2>Risk</h2><table class='x-grid num'><tr><th class='l'>Measure"
+    return (f"<table width='100%'><tr><td width='45%' valign='top'><h2>Fees</h2><table class='x-grid'>{fee_html}</table>"
+            "</td><td width='3%'></td><td valign='top' width='52%'><h2>Risk</h2><table class='x-grid num'><tr><th class='l'>Measure"
             f"</th><th>Value</th><th class='l'>Source</th></tr>{risk_html}</table></td></tr></table>")
 
 
@@ -234,6 +269,7 @@ def material_issues(data: dict) -> str:
     """ Insufficient evidence apart from performance concerns, then data issues in full (never shortened) """
     quality = evidence_quality(data)
     gaps, concerns = issue_groups(data["facts"], data["reasons"])
+    gaps = merge_same_ending(gaps, ": not rated until the data check is resolved (see the data issues)")
     body = ""
     if concerns:
         body += "<p class='x-group'>Performance concerns</p>" + _ul(concerns)
@@ -252,15 +288,36 @@ def material_issues(data: dict) -> str:
     return body or "<p>No performance concerns, no gaps in the evidence and no data issues.</p>"
 
 
+RESOLVE = re.compile(r"^Resolve the data check on (.+?) (before signing off this review \(see the data issues\)\.)$")
+
+
+def merge_resolve_actions(actions: list[str]) -> list[str]:
+    """ "Resolve the data check on Mandate ..." and "... on Performance ..." -> one action naming both """
+    matched = [(a, RESOLVE.match(a)) for a in actions]
+    names = [m.group(1) for _, m in matched if m]
+    if len(names) < 2:
+        return actions
+    tail = next(m.group(2) for _, m in matched if m)
+    merged = f"Resolve the data check on {', '.join(names[:-1])} and {names[-1]} {tail}"
+    out = []
+    for a, m in matched:
+        if not m:
+            out.append(a)
+        elif merged not in out:
+            out.append(merged)
+    return out
+
+
 def page2(inp, content: ExecutiveContent) -> str:
     data = content.data
     facts = data["facts"]
     questions = facts.get("manager_questions", [])[:MAX_QUESTIONS]
     blocking = evidence_quality(data).blocking
-    actions = [point_to_data_issues(a, blocking) for a in data.get("actions", [])]
+    actions = merge_resolve_actions([report_action(point_to_data_issues(a, blocking)) for a in data.get("actions", [])])
+    suggested = verdict_name(facts["scorecard"]["verdict"])
     ticks = "".join(f"<td class='x-box-tick'>&nbsp;</td><td>{n}</td>" for n in ("Satisfied", "Monitor", "Action needed"))
-    manual = "".join(f"<tr><td class='x-box-tick'>&nbsp;</td><td>Manual check done: {escape(m.name)}: "
-                     f"{escape(m.reason)}</td></tr>" for m in inp.card.manual_checks)
+    manual = "".join(f"<tr><td class='x-box-tick'>&nbsp;</td><td>Manual check done: "
+                     f"{escape(m.name)}: {escape(m.reason)}</td></tr>" for m in inp.card.manual_checks)
     return f"""
 <h1>{PAGE2}</h1>
 <h2>Benchmark and peers</h2>{_comparison(inp, facts)}
@@ -268,42 +325,48 @@ def page2(inp, content: ExecutiveContent) -> str:
 <h2>Material issues</h2>{material_issues(data)}
 <h2>Recommended actions</h2>{_ul(actions) or '<p>None.</p>'}
 {'<h2>Questions for the manager</h2>' + _ul(questions) if questions else ''}
-<h2>Analyst approval</h2>
+<h2>Analyst sign-off</h2>
 <table class="x-approval">
-<tr><td width="20%">Reviewer name</td><td class="x-line">&nbsp;</td><td width="8%">Date</td><td class="x-line" width="22%">&nbsp;</td></tr>
-<tr><td>Decision</td><td colspan="3"><table class="x-ticks"><tr>{ticks}</tr></table></td></tr>
+<tr><td colspan="4" class="x-signoff-lead">Suggested assessment: <b>{escape(suggested)}</b>. The analyst decides; tick one.</td></tr>
+<tr><td width="22%" class="x-tick-head">Decision</td><td colspan="3"><table class="x-ticks"><tr>{ticks}</tr></table></td></tr>
+{f'<tr><td></td><td colspan="3"><table class="x-ticks">{manual}</table></td></tr>' if manual else ''}
 <tr><td>Analyst's comments</td><td class="x-line" colspan="3">&nbsp;</td></tr>
-<tr><td colspan="4">If you disagree with the suggested assessment, why?</td></tr>
 <tr><td>&nbsp;</td><td class="x-line" colspan="3">&nbsp;</td></tr>
+<tr><td colspan="2">If you disagree with the suggested assessment, why?</td><td class="x-line" colspan="2">&nbsp;</td></tr>
+<tr><td>Reviewer name</td><td class="x-line" width="38%">&nbsp;</td><td width="10%" class="x-right">Date</td><td class="x-line">&nbsp;</td></tr>
 <tr><td>Signature</td><td class="x-line" colspan="3">&nbsp;</td></tr>
 </table>
-{f'<table class="x-ticks">{manual}</table>' if manual else ''}
-<p class="x-src">Draft for oversight review from public data, prepared with AI assistance; every figure and rating comes
+<p class="x-src x-after">Draft for oversight review from public data, prepared with AI assistance; every figure and rating comes
 from code. Not investment advice. Full tables, sources, data checks and audit evidence: the Detailed Report.</p>
 """
 
 
 EXEC_CSS = f"""
 .x-banner td {{ background-color: {NAVY}; color: white; padding: 7px 10px; }}
-.x-kicker {{ font-size: 6.8pt; color: #b9cbe0; }} .x-fund {{ font-size: 14pt; font-weight: bold; }}
-.x-meta {{ font-size: 7.6pt; color: #dce6f1; }}
+.x-kicker {{ font-size: 7.4pt; color: #b9cbe0; }} .x-fund {{ font-size: 16pt; font-weight: bold; }}
+.x-meta {{ font-size: 8.4pt; color: #dce6f1; }}
 .x-status td.x-box, .x-metrics td.x-metric {{ border: 0.6px solid #dde3ea; padding: 6px 8px; vertical-align: top;
-  background-color: #ffffff; font-size: 7.6pt; }}
-.x-label {{ font-size: 6.6pt; color: #5b6878; }}
-.x-big {{ font-size: 12.5pt; font-weight: bold; }}
-.x-metrics {{ margin-top: 6px; }}
-.x-value {{ font-size: 14pt; font-weight: bold; color: {NAVY}; }} .x-na {{ font-size: 10pt; color: #5b6878; }}
-.x-src {{ font-size: 6.8pt; color: #5b6878; }}
-.x-list li {{ margin-bottom: 1px; }}
+  background-color: #ffffff; font-size: 8.4pt; }}
+.x-label {{ font-size: 7.2pt; color: #5b6878; }}
+.x-big {{ font-size: 14pt; font-weight: bold; }}
+.x-metrics {{ margin-top: 7px; }}
+.x-value {{ font-size: 15pt; font-weight: bold; color: {NAVY}; }} .x-na {{ font-size: 11pt; color: #5b6878; }}
+.x-src {{ font-size: 7.4pt; color: #5b6878; }}
+.x-list li {{ margin-bottom: 2px; }}
 .x-group {{ font-weight: bold; color: {NAVY}; margin-top: 3px; }}
-.x-grid th {{ background-color: #eef3fa; color: {NAVY}; padding: 2px 4px; font-size: 7.4pt; text-align: center; }}
-.x-grid td {{ padding: 2px 4px 1px 4px; border-bottom: 0.5px solid #dde3ea; vertical-align: top; }}
+.x-grid th {{ background-color: #eef3fa; color: {NAVY}; padding: 3px 4px; font-size: 8pt; text-align: center; }}
+.x-grid td {{ padding: 3px 4px 2px 4px; border-bottom: 0.5px solid #dde3ea; vertical-align: top; }}
 .x-grid.num td, .x-grid.num th {{ text-align: right; }} .x-grid td.l, .x-grid th.l {{ text-align: left; }}
 .x-total td {{ font-weight: bold; background-color: #f6f8fb; }}
-.x-chip {{ color: white; font-weight: bold; text-align: center; vertical-align: middle; font-size: 7.4pt; }}
+.x-chip {{ color: white; font-weight: bold; text-align: center; vertical-align: middle; font-size: 8.4pt; }}
 .x-q {{ width: 24%; }}
-.x-approval td {{ padding: 5px 4px 2px 4px; }} .x-line {{ border-bottom: 0.8px solid #1d2733; }}
-.x-ticks td {{ padding: 2px 4px; }} .x-box-tick {{ border: 0.8px solid #1d2733; width: 10px; }}
+.x-callout td {{ text-align: left; background-color: #f3eefa; border-left: 4px solid #6d4c9f; padding: 8px 10px; font-size: 8.8pt; }}
+.x-approval {{ background-color: #f6f8fb; }}
+.x-signoff-lead {{ font-size: 9pt; }}
+.x-approval td {{ padding: 8px 4px 1px 4px; }} .x-line {{ border-bottom: 0.8px solid #1d2733; }}
+.x-right {{ text-align: right; }} .x-after {{ margin-top: 8px; }}
+.x-ticks td {{ padding: 3px 4px; }} .x-box-tick {{ border: 1px solid #1d2733; width: 12px; background-color: #ffffff; }}
+.x-tick-head {{ font-weight: bold; color: {NAVY}; width: 22%; }}
 """
 
 

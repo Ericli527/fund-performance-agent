@@ -88,3 +88,10 @@ def test_missing_or_bad_email_to_is_not_sent(pdf, resend_key, monkeypatch):
     assert send_report(pdf, ON, "F", "d", post=FakePost()) == "Email: not sent, EMAIL_TO is not set"
     monkeypatch.setenv("EMAIL_TO", "oversight team")
     assert send_report(pdf, ON, "F", "d", post=FakePost()).startswith("Email: not sent, EMAIL_TO has an entry")
+
+
+def test_the_attachment_can_carry_a_readable_name(pdf, resend_key):
+    post = FakePost()
+    send_report(pdf, ON, "Fund", "30 Sep 2026", post=post, filename="Fund_Executive_Report_2026-09-30.pdf")
+    assert post.calls[0]["json"]["attachments"][0]["filename"] == "Fund_Executive_Report_2026-09-30.pdf"
+    assert pdf.name == "report.pdf"                                             # the file itself keeps its name

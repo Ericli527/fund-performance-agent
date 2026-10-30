@@ -127,6 +127,13 @@ def test_offline_controller_material_outcomes(tmp_path, scenario, verdict, perfo
         assert ' '.join(blocking.message.split()) in ' '.join(executive[1].split())   # never shortened
         assert 'Pending data check' in executive[0] and 'Data check needed' in executive[0]
         assert ' '.join(blocking.message.split()) in ' '.join(' '.join(page_texts(result.pdf)).split())
+        # Stage 3.1: the misleading gap chart is replaced on the Executive Report by an explanation; the Detailed
+        # Report keeps the original charts, marked as not reliable
+        assert 'Chart left out: the comparison with the index is not reliable' in ' '.join(executive[0].split())
+        assert not (result.run_dir / 'exec_chart.png').exists()
+        detailed = ' '.join(' '.join(page_texts(result.pdf)).split())
+        assert 'Read with care. Not reliable until the data check is resolved' in detailed
+        assert (result.run_dir / 'dash_gaps.png').is_file()
     if scenario == 'underperformance':
         assert 'Action needed' in json.dumps(facts)
     assert result.pdf.is_file()  # real controller/report execution, no mocked financial stages

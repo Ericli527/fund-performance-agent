@@ -87,7 +87,7 @@ def yearly_gap_chart(years: list[str], gaps: list[float], path: Path, title: str
     edge = amber if amber is not None else 0
     low, high = min(gaps + [-edge]), max(gaps + [edge])
     ax.set_ylim(low - 0.1 * (high - low), high + 0.1 * (high - low))
-    ax.legend(frameon=False, fontsize=5.5, ncol=2, loc="upper center", bbox_to_anchor=(0.5, -0.14))
+    ax.legend(frameon=False, fontsize=6.5, ncol=2, loc="upper center", bbox_to_anchor=(0.5, -0.14))
     return _finish(fig, ax, path, title)
 
 
@@ -105,7 +105,7 @@ def peer_returns_chart(periods: list[str], series: dict[str, list[float | None]]
     ax.set_xticks(x, periods)
     ax.set_ylabel("% a year")
     ax.grid(axis="y", alpha=0.3)
-    ax.legend(frameon=False, fontsize=5.5, ncol=2, loc="upper center", bbox_to_anchor=(0.5, -0.12))
+    ax.legend(frameon=False, fontsize=6.5, ncol=2, loc="upper center", bbox_to_anchor=(0.5, -0.12))
     return _finish(fig, ax, path, title)
 
 

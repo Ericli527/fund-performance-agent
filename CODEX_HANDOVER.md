@@ -53,6 +53,19 @@ Data: `data/` is gitignored (public repo). Test 1 files live in `data/test1/`, a
 - Web: both downloads; Analyst view = Detailed primary, Management = Executive primary (no rerun).
 - Email: `email.attachment` in settings.yaml (default `executive`; `detailed` = report.pdf).
 - The synthetic currency-mismatch case no longer overflows (both PDFs built; tested).
+## 3b. Stage 3.1 (done, awaiting owner review)
+
+- PDF readability: larger type, charts and spacing; less repetition (merged "not rated" items and "resolve the data
+  check" actions, one peer fee); "Analyst sign-off" box with the suggested assessment. Executive Report still 2 pages.
+- Peers: `peer.json` without a share class type gets it from the minimum investment (£1m+ = institutional), like an
+  uploaded factsheet. Page 2 shows the fund on the peers' price basis and one line per peer (class, currency,
+  minimum, pricing). Tested with HSBC American Index Fund Acc C as the Fidelity peer (`test_peers.py`).
+- No peer comparison: the manager question asks for suitable peers instead of "why is the fee higher". This changes
+  the Test 1 golden baseline (`manager_questions` only); not regenerated, awaiting owner approval.
+- Blocking currency/benchmark mismatch: executive chart replaced by an explanation; Appendices A/B keep the charts
+  with a "Read with care" warning (`presentation.comparison_problems`).
+- Readable download/email names: `{Fund_Name}_{Executive|Detailed}_Report_{YYYY-MM-DD}.pdf`.
+
 ## 4. Known issues and test findings
 
 - CI added in Stage 2.5 (`.github/workflows/tests.yml`, skip audit). 57 test functions still need `data/test1/` and skip without it, including

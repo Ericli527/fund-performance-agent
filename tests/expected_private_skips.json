@@ -35,6 +35,7 @@
   "tests.test_models::test_test1_extras_match_the_factsheet": "Test 1 files are not in data/test1 (they are kept out of the public repo)",
   "tests.test_models::test_test1_factsheet_file_matches_the_spec": "Test 1 files are not in data/test1 (they are kept out of the public repo)",
   "tests.test_models::test_test1_profile_file_loads": "Test 1 files are not in data/test1 (they are kept out of the public repo)",
+  "tests.test_peers::test_fidelity_with_the_hsbc_acc_c_peer": "Test 1 files are not in data/test1 (they are kept out of the public repo)",
   "tests.test_peers::test_test1_with_the_approved_peers_is_satisfied": "Test 1 files are not in data/test1 (they are kept out of the public repo)",
   "tests.test_precedence::test_test1_2024_repeated_price_is_info_after_the_factsheet_check": "Test 1 files are not in data/test1 (they are kept out of the public repo)",
   "tests.test_precedence::test_test1_calendar_years_from_the_factsheet_last_10": "Test 1 files are not in data/test1 (they are kept out of the public repo)",

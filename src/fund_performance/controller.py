@@ -47,6 +47,7 @@ from fund_performance.io import detect_file_type, read_document, read_json, read
 from fund_performance.mandate import decision_path
 from fund_performance.models import DataFlag, FactsheetPerformance, FundProfile, Peer
 from fund_performance.peers import approved_peers, compare_peers
+from fund_performance.presentation import report_filename
 from fund_performance.precedence import apply_precedence
 from fund_performance.executive import build_executive
 from fund_performance.report import ReportInputs, ReportLayoutError, build_report, plain_reason
@@ -505,8 +506,10 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     # 10. Email (plain code, off by default; recipients from EMAIL_TO only)
     step = log.start("email")
     attach = executive_pdf if s.email.attachment == "executive" and executive_pdf else pdf
+    kind = "Executive" if attach == executive_pdf else "Detailed"
     line = send_report(attach, s.email, profile.fund_name, f"{profile.as_of_date:%d %b %Y}",
-                       **({"post": r.email_post} if r.email_post else {}))
+                       **({"post": r.email_post} if r.email_post else {}),
+                       filename=report_filename(profile.fund_name, kind, profile.as_of_date))
     if s.email.attachment == "executive" and executive_pdf is None and s.email.enabled:
         line += " (Detailed Report attached: the Executive Report was not produced)"
     text_log.append(line)

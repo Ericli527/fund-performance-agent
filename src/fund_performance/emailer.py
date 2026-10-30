@@ -24,20 +24,21 @@ def recipients() -> list[str]:
     return [a.strip() for a in os.getenv("EMAIL_TO", "").split(",") if a.strip()]
 
 
-def build_payload(pdf: Path, settings: EmailSettings, fund_name: str, as_of_date: str, to: list[str]) -> dict:
+def build_payload(pdf: Path, settings: EmailSettings, fund_name: str, as_of_date: str, to: list[str],
+                  filename: str | None = None) -> dict:
     text = (f"The draft fund performance review for {fund_name} (figures to {as_of_date}) is attached.\n\n"
             "It is a draft for oversight review: the verdict is final only when signed by the reviewer.\n"
             "Prepared from public data only.")
     return {"from": settings.sender or os.getenv("EMAIL_FROM") or TEST_SENDER, "to": to,
             "subject": settings.subject.format(fund_name=fund_name, as_of_date=as_of_date),
             "text": text, "html": "<p>" + text.replace("\n\n", "</p><p>").replace("\n", "<br>") + "</p>",
-            "attachments": [{"filename": pdf.name, "content": base64.b64encode(pdf.read_bytes()).decode()}]}
+            "attachments": [{"filename": filename or pdf.name, "content": base64.b64encode(pdf.read_bytes()).decode()}]}
 
 
 def send_report(pdf: Path, settings: EmailSettings, fund_name: str, as_of_date: str,
-                post: PostFn = requests.post) -> str:
-    """ Send the PDF to the configured recipients. Returns a line for the run log; never raises, so a failed
-    email does not lose the report (it is already saved) """
+                post: PostFn = requests.post, filename: str | None = None) -> str:
+    """ Send the PDF to the configured recipients, attached as `filename` (default: its own name). Returns a line
+    for the run log; never raises, so a failed email does not lose the report (it is already saved) """
     if not settings.enabled:
         return "Email: off (config/settings.yaml)"
     key = os.getenv("RESEND_API_KEY")
@@ -50,7 +51,7 @@ def send_report(pdf: Path, settings: EmailSettings, fund_name: str, as_of_date: 
     if bad:
         return f"Email: not sent, EMAIL_TO has an entry that is not an email address ({len(bad)})"
     try:
-        response = post(RESEND_URL, json=build_payload(pdf, settings, fund_name, as_of_date, to),
+        response = post(RESEND_URL, json=build_payload(pdf, settings, fund_name, as_of_date, to, filename),
                         headers={"Authorization": f"Bearer {key}"}, timeout=TIMEOUT_SECONDS)
     except requests.RequestException as e:
         return f"Email: not sent, could not reach Resend ({type(e).__name__})"

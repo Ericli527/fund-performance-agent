@@ -38,6 +38,7 @@ from fund_performance.config import WebSettings, load_settings
 from fund_performance.dashboard import dashboard_data, dashboard_html, technical_html
 from fund_performance.controller import DEFAULT_QUESTION, RunResult, RunStopped, run_review
 from fund_performance.plain import verdict_meaning, verdict_name
+from fund_performance.presentation import download_copy
 from fund_performance.report import ANGLE_WORDS, REPORT_TYPE_WORDS
 from fund_performance.intake import read_documents, self_check, write_inputs
 
@@ -339,8 +340,20 @@ async def _run_controller(folder: Path, question: str, offline: bool, on_step: P
         return Outcome(f"**Something went wrong** ({type(e).__name__}). Please try again, or run it offline.")
     log = result.run_dir / "log.json"
     executive = getattr(result, "executive_pdf", None)
-    return Outcome(summary_markdown(result), str(result.pdf), str(log) if log.exists() else None,
-                   dashboard_data(result), str(executive) if executive else None)
+    return Outcome(summary_markdown(result), _download(result, result.pdf), str(log) if log.exists() else None,
+                   dashboard_data(result), _download(result, executive) if executive else None)
+
+
+def _download(result: RunResult, pdf: Path | None) -> str | None:
+    """ The PDF under its readable name ({Fund_Name}_{Executive|Detailed}_Report_{YYYY-MM-DD}.pdf) for the
+    download button; the run folder keeps report.pdf and report_executive.pdf """
+    if pdf is None:
+        return None
+    fund = (result.facts or {}).get("fund", {})
+    try:
+        return str(download_copy(pdf, fund["fund_name"], date.fromisoformat(str(fund["as_of_date"]))))
+    except (KeyError, TypeError, ValueError, OSError):
+        return str(pdf)
 
 
 async def start_review(question: str, price, factsheet, kid, peer_factsheets, json_files, offline: bool,
