@@ -6,8 +6,10 @@ passed in code. load_env() copies it from the project's .env file into the envir
 Data sharing is on for this key: public data only, never confidential or client data.
 """
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 import os
+import time
 from typing import Any, Generic, TypeVar
 from pathlib import Path
 from agents import Agent, ModelSettings, RunConfig, Runner
@@ -76,6 +78,17 @@ class StructuredResult(Generic[T]):
         return self.output is not None
 
 
+# Every model call of one review, for log.json and the page: agent, attempt, seconds, outcome (set by the controller)
+AI_CALLS: ContextVar[list[dict] | None] = ContextVar("AI_CALLS", default=None)
+
+
+def _record(agent: Agent, attempt: int, started: float, outcome: str) -> None:
+    calls = AI_CALLS.get()
+    if calls is not None:
+        calls.append({"agent": agent.name, "attempt": attempt, "seconds": round(time.monotonic() - started, 2),
+                      "outcome": outcome})
+
+
 async def run_structured(agent: Agent, prompt: str, output_model: type[BaseModel],
                          convert: Callable[[Any], T] | None = None, run: RunFn | None = None,
                          attempts: int = MAX_ATTEMPTS) -> StructuredResult[T]:
@@ -86,15 +99,20 @@ async def run_structured(agent: Agent, prompt: str, output_model: type[BaseModel
     run = run or run_with_fresh_client
     errors: list[str] = []
     for attempt in range(1, attempts + 1):
+        started = time.monotonic()
         try:
             result = await run(agent, prompt)
             output = output_model.model_validate(result.final_output) if not isinstance(
                 result.final_output, output_model) else result.final_output
-            return StructuredResult(convert(output) if convert else output, attempt, errors)
+            converted = convert(output) if convert else output
+            _record(agent, attempt, started, "ok")
+            return StructuredResult(converted, attempt, errors)
         except (ValidationError, ModelBehaviorError, ValueError) as e:
+            _record(agent, attempt, started, "invalid output")
             errors.append(f"attempt {attempt}: invalid output ({type(e).__name__}: {str(e)[:200]})")
         except (AgentsException, OpenAIError) as e:
             # A failed call (network, key, quota) is not invalid output: no retry
+            _record(agent, attempt, started, "call failed")
             errors.append(f"attempt {attempt}: call failed ({type(e).__name__}: {str(e)[:200]})")
             return StructuredResult(None, attempt, errors)
     return StructuredResult(None, attempts, errors)

@@ -167,6 +167,9 @@ def conclusion_origin(concl: dict) -> str:
     if concl.get("executive_fallback"):
         return ("Written by code from the scorecard: the AI draft did not fit on this page and is kept in full in "
                 "the Detailed Report")
+    if concl.get("source") == "ai" and concl.get("revised"):
+        return (f"AI draft for the {ANGLE_WORDS.get(concl.get('angle'), concl.get('angle'))}, revised once after the "
+                "Judge's review and checked by code")
     if concl.get("source") == "ai":
         return (f"AI draft for the {ANGLE_WORDS.get(concl.get('angle'), concl.get('angle'))}, chosen by the Judge and "
                 "checked by code")

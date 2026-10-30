@@ -115,6 +115,39 @@ async def _judge(facts: dict, drafts: list[Draft], run: RunFn | None) -> tuple[l
     return scored, (sent[preferred - 1].draft.angle if preferred and 1 <= preferred <= len(sent) else None), None
 
 
+REVISED = "revised once after the Judge's review; checked by code, not judged again"
+
+
+async def _judge_once(facts, drafts, angles, focus, run_reporter, run_judge, max_rewrites, max_chars,
+                      out: DraftResult) -> DraftResult:
+    scored, preferred, error = await _judge(facts, drafts, run_judge)
+    out.scored = scored
+    out.log.append("Drafts: " + "; ".join(f"{s.draft.angle} {s.score}/{MAX_SCORE}" for s in scored)
+                   + (f" (Judge: {error})" if error else ""))
+    if error:
+        out.flags.append(DataFlag(check="judge", level="warning", message=(
+            f"AI drafts not judged: the Judge Agent gave no valid answer ({error[:150]}); code's conclusion used")))
+        return out
+    out.chosen = pick(scored, preferred, angles)
+    if out.chosen is None and max_rewrites > 0:
+        # One targeted rewrite with every issue the Judge and code found; code checks it, the Judge does not run again
+        rewritten = list(await asyncio.gather(*(
+            write_draft(facts, s.draft.angle, focus, run_reporter, s.issues or ["make it pass the checklist"],
+                        s.draft.text, max_chars) for s in scored)))
+        out.log.append("Rewrite: " + "; ".join(f"{d.angle} {'passes' if d.figures_match else 'fails'} code's checks"
+                                               for d in rewritten))
+        usable = [d for d in rewritten if d.figures_match]
+        if usable:
+            out.chosen = Scored(usable[0], {"figures_match": True}, [REVISED])
+            out.scored = [out.chosen] + scored
+            return out
+    if out.chosen is None:
+        failed = sorted({CHECK_WORDS[k] for s in out.scored for k, v in s.checks.items() if not v})
+        out.flags.append(DataFlag(check="judge", level="warning", message=(
+            f"{AI_DRAFTS_FAILED} ({', '.join(failed) or 'no valid draft'}); code's conclusion used")))
+    return out
+
+
 def pick(scored: list[Scored], preferred: str | None, order: list[str]) -> Scored | None:
     """ Code's pick: the highest score among drafts that pass everything; tie -> the Judge's preferred, then the
     plan's angle order """
@@ -127,10 +160,17 @@ def pick(scored: list[Scored], preferred: str | None, order: list[str]) -> Score
 
 async def draft_and_judge(facts: dict, angles: list[str], focus: list[str], run_reporter: RunFn | None = None,
                           run_judge: RunFn | None = None, max_rewrites: int = 1,
-                          max_chars: int = MAX_SUMMARY_CHARS) -> DraftResult:
+                          max_chars: int = MAX_SUMMARY_CHARS, max_drafts: int | None = None,
+                          rejudge: bool = True) -> DraftResult:
+    """ Drafts (max_drafts of the plan's angles), the Judge's checklist, and at most max_rewrites targeted rewrites.
+    With rejudge False (the Version 1 pilot), the Judge runs once: a rewrite that passes code's checks is used,
+    marked as revised after the Judge's review and not judged again """
+    angles = list(angles)[:max_drafts] if max_drafts else list(angles)
     out = DraftResult()
     drafts = list(await asyncio.gather(*(write_draft(facts, a, focus, run_reporter, max_chars=max_chars)
                                          for a in angles)))
+    if not rejudge:
+        return await _judge_once(facts, drafts, angles, focus, run_reporter, run_judge, max_rewrites, max_chars, out)
     for attempt in range(max_rewrites + 1):
         scored, preferred, error = await _judge(facts, drafts, run_judge)
         out.scored = scored
