@@ -91,8 +91,7 @@ Instructions for Claude Code in this project. The build specification is
   market. v2: MCP Fetch for agent-chosen URLs.
 - Risk-free rate: 0 for v1, with a flag. Prefer the factsheet Sharpe ratios where supplied.
 - Charts are built in step 9 with the report.
-- Report (step 9): 3 main pages (Summary; Mandate and performance; Value, fees and AoV) plus an
-  appendix, 4 pages, 5 at most. Over 5: shorten the appendix first; a main page running over is an
+- Report (step 9, updated): 4 main pages plus an appendix, 5 pages at most. Over 5: shorten the appendix first; a main page running over is an
   error. Saved to `runs/<timestamp>/` with `facts.json` and `run_log.txt`; `--offline` skips AI steps.
   Plain wording (decision path, fee note) is for the report only; facts.json and the Analyst keep the codes.
 - Emailing the report is a plain code function (`emailer.py`, not an AI agent), off by default
@@ -113,8 +112,20 @@ Instructions for Claude Code in this project. The build specification is
   the report's sources list comes from it.
 - Front end (step 11): `src/fund_performance/web.py` + `app.py` (Gradio; Render runs `python app.py`,
   blueprint in `render.yaml`). Public-data warning first; demo = made-up fund in `demo/sample_index_fund`
-  (offline). Results table has a "Why" column. AI runs need the in-page login when APP_USERNAME/APP_PASSWORD
-  are set; without login only the offline demo runs; on a server with no login set up AI runs are off.
-  Page events are private (not in Gradio's API). The old root-level app was removed in step 11.
+  (offline). Results table has a "Why" column. Login: with APP_USERNAME/APP_PASSWORD set, the page asks for them
+  before it opens (Gradio auth); on a server with no login set up AI runs are off (offline demo only). AI-run
+  limits (per day, one at a time) in `config/settings.yaml`. Page events are private (not in Gradio's API).
+  Main route = documents (price file + factsheet, optional KID and peer factsheets) read by the Extractor and
+  Mandate agents, confirmed in an editable table ("entered by user" for corrections); JSON files are "Advanced".
+- Peers: approved peers per benchmark in `config/peers.yaml` (factsheets in `data/peers/`, found by ISIN), used when
+  no peer is given. Peer checks in `peers.py`: returns only in the fund's currency (else fees only, info flag);
+  noon vs noon NAV, market close vs PNAV; share class type and minimum investment (institutional note);
+  income/accumulation shown. Several peers: Value = average gap over usable peers, Fees = average OCF of all.
+- Verdict names for people: Retain -> "Satisfied", Monitor -> "Monitor", Review -> "Action needed" (codes stay in
+  facts.json and the scorecard). Page 1: suggested conclusion, points for judgement (max 4) and questions for the
+  manager (2-4), all code-built (`conclusion.py`); the conclusion passes the number/label/rating checks. Approval
+  box has "Analyst's comments" and "If you disagree with the suggested verdict, why?".
+- Report: 5 pages (Summary; Evidence dashboard; Mandate and performance; Value, fees and AoV; Appendix).
+  Dashboard is code only (`evidence.py`, charts): t-test level and min points in `config/settings.yaml`.
 - Value and Fees reasons (findings, report, page) give the peer return gap and the fee gap (`plain.py`,
   from the figures the scorecard keeps in `Pillar.values`).

@@ -5,7 +5,7 @@ dashboard's statistics). No AI writes or rewords them in v1. The conclusion goes
 and rating checks as AI text; a sentence that fails is left out (the verdict sentence always stays).
 """
 from fund_performance.number_guard import check_labels, check_numbers, check_ratings
-from fund_performance.plain import verdict_meaning, verdict_name
+from fund_performance.plain import VERDICT_NAMES, verdict_meaning
 
 MAX_POINTS = 4
 MIN_QUESTIONS, MAX_QUESTIONS = 2, 4
@@ -103,7 +103,8 @@ def _verdict_sentence(facts: dict) -> str:
     card = facts["scorecard"]
     code = card["verdict"]
     pillars = _pillars(facts)
-    name, meaning = verdict_name(code).split(" (")[0], verdict_meaning(code).lower()
+    name = next(n for key, (n, _) in VERDICT_NAMES.items() if code.startswith(key))
+    meaning = verdict_meaning(code).lower()
     if code.startswith("Review"):
         red = [SHORT[n] for n, p in pillars.items() if p["rating"] == "RED"]
         return f"Suggested verdict: {name}, {meaning} about {_join(red)}." if red else f"Suggested verdict: {name}, {meaning}."
@@ -178,12 +179,20 @@ def _near(limit: dict) -> str | None:
     return None
 
 
+def _short(text: str, limit: int = 110) -> str:
+    """ A long message cut at a word, pointing to the appendix for the rest """
+    text = text.rstrip(".")
+    if len(text) <= limit:
+        return text + "."
+    return text[:limit].rsplit(" ", 1)[0].rstrip(",;:") + " … (full text in the appendix)."
+
+
 def judgement_points(facts: dict) -> list[str]:
     """ At most 4 points the analyst should weigh, built from the flags, the limits, the peers and the statistics """
     points: list[str] = []
     for f in facts.get("data_flags", []):
         if f["level"] == "blocking":
-            points.append(f"Resolve this data check first: {f['message'].rstrip('.')}.")
+            points.append(_short(f"Resolve this data check first: {f['message']}"))
     for p in facts["scorecard"]["pillars"]:
         for limit in (p.get("values") or {}).get("limits", []):
             band = _near(limit)
@@ -192,7 +201,7 @@ def judgement_points(facts: dict) -> list[str]:
                               f"{p['name']} rating.")
     for p in facts["scorecard"]["pillars"]:
         if p["rating"] == "MANUAL CHECK":
-            points.append(f"{p['name']} needs your check: {p['reason'].rstrip('.')}.")
+            points.append(_short(f"{p['name']} needs your check: {p['reason']}"))
     for row in facts.get("peers", []):
         if row.get("excluded", "").startswith("returns in"):
             points.append(f"{row['name']}'s returns are in {row['currency']}, so only its fee is compared.")
@@ -209,7 +218,7 @@ def judgement_points(facts: dict) -> list[str]:
         points.append("Some figures were read from the documents by AI: check them against the factsheet.")
     for f in facts.get("data_flags", []):
         if f["level"] == "warning":
-            points.append(f"Data warning: {f['message'].rstrip('.')}.")
+            points.append(_short(f"Data warning: {f['message']}"))
     points.append("The limits used are illustrative and not yet agreed with the oversight team.")
     return list(dict.fromkeys(points))[:MAX_POINTS]
 

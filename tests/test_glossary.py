@@ -6,7 +6,8 @@ from fund_performance.glossary import GLOSSARY, glossary_lines, used_in
 def test_the_terms_asked_for():
     assert list(GLOSSARY) == ["tracking difference", "tracking error", "NAV", "PNAV", "ongoing charge (OCF)", "R²",
                               "beta", "alpha", "Sharpe ratio", "information ratio", "largest fall", "pp",
-                              "Assessment of Value (AoV)", "AFM"]
+                              "Assessment of Value (AoV)", "AFM", "t-statistic", "p-value",
+                              "statistically significant", "percentile", "drawdown"]
 
 
 def test_only_the_terms_used_are_listed():

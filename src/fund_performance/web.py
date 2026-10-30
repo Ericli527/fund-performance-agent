@@ -27,6 +27,7 @@ import zipfile
 import gradio as gr
 from fund_performance.config import WebSettings, load_settings
 from fund_performance.controller import DEFAULT_QUESTION, RunResult, RunStopped, run_review
+from fund_performance.plain import verdict_meaning, verdict_name
 from fund_performance.intake import COLUMNS, build_inputs, missing, read_documents, table, write_inputs
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -191,26 +192,35 @@ class Outcome:
 
 
 def summary_markdown(result: RunResult) -> str:
-    """ The draft verdict, the ratings with their one-line reasons, the findings and actions, and what to check """
+    """ The suggested verdict and conclusion, the ratings with their one-line reasons, the points for judgement,
+    the findings, actions and questions, and what to check """
     facts = result.facts or {}
     card = facts.get("scorecard", {})
     fund = facts.get("fund", {})
     reasons = getattr(result, "reasons", {}) or {}
     cell = lambda text: " ".join(str(text).split()).replace("|", "/")      # noqa: E731
     lines = [f"### {fund.get('fund_name', 'Fund')}", f"Figures to {fund.get('as_of_date', '')}", "",
-             f"**Draft verdict: {card.get('verdict', '')}**", "", "| Question | Rating | Why |", "|---|---|---|"]
+             f"**Suggested verdict: {verdict_name(card.get('verdict', ''))}** ({verdict_meaning(card.get('verdict', ''))})"]
+    conclusion = (facts.get("suggested_conclusion") or {}).get("text")
+    if conclusion:
+        lines += ["", f"**Suggested conclusion (draft for the analyst).** {conclusion}"]
+    lines += ["", "| Question | Rating | Why |", "|---|---|---|"]
     lines += [f"| {p['name']} | {RATING_WORDS.get(p['rating'], p['rating'])} | {cell(reasons.get(p['name'], ''))} |"
               for p in card.get("pillars", [])]
     if result.narrative:
         lines += ["", "**Key findings**"] + [f"- {f}" for f in result.narrative.output.key_findings]
         lines += ["", "**Recommended actions**"] + [f"- {a}" for a in result.narrative.output.action_texts]
+    if facts.get("judgement_points"):
+        lines += ["", "**Points for your judgement**"] + [f"- {x}" for x in facts["judgement_points"]]
+    if facts.get("manager_questions"):
+        lines += ["", "**Questions to ask the manager**"] + [f"- {x}" for x in facts["manager_questions"]]
     flags = facts.get("data_flags", [])
     blocking = [f for f in flags if f["level"] == "blocking"]
     if blocking:
         lines += ["", "**Data checks to resolve**"] + [f"- {f['message']}" for f in blocking]
     elif flags:
         lines += ["", f"{len(flags)} data warning(s): see the appendix of the PDF."]
-    lines += ["", "_Draft for oversight review: the verdict is final only when signed by the reviewer._"]
+    lines += ["", "_The verdict is a suggestion: the analyst decides and signs the approval box in the PDF._"]
     return "\n".join(lines)
 
 

@@ -6,19 +6,21 @@ comparison with Fidelity's own 2025 Value Assessment. The spec is `docs/FUND_PER
 ## Summary
 
 - **Test 1 (Fidelity Index US Fund P Acc, figures to 30 Sep 2026): passed.** Every expected figure, flag and rating
-  in spec Section 10 matches. Draft verdict: **Monitor until a peer is added** (Mandate Green, Performance Green,
-  Value for investors and Fees Amber "Add peer").
+  in spec Section 10 matches. With the two approved S&P 500 peers (Vanguard and HSBC), the suggested verdict is
+  **Satisfied** (all four questions Green). With no peer at all it is **Monitor until a peer is added** (Value for
+  investors and Fees Amber "Add peer").
 - **Live AI runs: the last full run, through the web page, passed.** The findings, the actions and the Fidelity
   approved pages were all correct. Earlier runs found problems that led to the design changes listed below.
 - **Comparison with Fidelity's 2025 Value Assessment: the conclusions are consistent.** The fund tracks its
-  index closely and its fee is low. The draft verdict waits on a peer only because none was supplied.
+  index closely and its fee is low: Fidelity says "Good value", this review suggests "Satisfied".
 - **Tests 2, 3 and 4 were not run:** their input files have not been supplied yet (see the end).
-- **Automated tests:** 466 passed, 5 skipped (the live AI tests, run with `pytest --run-live`).
+- **Automated tests:** 509 passed, 6 skipped (the live AI tests, run with `pytest --run-live`).
 
 ## Test 1: Fidelity Index US Fund P Acc (GB00BJS8SH10), figures to 30 Sep 2026
 
 Inputs: monthly NAV CSV (Nov 2012 to Sep 2026), `fund_profile.json`, `factsheet_performance.json` (typed from the
-factsheet), factsheet and KID PDFs. No peer file. Run offline (`--offline`) for the figures below; the ratings and
+factsheet), factsheet and KID PDFs. The figures and checks below are without a peer; the approved peers are in the
+next section. Run offline (`--offline`) for the figures below; the ratings and
 figures are the same in the AI runs, because code decides them.
 
 ### Figures: expected (spec Section 10) and reported
@@ -54,8 +56,34 @@ Cross-checks of the calculated NAV returns against the factsheet: +0.01, +0.04 a
 | Value for investors | Amber | Add peer: no comparison fund was supplied |
 | Fees | Amber | Add peer: no comparison fund was supplied |
 
-**Draft verdict: Monitor until a peer is added.** Performance was **not** rated Red from the noon NAV (88.3%
-against the index's 91.6% over 5 years): the fair comparison uses the market-close price (PNAV).
+**Suggested verdict without a peer: Monitor until a peer is added.** Performance was **not** rated Red from the noon
+NAV (88.3% against the index's 91.6% over 5 years): the fair comparison uses the market-close price (PNAV).
+
+### With the approved peers (config/peers.yaml): Satisfied
+
+The two approved S&P 500 peers, with figures from their factsheets to 30 Sep 2026 (in `data/peers/`, gitignored):
+
+| Peer | Share class | Currency, pricing | OCF | 5 years, a year | Used for |
+|---|---|---|---|---|---|
+| Vanguard S&P 500 UCITS ETF (USD) Accumulating, IE00BFMXXD54 | Accumulating, retail | USD, market close | 0.07% | 13.48% (in USD) | Fees only: returns in USD, not GBP (info flag) |
+| HSBC American Index Fund Inst Inc, GB00BYWKBM47 | Inst Inc, institutional, min GBP 10,000,000 | GBP, noon (12:00 UK) | 0.02% | 13.51% | Fees and returns (noon NAV vs noon NAV) |
+
+| Question | Rating | Reason (code) |
+|---|---|---|
+| Value for investors | Green | HSBC returned +0.01 pp a year vs the fund (13.51% vs 13.5%, 5 years, both net of fees, noon NAV vs noon NAV) |
+| Fees | Green | OCF 0.06% vs the 2 peers' average 0.05% (0.07% and 0.02%), gap +0.01 pp; note: "institutional share class: its fee is lower than retail investors could get" |
+
+Mandate and Performance stay Green, so the suggested verdict is **Satisfied** ("No action needed"). The suggested
+conclusion reads: "The evidence suggests the fund has delivered what it promised. It aims to track the S&P 500 Index
+NUK, and over 5 years it was 0.10% a year behind its index, mostly explained by its 0.06% yearly fee. Its returns
+were in line with a comparable tracker, and its fee is competitive with similar funds. Suggested verdict:
+Satisfied, no action needed." Checked by the unit test `test_test1_with_the_approved_peers_is_satisfied` (peer
+figures typed from the two factsheets). In a run with AI, the Extractor Agent reads the two factsheets instead (see
+"Documents route" below).
+
+Evidence dashboard: the yearly tracking difference 2016–2025 (PNAV vs index, factsheet) has a hit rate and best and
+worst years; the significance test shows "Not reliable: the data is rounded and too short for a significance test",
+because the factsheet's calendar-year returns are rounded to 1 d.p., so most yearly gaps are identical.
 
 ### Data checks
 
@@ -74,8 +102,8 @@ All as expected in the spec:
 
 ### Report
 
-4 pages (Summary; Mandate and performance; Value, fees and Assessment of Value; Appendix), within the 5-page
-limit. The code-written findings read:
+5 pages (Summary; Evidence dashboard; Mandate and performance; Value, fees and Assessment of Value; Appendix),
+within the 5-page limit. The code-written findings read:
 1. Mandate is Green: the fund moves in line with its index (R² 1.00 and beta 1.00 over 3 years, factsheet).
    Performance is Green: the fund is 0.10% a year behind its index over 5 years, a tracking difference of −0.10 pp
    (percentage points) a year; tracking error is 0.02% (over 3 years, factsheet).
@@ -97,29 +125,28 @@ numbers are close but not directly comparable.
 | 5-year return, per year (annualised; fund vs index) | 13.93% vs 13.99% | 13.8% vs 13.9% (PNAV vs index) |
 | Gap to the index | −0.06 pp a year | −0.10 pp a year (tracking difference) |
 | Tracking error | 0.03 | 0.02% (3 years, factsheet) |
-| Ongoing charge (OCF) | 0.06%, against a sector median of 0.10% | 0.06%; no peer supplied |
-| Conclusion | Tracks its index closely; fee below the sector median | Mandate and Performance Green; Value and Fees wait for a peer |
+| Ongoing charge (OCF) | 0.06%, against a sector median of 0.10% | 0.06%, against the approved peers' average 0.05% (0.07% and 0.02%) |
+| Conclusion | **Good value**: tracks its index closely; fee below the sector median | **Satisfied**: all four questions Green with the approved peers (without a peer: Monitor until a peer is added) |
 
 **The conclusions are consistent.** Both find a fund that tracks its index closely, at a gap that the low fee
 mostly explains, with a low fee.
 
-**The one difference is the comparator.** Fidelity compares the fee with a sector median, while this review
-needs a peer fund and has none, so Value and Fees are Amber "Add peer". With Fidelity's sector median as the
-comparator, the fee is 0.04 pp below it; under the current illustrative thresholds (Green up to 0.05 pp above the
-peer) code would rate Fees Green. Accepting a sector median OCF as the peer is on the v2 roadmap (spec Section 13).
+**The one difference is the comparator.** Fidelity compares the fee with a sector median; this review compares it
+with approved peer funds (their average). Both find the fee competitive. Rating against a sector median OCF is on
+the v2 roadmap (spec Section 13); `config/peers.yaml` can already show one as context (`sector_average_ocf`).
 
 ## Alignment with IFSL Marlborough's 2025 Value Assessment
 
 A second published Value Assessment, from IFSL Marlborough (the AFM of Test 3's fund), supports the same design.
 Like Fidelity's, it was read only for comparison, never as an input.
 
-- **Rating levels.** Marlborough rates each fund on 4 levels. They map onto this review's draft verdicts:
+- **Rating levels.** Marlborough rates each fund on 4 levels. They map onto this review's suggested verdicts:
 
   | IFSL Marlborough rating | This review |
   |---|---|
-  | Fees justified | Retain |
-  | Fees justified, but targeting improvement | Monitor |
-  | Requires improvement | Review |
+  | Fees justified | Satisfied ("No action needed") |
+  | Fees justified, but targeting improvement | Monitor ("Keep a close eye on it") |
+  | Requires improvement | Action needed ("Investigate and engage the manager") |
   | Too soon to rate | Short history (since-launch figures; Performance at least Amber, never Red on history alone) |
 
 - **Comparable market rates.** Marlborough's market-rates test compares each fund's OCF with the mean of its IA
@@ -127,7 +154,7 @@ Like Fidelity's, it was read only for comparison, never as an input.
   Fidelity also does with its sector median.
 - **A person makes the final call.** Marlborough's US Focus Fund example shows that underperforming a comparator
   does not decide the rating on its own: the AFM weighs it with the other factors. That is why this agent gives a
-  *draft* verdict from code, and a reviewer signs the final decision in the approval box.
+  *suggested* verdict from code, and the analyst makes the judgement, adds comments and signs the approval box.
 
 ## Live AI runs and what they changed
 
@@ -161,6 +188,20 @@ text depends on outside sources (the market context). Each rule the AI broke mor
 or a code-written sentence. AI-written insight findings stay on the v2 roadmap, once a canonical phrasing per data
 note is defined.
 
+## Documents route (live test: to be run)
+
+The page's main route reads the documents instead of typed JSON files. The check: Test 1 from the CSV and the two
+PDFs (with the approved peers' factsheets) must give the same ratings and verdict as the JSON route. The unit test
+with mocked agents passes; the live run needs an OpenAI API key, so it was not run in the build environment:
+
+```bash
+pytest --run-live -k documents_route_matches                                    # the live check
+PYTHONPATH=src python -m fund_performance.run_report --data data/test1 --from-documents   # prints every value read
+```
+
+The second command saves `extraction_check.txt` in the run folder with each value the Extractor read and every value
+that differs from the typed JSON files. Result and the Extractor's mistakes: *to be recorded after the live run.*
+
 ## Tests 2, 3 and 4
 
 Not run yet: their input files (price files, factsheets, fund profiles) have not been supplied. The behaviour they
@@ -176,7 +217,7 @@ They are on the v2 roadmap (spec Section 13).
 ## How to reproduce
 
 ```bash
-pytest -q                                                                   # 466 passed, 5 skipped
+pytest -q                                                                   # all pass (AI mocked)
 PYTHONPATH=src python -m fund_performance.run_report --data data/test1 --offline   # figures and ratings above
 PYTHONPATH=src python -m fund_performance.run_report --data data/test1             # full run with AI
 python app.py                                                               # the web page

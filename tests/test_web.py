@@ -1,4 +1,4 @@
-""" The Gradio front end: limits instead of a login, the documents route with its confirmation step, the Advanced
+""" The Gradio front end: the login and the limits, the documents route with its confirmation step, the Advanced
 JSON route, the demo and example files, and the page's text. No server is started and no AI is called (offline
 runs and stand-ins for the reader and the controller) """
 import asyncio
@@ -9,7 +9,7 @@ import gradio as gr
 import pytest
 from fund_performance.config import WebSettings
 from fund_performance.controller import RunStopped
-from fund_performance.web import (BUSY, FILES_TABLE, HOW_END, INSTRUCTIONS, LIMIT_REACHED, NEED_FILES, NEEDS_AI,
+from fund_performance.web import (AI_OFF, BUSY, FILES_TABLE, HOW_END, INSTRUCTIONS, LIMIT_REACHED, NEED_FILES, NEEDS_AI,
                                   PUBLIC_DATA, AiLimits, build_ui, confirm_review, demo_files, example_zip,
                                   prepare_inputs, start_review, summary_markdown, with_progress)
 from test_intake import extractor_answer, MANDATE, peer_answer
@@ -24,13 +24,38 @@ def demo():
     return demo_files()
 
 
-# Limits instead of a login
-def test_there_is_no_login(monkeypatch):
-    import fund_performance.web as web
-    for name in ("credentials", "check_login", "ai_allowed"):
-        assert not hasattr(web, name)
-    texts = [getattr(c, "value", "") or "" for c in build_ui().blocks.values()]
-    assert not any("Log in" in str(t) for t in texts)
+# The login (A1): the page asks for the username and password before it opens
+class FakeUi:
+    def queue(self, **kwargs):
+        return self
+
+    def launch(self, **kwargs):
+        self.kwargs = kwargs
+
+
+def test_the_page_asks_for_the_login_before_it_opens(monkeypatch):
+    from fund_performance.web import launch, login
+    monkeypatch.setenv("APP_USERNAME", "analyst")
+    monkeypatch.setenv("APP_PASSWORD", "secret")
+    ui = FakeUi()
+    launch(ui)
+    assert ui.kwargs["auth"] == ("analyst", "secret") and login() == ("analyst", "secret")
+    monkeypatch.delenv("APP_PASSWORD")
+    launch(ui)
+    assert ui.kwargs["auth"] is None                          # your own computer: no login set up
+
+
+def test_on_a_server_without_a_login_ai_runs_are_off(monkeypatch, limits, tmp_path):
+    monkeypatch.delenv("APP_USERNAME", raising=False)
+    monkeypatch.delenv("APP_PASSWORD", raising=False)
+    monkeypatch.setenv("PORT", "10000")
+    assert limits.start() == AI_OFF
+    d = demo()
+    outcome = asyncio.run(start_review("q", d["price"], None, None, None, d["json"], True, limits, out_root=tmp_path))
+    assert "**Suggested verdict: Satisfied**" in outcome.message          # the offline demo still works
+    monkeypatch.setenv("APP_USERNAME", "a")
+    monkeypatch.setenv("APP_PASSWORD", "b")
+    assert limits.start() is None
 
 
 def test_the_daily_limit_counts_ai_runs_and_survives_a_restart(tmp_path):
@@ -62,15 +87,15 @@ def test_the_limit_message_is_shown_and_offline_still_works(tmp_path):
     outcome = asyncio.run(start_review("q", d["price"], None, None, None, d["json"], False, full, out_root=tmp_path))
     assert outcome.message == LIMIT_REACHED
     outcome = asyncio.run(start_review("q", d["price"], None, None, None, d["json"], True, full, out_root=tmp_path))
-    assert "**Draft verdict: Retain**" in outcome.message
+    assert "**Suggested verdict: Satisfied**" in outcome.message
 
 
 # The documents route
-async def fake_reader(factsheet, kid, peer):
+async def fake_reader(factsheet, kid, peers):
     from fund_performance.intake import read_documents
-    from conftest import FakeRun
-    return await read_documents(factsheet, kid, peer, run_extractor=FakeRun(extractor_answer()),
-                                run_mandate=FakeRun(MANDATE), run_peer=FakeRun(peer_answer()))
+    from conftest import FakeRunBy
+    return await read_documents(factsheet, kid, peers, run_extractor=FakeRunBy(lambda p: extractor_answer()),
+                                run_mandate=FakeRunBy(lambda p: MANDATE), run_peer=FakeRunBy(lambda p: peer_answer()))
 
 
 def documents(tmp_path):
@@ -89,8 +114,9 @@ def documents(tmp_path):
 
 def test_documents_are_read_and_shown_for_confirmation(tmp_path, limits):
     price, factsheet, peer = documents(tmp_path)
-    outcome = asyncio.run(start_review("q", price, factsheet, None, peer, [], False, limits, out_root=tmp_path,
+    outcome = asyncio.run(start_review("q", price, factsheet, None, [peer, peer], [], False, limits, out_root=tmp_path,
                                        reader=fake_reader))
+    assert len([r for r in outcome.state["intake"]["rows"] if r["key"].endswith(".ocf_pct")]) == 2   # 2 peers
     assert outcome.pdf is None and outcome.message.startswith("**Check what the agent read.**")
     assert outcome.state["paid"] is True and outcome.state["price"] == price
     assert limits.used_today() == 1 and limits.active == 0
@@ -149,7 +175,7 @@ def test_the_demo_runs_offline_through_the_json_route(tmp_path, limits):
     d = demo()
     outcome = asyncio.run(start_review("Is this index fund meeting its mandate?", d["price"], d["factsheet"], None,
                                        d["peer"], d["json"], True, limits, out_root=tmp_path))
-    assert outcome.pdf and Path(outcome.pdf).exists() and "**Draft verdict: Retain**" in outcome.message
+    assert outcome.pdf and Path(outcome.pdf).exists() and "**Suggested verdict: Satisfied**" in outcome.message
     assert "| Question | Rating | Why |" in outcome.message
     assert ("| Fees | 🟢 Green | The fund's 0.10% yearly ongoing charge (OCF) is 0.05 pp above the peer's 0.05%. |"
             in outcome.message)
@@ -213,7 +239,7 @@ def test_summary_lists_blocking_checks():
                                     "data_flags": [{"level": "blocking", "message": "CHECK DATA: currency mismatch"}]},
                              narrative=None)
     text = summary_markdown(result)
-    assert "**Draft verdict: Pending data check**" in text and "| Performance | 🟣 Check data |" in text
+    assert "**Suggested verdict: Pending data check**" in text and "| Performance | 🟣 Check data |" in text
 
 
 def test_when_the_extractor_cannot_read_the_documents_the_page_says_so(tmp_path, limits):
@@ -221,8 +247,8 @@ def test_when_the_extractor_cannot_read_the_documents_the_page_says_so(tmp_path,
     from fund_performance.intake import read_documents
     from conftest import FakeRun
 
-    async def failing_reader(factsheet, kid, peer):
-        return await read_documents(factsheet, kid, peer, run_extractor=FakeRun(AgentsException("no key")))
+    async def failing_reader(factsheet, kid, peers):
+        return await read_documents(factsheet, kid, peers, run_extractor=FakeRun(AgentsException("no key")))
     price, factsheet, _ = documents(tmp_path)
     outcome = asyncio.run(start_review("q", price, factsheet, None, None, [], False, limits, reader=failing_reader))
     assert "**The Extractor Agent could not read the documents**" in outcome.message

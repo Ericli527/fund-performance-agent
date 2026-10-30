@@ -163,10 +163,6 @@ def plain_reason(inp: ReportInputs, name: str) -> str:
 
 # --- Pages ---------------------------------------------------------------------------------------------------------
 
-def _lines(n: int) -> str:
-    return "".join('<tr><td class="line">&nbsp;</td></tr>' for _ in range(n))
-
-
 def _page1(inp: ReportInputs) -> str:
     p, card, facts = inp.profile, inp.card, inp.facts
     rows = "".join(
@@ -209,8 +205,10 @@ def _page1(inp: ReportInputs) -> str:
 <table class="approval">
 <tr><td width="18%">Reviewer name</td><td class="line">&nbsp;</td><td width="10%">Date</td><td class="line" width="22%">&nbsp;</td></tr>
 <tr><td>Decision</td><td colspan="3"><table class="ticks"><tr>{ticks}</tr></table></td></tr>
-<tr><td>Analyst's comments</td><td colspan="3"><table width="100%">{_lines(2)}</table></td></tr>
-<tr><td>If you disagree with the suggested verdict, why?</td><td colspan="3"><table width="100%">{_lines(1)}</table></td></tr>
+<tr><td>Analyst's comments</td><td class="line" colspan="3">&nbsp;</td></tr>
+<tr><td>&nbsp;</td><td class="line" colspan="3">&nbsp;</td></tr>
+<tr><td colspan="4">If you disagree with the suggested verdict, why?</td></tr>
+<tr><td>&nbsp;</td><td class="line" colspan="3">&nbsp;</td></tr>
 <tr><td>Signature</td><td class="line" colspan="3">&nbsp;</td></tr>
 </table>
 {f'<table class="ticks">{manual}</table>' if manual else ''}
@@ -793,7 +791,7 @@ p {{ margin: 0 0 3px 0; }} ul, ol {{ margin: 0 0 3px 0; }} li {{ margin-bottom: 
 .total td {{ font-weight: bold; background-color: #f1f4f8; }}
 .chip {{ color: white; font-weight: bold; text-align: center; vertical-align: middle; }}
 .ratings td {{ padding: 4px 4px 3px 4px; }} .q {{ width: 27%; }}
-.approval td {{ padding: 6px 4px 3px 4px; }} .line {{ border-bottom: 0.8px solid #1d2733; }}
+.approval td {{ padding: 4px 4px 2px 4px; }} .line {{ border-bottom: 0.8px solid #1d2733; }}
 .ticks td {{ padding: 2px 4px; }} .box {{ border: 0.8px solid #1d2733; width: 10px; }}
 .callout td {{ background-color: #fff6e0; border-left: 3px solid {RATING_COLOURS[AMBER]}; padding: 6px 8px; }}
 .tight li {{ margin-bottom: 0; }}
