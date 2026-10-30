@@ -22,6 +22,7 @@ timeouts_seconds:
 
 drafting:
   max_rewrites: 1      # if no draft passes the checklist, send them all back this many times, then use code's text
+  max_summary_chars: 700   # a longer draft fails code's checks (Executive page 1 overflows at about 950)
 
 web:
   max_ai_runs_per_day: 20          # reviews that use AI (reading documents, or a JSON run with AI), counted per day

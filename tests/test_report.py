@@ -239,3 +239,47 @@ def test_test1_facts_keep_the_original_wording(test1_pdf):
     facts = json.loads((test1_pdf.parent / "facts.json").read_text())
     assert facts["data_notes"][1]["note"].startswith("Most of the yearly gap to the index is the fee. Adding")
     assert "TD_ex_cost" in facts["decision_path"][0]
+
+
+# Stage 4B: a long AI summary never stops the Executive Report being made
+def test_a_long_ai_summary_falls_back_to_codes_summary_on_the_executive_pages_only(tmp_path):
+    from fund_performance.executive import EXECUTIVE_FALLBACK, build_executive_reliably
+    inp = made_up_inputs()
+    concl = inp.facts["suggested_conclusion"]
+    code_text = concl.get("code_text") or concl["text"]
+    long_ai = "The evidence suggests the fund stayed close to its index over the period. " * 30
+    inp.facts["suggested_conclusion"] = concl | {"text": long_ai, "source": "ai", "angle": "board", "code_text": code_text}
+    with pytest.raises(ReportLayoutError):
+        build_executive(inp, tmp_path / "plain")                       # without the fallback it would not fit
+    path, flag = build_executive_reliably(inp, tmp_path / "exec")
+    pages = page_texts(path)
+    text = " ".join(" ".join(pages).split())
+    assert len(pages) == 2 and flag.level == "info" and flag.message == EXECUTIVE_FALLBACK
+    assert " ".join(code_text.split()) in text and long_ai.split(".")[0] not in text
+    assert "the AI draft did not fit on this page and is kept in full in the Detailed Report" in text
+    assert inp.facts["suggested_conclusion"]["text"] == long_ai          # the run's facts keep the AI text
+    detailed = " ".join(" ".join(page_texts(build_report(inp, tmp_path / "detailed"))).split())
+    assert " ".join(long_ai.split()) in detailed                         # kept in full in the Detailed Report
+
+
+def test_a_short_ai_summary_or_code_summary_is_used_as_it_is(tmp_path):
+    from fund_performance.executive import build_executive_reliably
+    inp = made_up_inputs()
+    path, flag = build_executive_reliably(inp, tmp_path)
+    assert flag is None and len(page_texts(path)) == 2
+    inp.facts["drafts"] = []
+    inp.facts["suggested_conclusion"] |= {"source": "ai", "angle": "board", "code_text": "x"}
+    assert build_executive_reliably(inp, tmp_path / "b")[1] is None
+
+
+def test_overlong_drafts_fail_codes_checks():
+    from fund_performance.agents.reporter import MAX_SUMMARY_CHARS, draft_problems
+    from fund_performance.config import load_settings
+    assert load_settings().drafting.max_summary_chars == MAX_SUMMARY_CHARS == 700
+    facts = made_up_inputs().facts
+    short = "Short. " * 3
+    assert not any(p.startswith("style: ") and "characters" in p for p in draft_problems(short, facts))
+    long_text = ("x" * 200 + ". ") * 4
+    assert f"style: {len(long_text.strip())} characters; use at most 700 (shorter sentences)" in \
+        draft_problems(long_text.strip(), facts)
+    assert not any("characters" in p for p in draft_problems(long_text.strip(), facts, max_chars=2000))

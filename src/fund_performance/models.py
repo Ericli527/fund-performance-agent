@@ -136,6 +136,9 @@ class Peer(_Strict):
     investor_type: Literal["retail", "institutional"] | None = None
     minimum_investment: str | None = None
     vol_3y: float | None = None             # 3-year volatility from the peer's factsheet, for the dashboard
+    # The index the peer follows, as its factsheet names it (e.g. "S&P 500 Index (GBP)"): disclosed when it is a
+    # different variant from the fund's benchmark; information only, it never changes a comparison or a rating
+    benchmark_name: str | None = None
     origin: Literal["typed", "uploaded", "approved"] = "typed"   # peer.json, an uploaded factsheet, config/peers.yaml
 
 

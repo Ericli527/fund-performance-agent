@@ -49,7 +49,7 @@ from fund_performance.models import DataFlag, FactsheetPerformance, FundProfile,
 from fund_performance.peers import approved_peers, compare_peers
 from fund_performance.presentation import report_filename
 from fund_performance.precedence import apply_precedence
-from fund_performance.executive import build_executive
+from fund_performance.executive import build_executive_reliably
 from fund_performance.report import ReportInputs, ReportLayoutError, build_report, plain_reason
 from fund_performance.scorecard import score
 
@@ -460,7 +460,8 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         log.end(step, "skipped", notes=["offline run: code's conclusion"])
     else:
         drafted = await _timed(draft_and_judge(facts, plan.angles, plan.focus, r.reporter, r.judge,
-                                               s.drafting.max_rewrites), s.timeouts_seconds.drafting)
+                                               s.drafting.max_rewrites, s.drafting.max_summary_chars),
+                               s.timeouts_seconds.drafting)
         if drafted is None:
             flags.append(DataFlag(check="judge", level="warning", message=(
                 f"AI drafts not finished within {s.timeouts_seconds.drafting:g} seconds; code's conclusion used")))
@@ -490,7 +491,10 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     # warning says so in the Detailed Report, which keeps everything
     executive_pdf = None
     try:
-        executive_pdf = build_executive(inputs, run_dir)
+        executive_pdf, fallback = build_executive_reliably(inputs, run_dir)
+        if fallback:
+            flags.append(fallback)
+            inputs.flags = flags
     except ReportLayoutError as e:
         flags.append(DataFlag(check="report_layout", level="warning", message=(
             f"Executive Report not produced: {e}. Nothing was cut; the Detailed Report has every section.")))

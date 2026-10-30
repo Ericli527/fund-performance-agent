@@ -195,3 +195,20 @@ def test_fidelity_with_the_hsbc_acc_c_peer(tmp_path):
     assert "This fund, noon price (NAV): compared with peers 17.5% 19.1% 13.5% 0.06%" in p2
     assert "HSBC American Index Fund Acc C 17.4% 19.2% 13.5% 0.07%" in p2
     assert "minimum investment GBP 1,000,000; pricing: noon NAV vs noon NAV" in p2
+
+
+def test_a_peer_benchmark_variant_is_disclosed_for_information_only():
+    """ Stage 4B: an optional benchmark name on the peer; a different variant gets a note, nothing else changes """
+    from fund_performance.facts import peer_rows
+    plain = Peer.model_validate(HSBC_ACC_C)
+    named = Peer.model_validate(HSBC_ACC_C | {"benchmark_name": "S&P 500 Index (GBP)"})
+    same = Peer.model_validate(HSBC_ACC_C | {"benchmark_name": "S&P 500 index nuk"})
+    p = profile(benchmark_name="S&P 500 Index NUK", pricing_point="midday")
+    base, disclosed, matching = (compare_peers([x], p, reported()) for x in (plain, named, same))
+    assert disclosed.rows[0].notes[-1] == ("follows S&P 500 Index (GBP), a different benchmark variant from the "
+                                           "fund's S&P 500 Index NUK (for information: the comparison and ratings are "
+                                           "unchanged)")
+    assert matching.rows[0].notes == base.rows[0].notes
+    assert (disclosed.average_gap, disclosed.average_ocf, disclosed.rows[0].used_for_returns) == \
+        (base.average_gap, base.average_ocf, base.rows[0].used_for_returns)
+    assert "benchmark_name" not in peer_rows(base)[0] and peer_rows(disclosed)[0]["benchmark_name"] == "S&P 500 Index (GBP)"

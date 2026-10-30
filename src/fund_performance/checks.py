@@ -48,6 +48,22 @@ def index_currency_vs_factsheet(prices: pd.DataFrame, factsheet: FactsheetPerfor
                              f"index ({detail}); the factsheet index figures are used instead")]
 
 
+# --- Review-date cutoff ------------------------------------------------------------------------------
+
+def after_review_date(prices: pd.DataFrame, as_of: date) -> tuple[pd.DataFrame, list[DataFlag]]:
+    """ Prices dated after the review date are left out of every figure (an info flag says how many and which
+    dates), so a file downloaded later still gives the figures as at the review date """
+    later = prices["date"] > pd.Timestamp(as_of)
+    if not later.any():
+        return prices, []
+    dropped = prices.loc[later, "date"]
+    return prices[~later].reset_index(drop=True), [DataFlag(
+        check="review_date_cutoff", level="info",
+        message=(f"{int(later.sum())} price(s) dated after the review date {as_of:%d %b %Y} left out "
+                 f"({dropped.min():%d %b %Y} to {dropped.max():%d %b %Y}); figures are as at the review date"),
+        dates=_dates([dropped.min(), dropped.max()]))]
+
+
 # --- End-date alignment -------------------------------------------------------------------------------
 
 def align_end_dates(prices: pd.DataFrame) -> tuple[pd.DataFrame, list[DataFlag]]:
@@ -234,10 +250,11 @@ def check_prices(data: PriceData, profile: FundProfile, thresholds: Thresholds,
     """ Run every price-file check in spec 3.4 that does not need calculated returns
     (the cross-check and the tracker-gap check run once the calculator has produced figures) """
     t = thresholds.data_checks
-    flags = currency_match(profile.currency, index_currency)
+    prices, cutoff = after_review_date(data.prices, profile.as_of_date)
+    flags = currency_match(profile.currency, index_currency) + cutoff
     if factsheet is not None:
-        flags += index_currency_vs_factsheet(data.prices, factsheet, t.currency_mismatch_calendar_year_pp)
-    prices, aligned = align_end_dates(data.prices)
+        flags += index_currency_vs_factsheet(prices, factsheet, t.currency_mismatch_calendar_year_pp)
+    prices, aligned = align_end_dates(prices)
     flags += aligned
     comparison = pricing_point(profile, factsheet, t.timing_difference_extra_tolerance_pp) if factsheet else None
     if comparison:

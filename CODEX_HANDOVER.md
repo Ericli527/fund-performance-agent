@@ -69,6 +69,16 @@ Data: `data/` is gitignored (public repo). Test 1 files live in `data/test1/`, a
   the fund-vs-index comparison as reliable; Appendix B keeps the raw figures marked. Test 1 golden baseline updated
   (owner-approved; only `manager_questions` changed).
 
+## 3c. Stage 4B: real-fund demo library (done, awaiting owner review)
+
+- `demos.py` + `demo/library/*.yaml` (metadata only) + private `data/demos/` (see data/README.md). Two cards on the
+  page: Fidelity Index US (HSBC Acc C peer) and Vanguard FTSE Global All Cap; Quick Demo offline by default, Live AI
+  Demo only where AI is on. NAV return check vs factsheet (0.05 pp). The made-up fund remains for CI and examples.
+- Data fixes: robust price downloads (`io.py`), review-date cutoff (`checks.after_review_date`), annualised `series`
+  kept annualised (`precedence.py`, `calc.cumulate`). Peer `benchmark_name` (information only).
+- Missing evidence worded as such (Vanguard: no TE, beta, R²): verdict stays "Pending data check".
+- Executive reliability: `drafting.max_summary_chars` + `executive.build_executive_reliably` fallback.
+
 ## 4. Known issues and test findings
 
 - CI added in Stage 2.5 (`.github/workflows/tests.yml`, skip audit). 57 test functions still need `data/test1/` and skip without it, including

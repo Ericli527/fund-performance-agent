@@ -53,7 +53,10 @@ cp .env.example .env            # add your OPENAI_API_KEY
 python app.py                   # opens on http://127.0.0.1:7860
 ```
 
-Click **Use Demo Files** and **Run Fund Review** to try it: the demo is a made-up fund and runs without AI. With
+Pick a demo under **Try a demo** (Fidelity Index US, or Vanguard FTSE Global All Cap) and click **Run Fund Review**.
+The **Quick Demo** runs prevalidated inputs without AI in seconds; the **Live AI Demo** (offered only where AI runs are
+on) lets the agents read the documents. The demos' files are private (`data/demos/`, see `data/README.md`): without
+them the cards are not shown, and the example input files (a made-up fund) are under Help & methodology. With
 `APP_USERNAME` and `APP_PASSWORD` set in `.env`, the page asks for them before it opens; on your own computer you
 can leave them blank (no login).
 

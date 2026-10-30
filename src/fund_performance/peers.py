@@ -210,8 +210,15 @@ def compare_peers(peers: list[Peer], profile: FundProfile, reported: ReportedFig
             row.notes.append(INSTITUTIONAL_NOTE)
         if peer.distribution and peer.distribution != profile.distribution:
             row.notes.append(f"{peer.distribution} share class: compared on a total-return basis")
+        if peer.benchmark_name and _plain_name(peer.benchmark_name) != _plain_name(profile.benchmark_name):
+            row.notes.append(f"follows {peer.benchmark_name}, a different benchmark variant from the fund's "
+                             f"{profile.benchmark_name} (for information: the comparison and ratings are unchanged)")
         out.rows.append(row)
     return out
+
+
+def _plain_name(name: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (name or "").lower()).strip()
 
 
 def as_list(peers) -> list[Peer]:

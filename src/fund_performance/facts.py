@@ -109,6 +109,7 @@ def peer_rows(comparison) -> list[dict]:
              "pricing_point": r.peer.pricing_point, "origin": r.peer.origin, "basis": r.basis,
              "used_for_returns": r.used_for_returns, "excluded": r.excluded or "", "notes": r.notes,
              "returns_pct_a_year": {f"{n}y": None if v is None else round(v, 2) for n, v in r.returns.items()}}
+            | ({"benchmark_name": r.peer.benchmark_name} if r.peer.benchmark_name else {})
             for r in comparison.rows]
 
 

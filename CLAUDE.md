@@ -155,3 +155,18 @@ Instructions for Claude Code in this project. The build specification is
   else code's conclusion with a flag. Unit tests can never reach OpenAI (conftest blocks the real client).
 - Value and Fees reasons (findings, report, page) give the peer return gap and the fee gap (`plain.py`,
   from the figures the scorecard keeps in `Pillar.values`).
+- Real-fund demo library (Stage 4B, `demos.py`): metadata in `demo/library/*.yaml` (no document figures); inputs and
+  documents private in `data/demos/<id>/` (gitignored, never on Render); a demo with missing files is not shown.
+  "Try a demo" cards (Fidelity + HSBC Acc C peer; Vanguard FTSE Global All Cap): Quick Demo (default) = prevalidated
+  quick inputs, offline; Live AI Demo only where AI runs are on (key, login on servers), within the run limit. The
+  made-up fund stays for CI and the example input files. Code checks each demo's NAV 1/3/5y returns against the
+  factsheet (0.05 pp). Golden baselines in `data/demos/golden/`.
+- Price files: title rows above the column names, month names ("Sept"), currency-formatted values and newest-first
+  order are read; prices after the review date are left out with an info flag (`review_date_cutoff`).
+- Return basis: a `series` declared `annualised` stays annualised (its cumulative return derived by code; an
+  annualised since-launch figure is never read as cumulative); the cross-check compares like with like.
+- Peer `benchmark_name` (optional): a different variant from the fund's gets an information note only.
+- Ratings waiting for figures the documents do not give are "missing evidence" in the wording (evidence quality
+  "Evidence missing", "obtain the evidence missing for ..."), not a data check; ratings and verdict codes unchanged.
+- Executive summary: AI drafts over `drafting.max_summary_chars` (700) fail code's checks; if page 1 still overflows
+  with an AI summary, the Executive Report uses code's summary (info flag) and the Detailed Report keeps the AI text.

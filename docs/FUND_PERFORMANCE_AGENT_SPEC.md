@@ -686,6 +686,20 @@ Keep the manager's published Value Assessment Report out of the agent's inputs. 
 
 ---
 
+## 10b. Real-fund demo library (Stage 4B)
+
+- Manifests in `demo/library/<id>.yaml`: names, share class, ISIN, benchmark, peer, review date, quick and live file
+  lists, sources and disclosures, and the return-check tolerance (0.05 pp). No figure from a document.
+- Private files in `data/demos/<id>/` (`quick/`, `documents/`, `context/`), gitignored and not deployed; a demo with
+  missing files is not offered. `FUND_DEMO_DATA` points elsewhere.
+- Quick Demo: the quick inputs (price file + JSON) run offline (code recognises them byte for byte). Live AI Demo:
+  the documents route, only where AI runs are on, within the daily limit; the results say which kind ran.
+- Code checks each demo: NAV-derived 1/3/5-year returns (to the review date) vs the factsheet on its own basis.
+- Demos: Fidelity Index US P Acc with HSBC American Index Acc C (institutional minimum and benchmark variant
+  disclosed); Vanguard FTSE Global All Cap GBP Acc (GBP figures from Vanguard's factsheet, calendar years from the
+  KIID, USD index factsheet listed as context only, no tracking error/beta/R² or peer: Pending data check, worded as
+  missing evidence; pricing time recorded as the factsheet states it, not verified).
+
 ## 11. Build order for Claude Code
 
 1. **Project setup:** modules in the package `src/fund_performance/`: `io.py` (file reader), `checks.py` (Section 3.4), `calc.py` (Section 4), `precedence.py` (factsheet precedence and cross-check, step 4), `facts.py` (the facts JSON, step 7), `number_guard.py` (Section 8.3, step 7), `mandate.py` (decision tree), `scorecard.py` (Section 6), `agents/` (Section 8), `fetch.py` (approved sources, Section 8.2), `report.py` (Section 9), `controller.py` (Section 8.5); `config/thresholds.yaml`; `tests/`.

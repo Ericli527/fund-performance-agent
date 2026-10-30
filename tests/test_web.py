@@ -211,12 +211,13 @@ def test_the_page_has_the_instructions_files_table_and_how_it_works():
     ui = build_ui()
     texts = " ".join(str(getattr(c, "value", "") or "") for c in ui.blocks.values())
     assert PUBLIC_DATA_HTML in texts and INSTRUCTIONS in texts and FILES_TABLE in texts and HOW_END in texts
-    for step in ("Try the demo", "Upload a real fund", "Let the agent check itself", "Read the evidence",
+    for step in ("Try a demo", "Upload a real fund", "Let the agent check itself", "Read the evidence",
                  "Make the judgement"):
         assert step in INSTRUCTIONS
     accordions = {c.label: c.open for c in ui.blocks.values() if isinstance(c, gr.Accordion)}
     assert accordions == {"Additional options": False, "Help & methodology": False, "Technical details": False}
-    assert any(isinstance(c, gr.DownloadButton) and c.label == "Download example files" for c in ui.blocks.values())
+    assert any(isinstance(c, gr.DownloadButton) and c.label == "Download example input files (a made-up fund)"
+               for c in ui.blocks.values())
 
 
 # The redesigned input page (UX stage 1)
@@ -228,9 +229,9 @@ def test_the_page_follows_the_new_layout():
     ui = build_ui()
     texts = " ".join(str(getattr(c, "value", "") or "") for c in ui.blocks.values())
     assert "<h1>Fund Performance Review</h1>" in texts and "Clear insights for better investment oversight." in texts
-    assert "What would you like to analyse?" in texts and "Fund documents" in texts
+    assert "What would you like to analyse?" in texts and "Try a demo" in texts and "Fund documents" in texts
     buttons = {c.value: c.variant for c in _blocks(gr.Button) if not isinstance(c, gr.DownloadButton)}
-    assert buttons == {"Run Fund Review": "primary", "Use Demo Files": "secondary"}
+    assert buttons == {"Run Fund Review": "primary"}           # Stage 4B: demos are picked from cards
     files = [c.label for c in _blocks(gr.File)]
     for label in ("Fund price data · CSV or Excel · Required", "Fund factsheet · PDF or Word · Required"):
         assert label in files
@@ -342,12 +343,11 @@ def test_code_decides_offline_runs_not_the_user(monkeypatch, tmp_path):
     assert run_offline(d["price"], []) is True
 
 
-def test_the_demo_button_loads_the_files_and_opens_the_options():
-    ui = build_ui()
-    demo_fn = next(f for f in ui.fns.values() if f.name == "on_demo")
-    price, factsheet, kid, peers, json_files, options = demo_fn.fn()
-    assert (price, factsheet, kid) == (demo()["price"], demo()["factsheet"], None)
-    assert peers == [demo()["peer"]] and json_files == demo()["json"] and options["open"] is True
+def test_the_made_up_fund_is_not_a_demo_card_but_still_the_example_files():
+    """ Stage 4B: the made-up fund stays in CI and the example input files, not in the demo selector """
+    cards = [c for c in _blocks(gr.Radio) if "fp-demo-cards" in (c.elem_classes or [])]
+    assert cards and all("Sample World" not in label for label, _ in cards[0].choices)
+    assert "example_files/prices.csv" in zipfile.ZipFile(example_zip()).namelist()
 
 
 def test_the_page_events_are_not_in_the_public_api():

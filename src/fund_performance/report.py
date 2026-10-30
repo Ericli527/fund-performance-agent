@@ -26,6 +26,7 @@ from fund_performance.evidence import Evidence
 from fund_performance.peers import PeerComparison, as_list
 from fund_performance.plain import plain_peer_reason
 from fund_performance.presentation import (NOT_RELIABLE, UNRELIABLE, UNRELIABLE_MARK, comparison_problems,
+                                           missing_evidence,
                                            is_comparative)
 from fund_performance.precedence import ReportedFigures
 from fund_performance.scorecard import AMBER, CHECK_DATA, GREEN, MANUAL_CHECK, RED, Scorecard
@@ -127,6 +128,8 @@ def plain_reason(inp: ReportInputs, name: str) -> str:
         what = "value for investors" if name.startswith("Value") else "the fee"
         why = "no comparison fund was supplied" if not inp.peers else "no peer's returns could be compared"
         return f"Add peer: {why}, so {what} cannot be judged."
+    if pillar.rating == CHECK_DATA and (missing := missing_evidence(inp.facts).get(name)):
+        return f"Not rated: {missing}."
     if pillar.rating in (MANUAL_CHECK, CHECK_DATA):
         return pillar.reason.replace(f"{n}y", f"{n} years")
     if (peer_reason := plain_peer_reason(name, pillar.values)):

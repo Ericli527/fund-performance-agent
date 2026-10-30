@@ -8,7 +8,8 @@ change these; a deliberate change to a calculation updates the baseline on purpo
     PYTHONPATH=src python tests/test_golden_facts.py --update
 
 The demo baseline (a made-up fund) is committed in tests/golden/. The Test 1 baselines are kept next to the Test 1
-files in data/test1/golden/ (gitignored, like the files they come from) and their tests skip when absent.
+files in data/test1/golden/, and the real-fund demo baselines in data/demos/golden/ (gitignored, like the files they
+come from); their tests skip when absent.
 """
 import asyncio
 import json
@@ -24,10 +25,14 @@ sys.path.insert(0, str(ROOT / "tests"))
 from conftest import TEST1  # noqa: E402
 
 DEMO = ROOT / "demo" / "sample_index_fund"
+DEMOS = ROOT / "data" / "demos"
 CASES = {
     "demo": (DEMO, ROOT / "tests" / "golden" / "demo_facts.json", None),
     "test1": (TEST1, TEST1 / "golden" / "test1_facts.json", None),
     "test1_with_approved_peers": (TEST1, TEST1 / "golden" / "test1_with_approved_peers_facts.json", "peers"),
+    # Stage 4B: the real-fund demos' Quick Demo inputs (private, gitignored: data/demos/), baselines beside them
+    "demo_fidelity_us": (DEMOS / "fidelity_us" / "quick", DEMOS / "golden" / "fidelity_us_facts.json", None),
+    "demo_vanguard_global": (DEMOS / "vanguard_global" / "quick", DEMOS / "golden" / "vanguard_global_facts.json", None),
 }
 
 

@@ -5,6 +5,7 @@ Each candidate has an id, its wording, its own fixed timing ("when", part of the
 required (a required action is always used while there is room for it).
 """
 import re
+from fund_performance.presentation import missing_evidence
 
 SIGN_OFF = "before signing off this review"
 NEXT_REVIEW = "before the next quarterly review"
@@ -28,8 +29,13 @@ def candidate_actions(facts: dict) -> list[dict]:
     then two general actions so there are always at least two """
     pillars = facts.get("scorecard", {}).get("pillars", [])
     found: list[dict] = []
+    missing = missing_evidence(facts)
     for p in pillars:
-        if p["rating"] == "CHECK DATA":
+        if p["rating"] == "CHECK DATA" and p["name"] in missing:
+            found.append(_action(f"check_data_{_slug(p['name'])}",
+                                 f"Obtain the evidence missing for {p['name']} {SIGN_OFF}: {missing[p['name']]}.",
+                                 SIGN_OFF, True))
+        elif p["rating"] == "CHECK DATA":
             found.append(_action(f"check_data_{_slug(p['name'])}",
                                  f"Resolve the data check on {p['name']} {SIGN_OFF}: {p['reason']}.",
                                  SIGN_OFF, True))

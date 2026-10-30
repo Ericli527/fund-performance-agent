@@ -33,12 +33,14 @@ import tempfile
 import traceback
 from typing import Awaitable, Callable
 import zipfile
+from html import escape
 import gradio as gr
 from fund_performance.config import WebSettings, load_settings
 from fund_performance.dashboard import dashboard_data, dashboard_html, technical_html
 from fund_performance.controller import DEFAULT_QUESTION, RunResult, RunStopped, run_review
 from fund_performance.plain import verdict_meaning, verdict_name
-from fund_performance.presentation import download_copy
+from fund_performance.presentation import MISSING_MEANING, download_copy, missing_evidence
+from fund_performance.demos import NOTICE, Demo, find_demo, load_demos, matching_demo, return_checks
 from fund_performance.report import ANGLE_WORDS, REPORT_TYPE_WORDS
 from fund_performance.intake import read_documents, self_check, write_inputs
 
@@ -57,14 +59,14 @@ AI_OFF = ("AI runs are switched off on this server, because no login is set up (
           "You can still run the offline demo.")
 NEEDS_AI = ("Reading the documents uses AI, which is switched off in this setup. Click **Use Demo Files**, or add "
             "JSON files under **Additional options**.")
-NEED_FILES = "Please add the fund price data and the fund factsheet (both required), or click **Use Demo Files**."
+NEED_FILES = "Please add the fund price data and the fund factsheet (both required), or pick a demo under **Try a demo**."
 OFFLINE_ENV = "FUND_REVIEW_OFFLINE"         # development and testing only: every review runs without AI
 
 PUBLIC_DATA = ("**Public data only.** Files and figures may be sent to OpenAI, which has data sharing on for this "
                "service. Never upload confidential or client data.")
 PUBLIC_DATA_HTML = PUBLIC_DATA.replace("**Public data only.**", "<b>Public data only.</b>")
 INSTRUCTIONS = """### How to use it
-1. **Try the demo:** click **Use Demo Files**, then **Run Fund Review**. Free, takes seconds, no AI.
+1. **Try a demo:** pick Fidelity or Vanguard under **Try a demo**, then **Run Fund Review**. The Quick Demo is free, takes seconds and uses no AI.
 2. **Upload a real fund:** the fund price data and the factsheet. The KID and peer factsheets are optional, under **Additional options**.
 3. **Let the agent check itself:** code checks every value the AI read against the documents and the prices, and flags anything it cannot confirm. Takes 1–2 minutes.
 4. **Read the evidence:** the suggested verdict, conclusion, ratings and charts; download the PDF.
@@ -154,7 +156,7 @@ def run_offline(price, json_files) -> bool:
     offline, for development and testing; every other review uses the AI workflow """
     if os.getenv(OFFLINE_ENV, "").strip().lower() in ("1", "true", "yes"):
         return True
-    return uses_demo_files(price, json_files)
+    return uses_demo_files(price, json_files) or matching_demo(price, json_files) is not None
 
 
 def _size(path: Path) -> str:
@@ -289,7 +291,8 @@ def summary_markdown(result: RunResult) -> str:
     reasons = getattr(result, "reasons", {}) or {}
     cell = lambda text: " ".join(str(text).split()).replace("|", "/")      # noqa: E731
     lines = [f"### {fund.get('fund_name', 'Fund')}", f"Figures to {fund.get('as_of_date', '')}", "",
-             f"**Suggested verdict: {verdict_name(card.get('verdict', ''))}** ({verdict_meaning(card.get('verdict', ''))})"]
+             f"**Suggested verdict: {verdict_name(card.get('verdict', ''))}** "
+             f"({MISSING_MEANING if card.get('verdict', '').startswith('Pending') and missing_evidence(facts) else verdict_meaning(card.get('verdict', ''))})"]
     concl = facts.get("suggested_conclusion") or {}
     if concl.get("text"):
         who = (f"AI draft for the {ANGLE_WORDS.get(concl.get('angle'), concl.get('angle'))}, chosen by the Judge"
@@ -435,6 +438,84 @@ async def with_progress(work: Callable[[Progress], Awaitable[Outcome]]):
     yield "done", task.result()
 
 
+# --- The real-fund demos (Stage 4B) ---------------------------------------------------------------------------------
+
+QUICK, LIVE = "quick", "live"
+DEMO_MODES = {QUICK: "Quick Demo · prevalidated inputs, no AI (seconds)",
+              LIVE: "Live AI Demo · the agents read the documents (1–2 minutes; counts towards today's AI limit)"}
+EVIDENCE_WORDS = {QUICK: ("Prevalidated inputs: figures typed from the documents and checked by code (the price "
+                          "returns below match the factsheet). No AI is used, so every run gives the same result."),
+                  LIVE: ("AI-extracted evidence: the Extractor and Mandate agents read the documents; code checks "
+                         "every value, and figures read by AI are marked as such in the reports.")}
+NO_DEMOS = ("The real-fund demos need their private data files, which are not on this server (they are kept out of "
+            "the public repository). You can still download example input files (a made-up fund) under Help & "
+            "methodology.")
+
+
+def live_demo_allowed() -> bool:
+    """ The Live AI Demo is offered only where AI runs are on: a key, a login on servers, not forced offline """
+    return (bool(os.getenv("OPENAI_API_KEY")) and not ai_switched_off()
+            and os.getenv(OFFLINE_ENV, "").strip().lower() not in ("1", "true", "yes"))
+
+
+def demo_card(demo: Demo) -> str:
+    return f"{demo.title}\n{demo.subtitle}"
+
+
+def demo_inputs(demo: Demo, mode: str) -> dict:
+    """ What goes into the upload boxes: the quick inputs (price + JSON) or the documents (price + PDFs) """
+    if mode == LIVE:
+        f = demo.live_files
+        return {"price": str(f["price"]), "factsheet": str(f["factsheet"]), "kid": str(f["kid"]) if f["kid"] else None,
+                "peer": [str(p) for p in f["peers"]] or None, "json": None}
+    f = demo.quick_files
+    return {"price": str(f["price"]), "factsheet": None, "kid": None, "peer": None, "json": [str(p) for p in f["json"]]}
+
+
+def demo_info_html(demo: Demo, mode: str) -> str:
+    """ The demo's card: fund, dates, evidence type, the return check, disclosures, sources and the notice """
+    rows = "".join(
+        f"<tr><td>{c.period.replace('y', ' year' + ('s' if c.period != '1y' else ''))}</td>"
+        f"<td>{c.calculated:.2f}%</td><td>{c.published:.2f}%</td><td>{c.difference:+.2f} pp</td>"
+        f"<td>{'✓ within' if c.ok else '✗ outside'} {c.tolerance_pp:.2f} pp</td></tr>"
+        for c in return_checks(demo) if c.calculated is not None and c.published is not None)
+    basis = next((c.basis for c in return_checks(demo) if c.period == "5y"), "")
+    sources = "".join(f"<li><b>{escape(x['publisher'])}</b>, {escape(x['title'])} ({escape(str(x['date']))}): "
+                      f"{escape(x['used'])}</li>" for x in demo.sources)
+    notes = "".join(f"<li>{escape(x)}</li>" for x in demo.disclosures)
+    ticker = f" · {escape(demo.ticker)}" if demo.ticker else ""
+    return f"""<div class='fp-card fp-demo-info'>
+<div class='fp-kicker'>{'Live AI Demo' if mode == LIVE else 'Quick Demo'} · historical data</div>
+<h3>{escape(demo.fund_name)}</h3>
+<p>{escape(demo.share_class)} · ISIN {escape(demo.isin)}{ticker} · Benchmark: {escape(demo.benchmark)}<br/>
+Peer: {escape(demo.peer)}<br/>Review date: {demo.review_date:%d %b %Y}</p>
+<p class='fp-evidence-type'><b>{'AI-extracted evidence' if mode == LIVE else 'Prevalidated inputs'}.</b>
+{escape(EVIDENCE_WORDS[mode].split(': ', 1)[1][:1].upper() + EVIDENCE_WORDS[mode].split(': ', 1)[1][1:])}</p>
+<details><summary>Return check: fund price returns vs the factsheet ({escape(basis)})</summary>
+<table class='fp-table'><tr><th>Period</th><th>From prices</th><th>Factsheet</th><th>Difference</th><th>Check</th></tr>
+{rows}</table></details>
+<details><summary>Disclosures</summary><ul>{notes}</ul></details>
+<details><summary>Sources</summary><ul>{sources}</ul></details>
+<p class='fp-help'>{escape(NOTICE)}</p></div>"""
+
+
+def demo_banner(price, json_files, picked: str | None, mode: str) -> dict | None:
+    """ What the results say about a demo run: which demo, and whether its evidence was prevalidated or read by AI """
+    if (demo := matching_demo(price, json_files)):
+        return {"label": "Quick Demo", "fund": demo.fund_name, "evidence": EVIDENCE_WORDS[QUICK], "notice": NOTICE}
+    demo = find_demo(picked) if picked else None
+    if demo and mode == LIVE and demo.available and _one(price) and \
+            Path(_one(price)).read_bytes() == demo.live_files["price"].read_bytes():
+        return {"label": "Live AI Demo", "fund": demo.fund_name, "evidence": EVIDENCE_WORDS[LIVE], "notice": NOTICE}
+    return None
+
+
+def demo_tag(price, json_files, picked: str | None, mode: str) -> str:
+    """ The same as one Markdown line, for the plain-text summary """
+    b = demo_banner(price, json_files, picked, mode)
+    return f"**{b['label']}: {b['fund']}.** {b['evidence']}" if b else ""
+
+
 # --- The page -------------------------------------------------------------------------------------------------------
 
 def demo_files() -> dict[str, list[str] | str]:
@@ -471,6 +552,12 @@ CSS = f"""
 
 /* What would you like to analyse: radio buttons drawn as cards (still radio inputs, so keyboard accessible) */
 .fp-cards .wrap {{ display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }}
+.fp-demo-cards .wrap {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+.fp-demo-info {{ margin-top: 10px; }} .fp-demo-info h3 {{ margin: 2px 0 4px 0; }}
+.fp-demo-info p {{ margin: 4px 0; font-size: 14px; }} .fp-demo-info summary {{ cursor: pointer; color: {NAVY_TEXT}; font-weight: 600; margin-top: 6px; }}
+.fp-demo-banner {{ background: #eef3fa; border: 1px solid {BORDER}; border-left: 4px solid {BLUE}; border-radius: 8px;
+  padding: 10px 14px; margin-bottom: 10px; font-size: 14px; }}
+.fp-evidence-type {{ background: #f6f8fb; border-left: 3px solid {BLUE}; padding: 6px 10px; border-radius: 4px; }}
 .fp-cards label {{ display: flex !important; align-items: flex-start; gap: 10px; padding: 14px 16px !important;
   border: 1px solid {BORDER} !important; border-radius: 12px !important; background: #fff !important;
   box-shadow: none !important; cursor: pointer; min-height: 72px; }}
@@ -605,7 +692,17 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
         question = gr.Textbox(label="Review question", value=UI_QUESTION, lines=2,
                               info="Edit it if you like. The agents use it to decide what to focus on.")
 
-        # C. Fund documents
+        # C. Try a demo (real funds; the made-up fund stays in the tests and the example files)
+        demos = [d for d in load_demos() if d.available]
+        gr.HTML("<h2>Try a demo</h2>", elem_classes="fp-section-title")
+        demo_choice = gr.Radio([(demo_card(d), d.id) for d in demos], value=None, show_label=False, container=False,
+                               elem_classes=["fp-cards", "fp-demo-cards"], label="Try a demo", visible=bool(demos))
+        demo_mode = gr.Radio([(label, value) for value, label in DEMO_MODES.items()], value=QUICK,
+                             label="How to run the demo", elem_classes="fp-segmented",
+                             visible=bool(demos) and live_demo_allowed())
+        demo_info = gr.HTML("" if demos else f"<p class='fp-help'>{escape(NO_DEMOS)}</p>")
+
+        # D. Fund documents
         gr.HTML("<h2>Fund documents</h2>", elem_classes="fp-section-title")
         with gr.Row(equal_height=True):
             with gr.Column(min_width=280):
@@ -638,14 +735,11 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
 
         # F. Actions, the privacy note and help
         run = gr.Button("Run Fund Review", variant="primary", elem_classes="fp-run")
-        with gr.Row():
-            use_demo = gr.Button("Use Demo Files", variant="secondary", scale=0, min_width=180)
-            gr.Markdown("A made-up fund. Runs in seconds, without AI.", elem_classes="fp-help")
         gr.HTML(f"<div class='fp-notice' role='note'>{PUBLIC_DATA_HTML}</div>")
         with gr.Accordion("Help & methodology", open=False):
             gr.Markdown(INSTRUCTIONS)
             gr.Markdown(FILES_TABLE)
-            gr.DownloadButton("Download example files", value=example_zip(), size="sm")
+            gr.DownloadButton("Download example input files (a made-up fund)", value=example_zip(), size="sm")
             gr.Markdown("### How the agent works")
             gr.HTML(how_it_works_html())
 
@@ -675,15 +769,21 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             return ("", gr.update(visible=True), dashboard_html(data, audience_value), detailed, executive,
                     technical_html(data), outcome.log, outcome.message, data)
 
-        async def on_run(q, p, f, k, pr, j, audience_value):
+        async def on_run(q, p, f, k, pr, j, audience_value, picked, mode):
             hidden = gr.update(visible=False)
             yield "Starting…", "", hidden, "", gr.update(value=None), gr.update(value=None), "", None, "", None
             offline = run_offline(p, j)
+            banner = demo_banner(p, j, picked, mode)
+            tag = demo_tag(p, j, picked, mode)
             async for kind, item in with_progress(lambda say: start_review(q, p, f, k, pr, j, offline, limits, say)):
                 if kind == "progress":
                     yield (item,) + (gr.update(),) * 9
                 else:
-                    yield ("",) + show(item, audience_value)
+                    if tag:
+                        item.message = f"{tag}\n\n{item.message}"
+                    if banner and item.data is not None:
+                        item.data = item.data | {"demo": banner}
+                    yield ("", ) + show(item, audience_value)
 
         def on_audience(data, audience_value):
             """ A new view and a new primary download from the saved results: the review is not run again """
@@ -691,9 +791,15 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                 return gr.update(), gr.update(), gr.update()
             return (dashboard_html(data, audience_value),) + download_buttons(data, audience_value)
 
-        def on_demo():
-            d = demo_files()
-            return d["price"], d["factsheet"], None, [d["peer"]], d["json"], gr.update(open=True)
+        def on_demo(demo_id, mode):
+            """ Fill the upload boxes with the demo's inputs for this mode, and show its card """
+            demo = find_demo(demo_id) if demo_id else None
+            if demo is None or not demo.available:
+                return (gr.update(),) * 6 + ("",)
+            mode = mode if mode == LIVE and live_demo_allowed() else QUICK
+            d = demo_inputs(demo, mode)
+            return (d["price"], d["factsheet"], d["kid"], d["peer"], d["json"], gr.update(open=bool(d["json"] or d["kid"])),
+                    demo_info_html(demo, mode))
 
         private = {"api_visibility": "private"}         # the page is the only way in, with its limits
         review_type.change(question_for, inputs=[review_type, question], outputs=question, **private)
@@ -702,8 +808,10 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                                                 (kid, kid_status, DOC_TYPES, "PDF or Word"),
                                                 (peer, peer_status, DOC_TYPES, "PDF or Word")):
             box.change(lambda v, a=allowed, k=kinds: file_status(v, a, k), inputs=box, outputs=status_box, **private)
-        use_demo.click(on_demo, outputs=[price, factsheet, kid, peer, json_files, options], **private)
-        run.click(on_run, inputs=[question, price, factsheet, kid, peer, json_files, audience],
+        for trigger in (demo_choice.change, demo_mode.change):
+            trigger(on_demo, inputs=[demo_choice, demo_mode],
+                    outputs=[price, factsheet, kid, peer, json_files, options, demo_info], **private)
+        run.click(on_run, inputs=[question, price, factsheet, kid, peer, json_files, audience, demo_choice, demo_mode],
                   outputs=[progress, message, results, dashboard, pdf, executive_pdf, technical, log, plain,
                            result_state], **private)
         audience.change(on_audience, inputs=[result_state, audience], outputs=[dashboard, pdf, executive_pdf],

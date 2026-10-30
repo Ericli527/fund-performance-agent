@@ -20,7 +20,8 @@ from fund_performance.presentation import (NAVY, NOT_AVAILABLE, QUESTIONS, RATIN
                                            VERDICT_STYLE, EvidenceQuality, _date, _figures, _shown, _source,
                                            assessment_caveat, evidence_quality, flag_dicts, headline_metrics,
                                            conclusion_origin, issue_groups, risk_measures, UNRELIABLE,
-                                           UNRELIABLE_SOURCE, UNRELIABLE_WHY, comparison_invalid)
+                                           UNRELIABLE_SOURCE, UNRELIABLE_WHY, assessment_meaning, comparison_invalid,
+                                           report_action)
 from fund_performance.report import ANGLE_WORDS, REPORT_TYPE_WORDS, plain_note
 
 AUDIENCES = ("analyst", "management")
@@ -72,7 +73,10 @@ def _header(data: dict, quality: EvidenceQuality) -> str:
     caveat = assessment_caveat(quality)
     q_colour = {"check": "#6d4c9f", "warnings": "#b7791f", "clear": "#4c5966"}[quality.level]
     offline = " · Run without AI (offline)" if data.get("offline") else ""
-    return f"""
+    demo = data.get("demo")
+    banner = (f"<div class='fp-demo-banner'><b>{escape(demo['label'])}: {escape(demo['fund'])}.</b> "
+              f"{escape(demo['evidence'])} <span class='fp-muted'>{escape(demo['notice'])}</span></div>" if demo else "")
+    return f"""{banner}
 <div class='fp-result-head'>
   <div class='fp-fund'><h2>{escape(fund.get('fund_name', 'Fund'))}</h2>
     <p>ISIN {escape(fund.get('isin', '–'))} · {escape(fund.get('share_class', ''))} · Benchmark:
@@ -82,7 +86,7 @@ def _header(data: dict, quality: EvidenceQuality) -> str:
     <div class='fp-status fp-assessment' style='border-left-color:{colour}'>
       <div class='fp-kicker'>Investment assessment (suggested)</div>
       <div class='fp-status-main' style='color:{colour}'>{escape(verdict_name(code))}</div>
-      <div class='fp-status-sub'>{escape(verdict_meaning(code))}. From fixed rules on the four ratings; the analyst
+      <div class='fp-status-sub'>{escape(assessment_meaning(code, quality, verdict_meaning(code)))}. From fixed rules on the four ratings; the analyst
       decides and signs.{(' <b>' + escape(caveat) + '</b>') if caveat else ''}</div></div>
     <div class='fp-status fp-quality' style='border-left-color:{q_colour}'>
       <div class='fp-kicker'>Evidence quality (data checks)</div>
@@ -141,7 +145,7 @@ def _attention(data: dict, quality: EvidenceQuality, analyst: bool) -> str:
                   + [f"Reviewer check: {m}" for m in manual])
     if quality.ai_read and quality.level != "check":
         data_items.append("Figures were read from the documents by AI: check them against the factsheet.")
-    actions = data.get("actions") or []
+    actions = [report_action(a) for a in data.get("actions") or []]
     body = ""
     if data_items:
         body += "<p class='fp-group'>Evidence quality: data issues to resolve or check</p>" + _list(data_items)
@@ -156,9 +160,12 @@ def _decisions(data: dict, quality: EvidenceQuality) -> str:
     """ Management view: the decisions to take, in order """
     code = data["facts"].get("scorecard", {}).get("verdict", "")
     items = []
-    if quality.level == "check":
+    if quality.level == "check" and quality.label == "Evidence missing":
+        items.append("Ask for the missing evidence before a decision is made: " + quality.detail + ".")
+    elif quality.level == "check":
         items.append("Ask for the data check to be resolved before a decision is made.")
-    items.append(f"Confirm or change the suggested assessment: {verdict_name(code)} ({verdict_meaning(code).lower()}).")
+    items.append(f"Confirm or change the suggested assessment: {verdict_name(code)} "
+                 f"({assessment_meaning(code, quality, verdict_meaning(code)).lower()}).")
     required = [c["action"] for c in data["facts"].get("candidate_actions", []) if c.get("required")]
     items += required[:2]
     questions = data["facts"].get("manager_questions", [])[:2]

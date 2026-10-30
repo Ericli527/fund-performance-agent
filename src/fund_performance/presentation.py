@@ -28,6 +28,28 @@ class EvidenceQuality:
     ai_read: bool = False
 
 
+# A rating can wait ("CHECK DATA") for two different reasons: a data check found a problem (a blocking flag), or the
+# documents do not give a figure the rating needs. The second is missing evidence, not bad data, and is said so.
+MISSING_WORDS = (
+    ("R²", "R² and beta are not in the documents provided, and there is no index price series to calculate them"),
+    ("tracking error not available", "tracking error is not in the documents provided, and there is no index price "
+                                     "series to calculate it"),
+    ("return not available", "a return needed for the comparison is not in the documents provided"))
+
+
+def missing_evidence(facts: dict) -> dict[str, str]:
+    """ {rating name: what is missing, in plain words} for ratings waiting for evidence the documents do not give """
+    blocking = [f["message"] for f in facts.get("data_flags", []) if f["level"] == "blocking"]
+    out = {}
+    for p in facts.get("scorecard", {}).get("pillars", []):
+        reason = p.get("reason") or ""
+        if p["rating"] != "CHECK DATA" or "not available" not in reason or any(m in reason for m in blocking):
+            continue
+        out[p["name"]] = "; ".join(w for key, w in MISSING_WORDS if key in reason) or \
+            reason.replace("CHECK DATA: ", "")
+    return out
+
+
 def evidence_quality(data: dict) -> EvidenceQuality:
     """ From code's data checks and the run's flags only. "clear" means no check raised an issue; it is not a
     verification of the source documents """
@@ -37,6 +59,11 @@ def evidence_quality(data: dict) -> EvidenceQuality:
     warnings = list(dict.fromkeys(f["message"] for f in flags if f["level"] == "warning"))
     checks = [p["name"] for p in facts.get("scorecard", {}).get("pillars", []) if p["rating"] == "CHECK DATA"]
     ai_read = any(f.get("source") == "ai_extracted" for f in facts.get("figures", []))
+    missing = missing_evidence(facts)
+    if missing and not blocking and set(missing) == set(checks):
+        return EvidenceQuality("check", "Evidence missing",
+                               f"{_and(list(missing))} cannot be rated: figures they need are not in the documents "
+                               "provided", blocking, warnings, ai_read)
     if blocking or checks:
         n = len(blocking) or len(checks)
         return EvidenceQuality("check", "Data check needed",
@@ -50,6 +77,10 @@ def evidence_quality(data: dict) -> EvidenceQuality:
     if ai_read:
         detail += "; figures were read from the documents by AI, so check them against the factsheet"
     return EvidenceQuality("clear", "No data issues raised", detail, blocking, warnings, ai_read)
+
+
+def _and(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 
 
 # --- Figures ---------------------------------------------------------------------------------------------------------
@@ -131,6 +162,9 @@ ANGLE_WORDS = {"board": "board", "analyst": "oversight analyst", "manager_meetin
 
 def conclusion_origin(concl: dict) -> str:
     """ Who wrote the suggested conclusion """
+    if concl.get("executive_fallback"):
+        return ("Written by code from the scorecard: the AI draft did not fit on this page and is kept in full in "
+                "the Detailed Report")
     if concl.get("source") == "ai":
         return (f"AI draft for the {ANGLE_WORDS.get(concl.get('angle'), concl.get('angle'))}, chosen by the Judge and "
                 "checked by code")
@@ -139,8 +173,18 @@ def conclusion_origin(concl: dict) -> str:
 
 def assessment_caveat(quality: EvidenceQuality) -> str:
     """ What the suggested verdict needs before it can be relied on """
+    if quality.label == "Evidence missing":
+        return "Not final: the missing evidence is needed first."
     return {"check": "Not final: resolve the data check first.",
             "warnings": "Not final: review the data warnings first."}.get(quality.level, "")
+
+
+MISSING_MEANING = "Obtain the missing evidence before deciding"
+
+
+def assessment_meaning(code: str, quality: EvidenceQuality, meaning: str) -> str:
+    """ What the suggested verdict means; a wait for missing evidence is not called a data check """
+    return MISSING_MEANING if code.startswith("Pending") and quality.label == "Evidence missing" else meaning
 
 
 def issue_groups(facts: dict, reasons: dict) -> tuple[list[str], list[str]]:
@@ -149,7 +193,9 @@ def issue_groups(facts: dict, reasons: dict) -> tuple[list[str], list[str]]:
     gaps, concerns = [], []
     for p in facts.get("scorecard", {}).get("pillars", []):
         why = reasons.get(p["name"]) or p["reason"]
-        if p["rating"] == "CHECK DATA":
+        if p["rating"] == "CHECK DATA" and p["name"] in missing_evidence(facts):
+            gaps.append(f"{p['name']}: not rated, because {missing_evidence(facts)[p['name']]}")
+        elif p["rating"] == "CHECK DATA":
             gaps.append(f"{p['name']}: not rated until the data check is resolved (see the data issues)")
         elif p.get("summary") == "Add peer":
             gaps.append(f"{p['name']}: {why}")

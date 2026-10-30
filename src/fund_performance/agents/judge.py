@@ -13,7 +13,7 @@ import asyncio
 import json
 from pydantic import BaseModel, ConfigDict
 from fund_performance.agents.base import RunFn, build_agent, run_structured
-from fund_performance.agents.reporter import Draft, write_draft
+from fund_performance.agents.reporter import MAX_SUMMARY_CHARS, Draft, write_draft
 from fund_performance.models import DataFlag
 
 CHECKLIST = ("key_points_covered", "conclusion_clear", "plain_english", "no_rating_change", "supported_by_facts")
@@ -126,9 +126,11 @@ def pick(scored: list[Scored], preferred: str | None, order: list[str]) -> Score
 
 
 async def draft_and_judge(facts: dict, angles: list[str], focus: list[str], run_reporter: RunFn | None = None,
-                          run_judge: RunFn | None = None, max_rewrites: int = 1) -> DraftResult:
+                          run_judge: RunFn | None = None, max_rewrites: int = 1,
+                          max_chars: int = MAX_SUMMARY_CHARS) -> DraftResult:
     out = DraftResult()
-    drafts = list(await asyncio.gather(*(write_draft(facts, a, focus, run_reporter) for a in angles)))
+    drafts = list(await asyncio.gather(*(write_draft(facts, a, focus, run_reporter, max_chars=max_chars)
+                                         for a in angles)))
     for attempt in range(max_rewrites + 1):
         scored, preferred, error = await _judge(facts, drafts, run_judge)
         out.scored = scored
@@ -144,7 +146,7 @@ async def draft_and_judge(facts: dict, angles: list[str], focus: list[str], run_
         # None passed: send every draft back once, with all its issues
         drafts = list(await asyncio.gather(*(
             write_draft(facts, s.draft.angle, focus, run_reporter, s.issues or ["make it pass the checklist"],
-                        s.draft.text) for s in scored)))
+                        s.draft.text, max_chars) for s in scored)))
     if out.chosen is None:
         failed = sorted({CHECK_WORDS[k] for s in out.scored for k, v in s.checks.items() if not v})
         out.flags.append(DataFlag(check="judge", level="warning", message=(

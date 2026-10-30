@@ -1,0 +1,34 @@
+# Real-fund demo (Stage 4B): metadata only, safe to publish. The inputs and documents are not in this repository:
+# they live in the private demo folder (data/demos/vanguard_global/, gitignored), and the demo is hidden when they
+# are missing. No figure from a document is written here.
+id: vanguard_global
+order: 2
+title: "Vanguard FTSE Global All Cap"
+subtitle: "Global tracker, with missing evidence handled honestly"
+fund_name: "Vanguard FTSE Global All Cap Index Fund GBP Acc"
+share_class: "A GBP Accumulation"
+isin: GB00BD3RZ582
+ticker: VAFTGAG
+benchmark: "FTSE Global All Cap Index"
+peer: "None: no verified peer, so value and fees are not compared"
+review_date: 2026-09-30
+quick:
+  prices: quick/Historical_Prices_Vanguard_FTSE_Global_All_Cap_GBP_Acc.xlsx
+  json: [quick/fund_profile.json, quick/factsheet_performance.json]
+live:
+  prices: quick/Historical_Prices_Vanguard_FTSE_Global_All_Cap_GBP_Acc.xlsx
+  factsheet: documents/Vanguard_FTSE_Global_All_Cap_GBP_Acc_factsheet.pdf
+  kid: documents/Vanguard_FTSE_Global_All_Cap_GBP_Acc_KIID.pdf
+  peers: []
+return_check_tolerance_pp: 0.05
+sources:
+  - {publisher: "Vanguard Asset Management", title: "Vanguard FTSE Global All Cap Index Fund GBP Acc factsheet", date: "30 Sep 2026", used: "returns in GBP (fund and benchmark), fees, fund size"}
+  - {publisher: "Vanguard Investments UK", title: "Key Investor Information (A GBP Accumulation)", date: "17 Feb 2026", used: "objective, risk indicator, calendar-year returns in GBP"}
+  - {publisher: "Vanguard", title: "Historical prices, GBP Acc (Excel download)", date: "downloaded 30 Oct 2026", used: "daily NAV to 30 Sep 2026: risk and cross-checks (later prices left out)"}
+  - {publisher: "FTSE Russell", title: "FTSE Global All Cap Index factsheet", date: "30 Sep 2026", used: "context only: its returns are in USD, so they are not compared with the GBP fund"}
+disclosures:
+  - "Benchmark returns are the GBP figures printed in Vanguard's factsheet. The FTSE Russell factsheet gives USD returns, which are not used."
+  - "Tracking error, beta and R² are not published in the documents provided, and there is no GBP benchmark price series to calculate them, so Mandate and Performance cannot be fully rated: the verdict waits for that evidence."
+  - "No verified peer fund is available, so value for investors and fees are not compared."
+  - "Pricing time not verified: the factsheet gives a 12:00 London dealing cut-off and says performance is calculated on the closing NAV; the profile records the closing NAV as stated."
+  - "The price download runs to 29 Oct 2026; prices after 30 Sep 2026 are left out of the September review."

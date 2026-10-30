@@ -21,7 +21,8 @@ from fund_performance.presentation import (CHART_LEFT_OUT, UNRELIABLE, compariso
                                            NAVY, NOT_AVAILABLE, RATING_STYLE, VERDICT_STYLE, _figures,
                                            _shown, _source, assessment_caveat, chart_choice, comparison_problems,
                                            evidence_quality, flag_dicts, conclusion_origin, headline_metrics,
-                                           issue_groups, merge_same_ending, point_to_data_issues, report_action,
+                                           issue_groups, merge_same_ending, missing_evidence, point_to_data_issues,
+                                           report_action, assessment_meaning,
                                            risk_measures)
 
 PAGE1, PAGE2 = "Overview", "Comparisons and decision"
@@ -121,7 +122,8 @@ def _statuses(data: dict) -> str:
     return (f"<table class='x-status'><tr>"
             f"<td width='50%' class='x-box' style='border-left: 4px solid {colour}'><span class='x-label'>INVESTMENT "
             f"ASSESSMENT (SUGGESTED)</span><br/><span class='x-big' style='color:{colour}'>{escape(verdict_name(code))}</span>"
-            f"<br/>{escape(verdict_meaning(code))}. From fixed rules on the four ratings; the analyst decides."
+            f"<br/>{escape(assessment_meaning(code, quality, verdict_meaning(code)))}. From fixed rules on the four "
+            "ratings; the analyst decides."
             f"{('<br/><b>' + escape(caveat) + '</b>') if caveat else ''}</td><td width='2%'></td>"
             f"<td width='48%' class='x-box' style='border-left: 4px solid {q_colour}'><span class='x-label'>EVIDENCE "
             f"QUALITY (DATA CHECKS)</span><br/><span class='x-big' style='color:{q_colour}'>{escape(quality.label)}</span>"
@@ -152,9 +154,12 @@ def key_findings(data: dict) -> list[str]:
 
 
 def _scorecard(data: dict) -> str:
+    missing = missing_evidence(data["facts"])
     rows = ""
     for p in data["facts"]["scorecard"]["pillars"]:
-        if p["rating"] == "CHECK DATA":
+        if p["rating"] == "CHECK DATA" and p["name"] in missing:
+            why = f"Not rated: {missing[p['name']]}."
+        elif p["rating"] == "CHECK DATA":
             why = "Not rated yet: the data check on page 2 must be resolved first."
         else:
             why = data["reasons"].get(p["name"]) or p["reason"]
@@ -397,6 +402,30 @@ def build_executive(inp, out_dir: Path, name: str = "report_executive.pdf") -> P
     if problems:
         raise ReportLayoutError("Executive Report: " + "; ".join(problems))
     return path
+
+
+EXECUTIVE_FALLBACK = ("Executive Report: the AI-written summary did not fit on page 1, so code's summary from the "
+                      "scorecard is used there; the AI summary is kept in full in the Detailed Report")
+
+
+def build_executive_reliably(inp, out_dir: Path, name: str = "report_executive.pdf"):
+    """ (path, info flag or None). If page 1 runs over and its summary is AI-written, the Executive Report is built
+    again with code's summary (deterministic, from the scorecard) instead; the Detailed Report keeps the AI text.
+    Anything else that does not fit is still a ReportLayoutError: nothing is ever cut """
+    from fund_performance.models import DataFlag
+    from fund_performance.report import ReportLayoutError
+    try:
+        return build_executive(inp, out_dir, name), None
+    except ReportLayoutError:
+        concl = (inp.facts or {}).get("suggested_conclusion") or {}
+        if concl.get("source") != "ai" or not concl.get("code_text"):
+            raise
+    import copy
+    fallback = copy.copy(inp)
+    fallback.facts = copy.deepcopy(inp.facts)
+    fallback.facts["suggested_conclusion"] |= {"text": concl["code_text"], "source": "code", "executive_fallback": True}
+    return build_executive(fallback, out_dir, name), DataFlag(check="report_layout", level="info",
+                                                              message=EXECUTIVE_FALLBACK)
 
 
 def executive_layout_problems(texts: list[str], next_title: str | None = None) -> list[str]:

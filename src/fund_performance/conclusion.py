@@ -6,7 +6,7 @@ and rating checks as AI text; a sentence that fails is left out (the verdict sen
 """
 from fund_performance.number_guard import check_labels, check_numbers, check_ratings
 from fund_performance.plain import VERDICT_NAMES, verdict_meaning
-from fund_performance.presentation import comparison_invalid
+from fund_performance.presentation import comparison_invalid, missing_evidence
 
 MAX_POINTS = 4
 MIN_QUESTIONS, MAX_QUESTIONS = 2, 4
@@ -111,6 +111,10 @@ def _verdict_sentence(facts: dict) -> str:
         return f"Suggested verdict: {name}, {meaning} about {_join(red)}." if red else f"Suggested verdict: {name}, {meaning}."
     if code.startswith("Pending"):
         checks = [SHORT[n] for n, p in pillars.items() if p["rating"] == "CHECK DATA"]
+        missing = missing_evidence(facts)
+        if missing and all(n in missing for n, p in pillars.items() if p["rating"] == "CHECK DATA"):
+            return (f"Suggested verdict: {name}: obtain the evidence missing for {_join(checks)} (not in the documents "
+                    "provided) before deciding.")
         return f"Suggested verdict: {name}: resolve the data check on {_join(checks)} before deciding."
     if code.startswith("Monitor (data check"):
         checks = [SHORT[n] for n, p in pillars.items() if p["rating"] == "CHECK DATA"]
@@ -247,6 +251,12 @@ def manager_questions(facts: dict) -> list[str]:
     if pillars.get("Value for investors", {}).get("rating") in ("RED", "AMBER") and \
             pillars["Value for investors"].get("summary") != "Add peer":
         found.append(f"Why did the fund return less than comparable funds over {n} years?")
+    missing = missing_evidence(facts)
+    if missing:                               # ask for what the documents do not give, so the ratings can be made
+        wanted = [w for key, w in (("Performance", "tracking error"), ("Mandate", "R² and beta")) if key in missing]
+        found.append(f"Can you provide the fund's {', '.join(wanted) or 'missing figures'} against its "
+                     f"{'index' if index_fund else 'benchmark'} (3 or 5 years, in the fund's currency), or a price "
+                     "series for the benchmark?")
     invalid = comparison_invalid(facts)
     if invalid:                               # ask about the mismatch, not about a gap that cannot be measured yet
         found.append(f"Which {'index' if index_fund else 'benchmark'} series and currency should the fund be compared "

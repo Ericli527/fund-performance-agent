@@ -221,6 +221,8 @@ class Timeouts(_Section):
 class DraftingSettings(_Section):
     """ Reporting Agents and the Judge: how many times the drafts may be sent back """
     max_rewrites: int = Field(default=1, ge=0)
+    # The longest summary a draft may have: it is Executive page 1's summary (measured to fit with room to spare)
+    max_summary_chars: int = Field(default=700, ge=200)
 
 
 class EmailSettings(_Section):
