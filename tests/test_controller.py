@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 import shutil
+from pathlib import Path
 import pytest
 from fund_performance.config import load_settings
 from fund_performance.controller import OFFLINE_NOTE, RunStopped, Runners, run_review
@@ -277,3 +278,24 @@ def test_without_the_new_agents_the_run_uses_the_default_plan_and_code_conclusio
     result = asyncio.run(run_review(TEST1, out_root=tmp_path, runners=runners))
     assert result.facts["plan"]["source"] == "default" and result.facts["suggested_conclusion"]["source"] == "code"
     assert result.facts["drafts"] and not any(d["chosen"] for d in result.facts["drafts"])
+
+
+# Stage 6C: live progress, from the steps that actually run
+def test_progress_shows_the_step_of_5_and_the_agent_as_each_step_runs(tmp_path):
+    from fund_performance.controller import STAGES, progress_line
+    messages = []
+    result = asyncio.run(run_review(Path(__file__).resolve().parents[1] / 'demo' / 'sample_index_fund', out_root=tmp_path, runners=mocked(), on_step=messages.append))
+    assert result.pdf.is_file()
+    stages = [int(m.split(" of 5")[0].removeprefix("Step ")) for m in messages]
+    assert stages == sorted(stages) and set(stages) == {1, 2, 3, 4, 5}
+    for step in ("read_files", "plan", "data_checks", "mandate", "calculator", "scorecard", "narrative", "drafts",
+                 "report"):
+        assert progress_line(*STAGES[step]) in messages, step
+    assert "Step 2 of 5 · Mandate Agent · Reading the fund's objective and promises…" in messages
+    assert "Step 4 of 5 · Reporting Agents and Judge · Drafting and judging the summary…" in messages
+
+
+def test_an_offline_run_announces_no_agent(tmp_path):
+    messages = []
+    asyncio.run(run_review(Path(__file__).resolve().parents[1] / 'demo' / 'sample_index_fund', out_root=tmp_path, offline=True, on_step=messages.append))
+    assert messages and all(" · Code: " in m for m in messages) and not any("Step 4 of 5" in m for m in messages)

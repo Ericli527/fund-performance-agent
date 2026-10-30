@@ -165,7 +165,14 @@ def test_the_controller_uses_the_confirmation_and_reports_progress(tmp_path):
     assert steps["mandate"]["notes"] == ["Mandate Agent read the objective before the run"]
     assert steps["extractor"]["status"] == "skipped"
     assert "factsheet.txt (read by the Extractor Agent; values checked by code)" in log["sources"]["input_files"]
-    assert messages == ["Checking the data…", "Scoring…", "Researching…", "Writing the report…"]   # read before
+    # Stage 6C progress: "Step X of 5 · who · what", in workflow order; the agents that read the documents before
+    # the run are not announced again
+    steps_shown = [int(m.split(" of 5")[0].removeprefix("Step ")) for m in messages]
+    assert all(m.startswith("Step ") and " of 5 · " in m and m.endswith("…") for m in messages)
+    assert steps_shown == sorted(steps_shown) and steps_shown[0] == 1 and steps_shown[-1] == 5
+    assert messages[0] == "Step 1 of 5 · Code: self-check · Checking every value the agents read against the documents…"
+    assert not any("Extractor Agent" in m or "Mandate Agent" in m for m in messages)
+    assert any("Step 4 of 5 · Oversight Analyst and Evaluator" in m for m in messages)
 
 
 # The documents route from the command line, and the live check that it matches the JSON route
@@ -255,3 +262,73 @@ def test_code_decides_currency_hedging(tmp_path, text, share_class, expected, so
                                         run_mandate=FakeRun(MANDATE)))
     row = by_key(intake)["hedged"]
     assert (row["value"], row["status"], row["source"]) == (expected, CODE, source)
+
+
+# Stage 6C: the performance fee is read from the documents' own words, with the words as evidence
+def fee_rows(tmp_path, kid_text, ai_value):
+    """ The factsheet plus a KID with kid_text; the Extractor answers ai_value for the performance fee """
+    from fund_performance.intake import self_check
+    factsheet, peer_doc = docs(tmp_path)
+    kid = tmp_path / "kid.txt"
+    kid.write_text("Key investor information. Charges taken from the fund over a year. " + kid_text)
+    intake = asyncio.run(read_documents(factsheet, kid, None, run_extractor=FakeRun(extractor_answer(performance_fee=ai_value)),
+                                        run_mandate=FakeRun(MANDATE), run_peer=FakeRun(peer_answer())))
+    row = next(r for r in intake["rows"] if r["key"] == "performance_fee")
+    return row, intake, self_check(intake)
+
+
+@pytest.mark.parametrize("text", ["Charges taken from the fund under certain specific conditions Performance fee N/A",
+                                  "Performance fee: None", "Performance fee 0.00%"])
+def test_documents_that_say_there_is_no_performance_fee_give_no_with_the_quote(tmp_path, text):
+    row, intake, built = fee_rows(tmp_path, text, None)             # the Extractor returned nothing (as on Render)
+    assert row["value"] == "no" and row["status"].startswith("Derived by code")
+    assert row["source"].startswith("kid.txt: \"Performance fee") and not built.problems
+
+
+def test_documents_that_say_a_performance_fee_is_charged_give_yes_with_the_quote(tmp_path):
+    row, intake, built = fee_rows(tmp_path, "Performance fee 20% of any return above the benchmark", None)
+    assert row["value"] == "yes" and row["source"] == 'kid.txt: "Performance fee 20%"' and not built.problems
+    row, intake, _ = fee_rows(tmp_path, "Performance fee 20% of any return above the benchmark", False)
+    assert row["value"] == "yes"                                     # the documents' words win over the AI
+    assert any("the Extractor Agent read no, but the documents say" in f["message"] for f in intake["flags"])
+
+
+@pytest.mark.parametrize("text, ai_value", [
+    ("It excludes: performance fees (where applicable); portfolio transaction costs.", None),   # not a statement
+    ("Nothing about fees here.", None),
+    ("Performance fee: None. Elsewhere: Performance fee 15% of outperformance.", None),          # contradictory
+])
+def test_an_unestablished_performance_fee_is_never_taken_as_no(tmp_path, text, ai_value):
+    row, intake, built = fee_rows(tmp_path, text, ai_value)
+    assert row["value"] == "" and built.profile["performance_fee"] is None
+
+
+def test_an_ai_answer_without_supporting_words_is_flagged(tmp_path):
+    row, intake, built = fee_rows(tmp_path, "Nothing about fees here.", False)
+    assert row["value"] == "no" and row["source"] == "not found in the documents"
+    assert any(f["message"] == "Read by the Extractor Agent but not found in the documents: Performance fee "
+               "(yes / no) = no" for f in built.flags)
+
+
+@requires_test1
+def test_the_real_fidelity_kid_states_no_performance_fee():
+    """ The Live AI failure on Render: the Fidelity KID says "Performance fee N/A"; code reads it, no AI needed """
+    from fund_performance.intake import performance_fee_evidence
+    from fund_performance.io import read_document_pages
+    kid = TEST1 / "Key_Investor_Info.pdf"
+    assert performance_fee_evidence({kid.name: read_document_pages(kid)}) == (
+        False, 'Key_Investor_Info.pdf, page 2: "Performance fee N/A"')
+    factsheet = TEST1 / "Monthly_FactSheet.pdf"                     # its only mention is "excludes ... (where applicable)"
+    assert performance_fee_evidence({factsheet.name: read_document_pages(factsheet)}) == (None, "")
+
+
+
+# Stage 6C: a performance fee that is not established is missing evidence, not a reason to stop the review
+def test_a_missing_performance_fee_is_flagged_and_the_review_can_go_on(tmp_path):
+    from fund_performance.intake import PERFORMANCE_FEE_MISSING
+    row, intake, built = fee_rows(tmp_path, "Nothing about fees here.", None)
+    assert row["value"] == "" and row["required"] is False
+    assert not built.problems                                        # no longer stops the run
+    assert any(f["check"] == "performance_fee" and f["level"] == "warning" and f["message"] == PERFORMANCE_FEE_MISSING
+               for f in built.flags)
+    assert built.profile["performance_fee"] is None                  # recorded as not established, never as no

@@ -211,7 +211,7 @@ def test_the_page_has_the_instructions_files_table_and_how_it_works():
     ui = build_ui()
     texts = " ".join(str(getattr(c, "value", "") or "") for c in ui.blocks.values())
     assert PUBLIC_DATA_HTML in texts and INSTRUCTIONS in texts and FILES_TABLE in texts and HOW_END in texts
-    for step in ("Try a demo", "Upload a real fund", "Let the agent check itself", "Read the evidence",
+    for step in ("Try a demo", "Test a real fund", "Let the agent check itself", "Read the evidence",
                  "Make the judgement"):
         assert step in INSTRUCTIONS
     accordions = {c.label: c.open for c in ui.blocks.values() if isinstance(c, gr.Accordion)}

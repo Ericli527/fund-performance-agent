@@ -260,7 +260,8 @@ def _fees_and_risk(inp, facts: dict) -> str:
     fee_rows = [("Ongoing charge (OCF)", f"{p.ocf_pct:.2f}% a year"),
                 ("Transaction costs", "Not disclosed in the documents provided" if p.transaction_cost_pct is None
                  else f"{p.transaction_cost_pct:.2f}%"),
-                ("Performance fee", "Yes" if p.performance_fee else "None")]
+                ("Performance fee", "Yes" if p.performance_fee else "None" if p.performance_fee is False
+                 else "Not established in the documents (missing evidence)")]
     if fees.get("peer_ocf") is not None:
         each = fees.get("peer_fees", [])
         fee_rows.append(("Peer's fee" if len(each) <= 1 else "Peers' average fee", f"{fees['peer_ocf']:.2f}% a year"

@@ -34,7 +34,9 @@ MISSING_WORDS = (
     ("R²", "R² and beta are not in the documents provided, and there is no index price series to calculate them"),
     ("tracking error not available", "tracking error is not in the documents provided, and there is no index price "
                                      "series to calculate it"),
-    ("return not available", "a return needed for the comparison is not in the documents provided"))
+    ("return not available", "a return needed for the comparison is not in the documents provided"),
+    ("performance fee not available", "the documents provided do not say whether the fund charges a performance "
+                                      "fee, so the fee cannot be rated Green"))
 
 
 def missing_evidence(facts: dict) -> dict[str, str]:

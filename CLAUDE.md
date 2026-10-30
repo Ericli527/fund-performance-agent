@@ -175,5 +175,11 @@ Instructions for Claude Code in this project. The build specification is
   login is set; the login alone never turns AI on. Each review gets its own folder (`<time>-<random id>`); on a server
   run folders and Gradio's cached files older than `web.keep_runs_hours` (24) are deleted. Where no real-fund demo is
   installed (Render), the made-up fund is the Quick Demo (`demo/library/sample_index_fund.yaml`, fallback).
+- Performance fee (Stage 6C): read from the documents' explicit words with the quote as evidence ("N/A", "None",
+  "0%" = no; "20% ..." = yes; "excludes performance fees (where applicable)" is not evidence). Not established =
+  `null` (warning, missing evidence), never taken as no fee: Fees that would be Green becomes CHECK DATA (verdict rule
+  "Monitor (data check needed: Fees)"); Amber/Red stand with a missing-evidence note. The review is not stopped.
+- Live progress (Stage 6C): "Step X of 5 · agent or component · status", sent by the controller as each step really
+  starts (`controller.STAGES`); skipped AI steps are not announced.
 - Executive summary: AI drafts over `drafting.max_summary_chars` (700) fail code's checks; if page 1 still overflows
   with an AI summary, the Executive Report uses code's summary (info flag) and the Detailed Report keeps the AI text.
