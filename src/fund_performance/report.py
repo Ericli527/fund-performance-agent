@@ -584,7 +584,7 @@ def _peers_table(inp: ReportInputs) -> str:
             "</th><th>Fee (OCF)</th><th>1 year</th><th>3 years, a year</th><th>5 years, a year</th>"
             "<th class='l'>Used for</th></tr>")
     rows = (f"<tr class='total'><td class='l'>{escape(p.fund_name)}</td><td class='l'>{escape(p.share_class)}, "
-            f"{p.distribution}</td><td class='l'>{p.currency}, {PRICING_TIME[p.pricing_point]}</td><td>{p.ocf_pct:.2f}%</td>"
+            f"{p.distribution}</td><td class='l'>{p.currency}, {PRICING_TIME.get(p.pricing_point, 'pricing time not stated')}</td><td>{p.ocf_pct:.2f}%</td>"
             + "".join(f"<td>{fmt('x', f, False)}</td>" for f in fund) + "<td class='l'>This fund (NAV)</td></tr>")
     notes = []
     for r in comp.rows if comp else []:

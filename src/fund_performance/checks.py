@@ -48,6 +48,21 @@ def index_currency_vs_factsheet(prices: pd.DataFrame, factsheet: FactsheetPerfor
                              f"index ({detail}); the factsheet index figures are used instead")]
 
 
+# --- Inferred day/month order ------------------------------------------------------------------------
+
+def inferred_date_order(data: PriceData) -> list[DataFlag]:
+    """ When every date could be read either way (all day and month values 12 or below), the order was chosen
+    because only one reading is a clean monthly series. Never silent: an info flag says which, why, and the dates """
+    line = next((x for x in data.log if "only this order gives one price per month" in x), None)
+    if line is None or data.prices.empty:
+        return []
+    first, last = data.prices["date"].min(), data.prices["date"].max()
+    return [DataFlag(check="date_order", level="info", message=(
+        f"Dates could be read as day/month or month/day; read as {data.date_format} because "
+        f"{line.split('(', 1)[1].removesuffix(')')}. First and last dates read: {first:%d %b %Y} and {last:%d %b %Y}: "
+        "check they match the file's provider"), dates=_dates([first, last]))]
+
+
 # --- Review-date cutoff ------------------------------------------------------------------------------
 
 def after_review_date(prices: pd.DataFrame, as_of: date) -> tuple[pd.DataFrame, list[DataFlag]]:
@@ -97,6 +112,11 @@ def pricing_point(profile: FundProfile, factsheet: FactsheetPerformance | None,
     """ A midday-priced fund is compared with a market-close index using PNAV when available;
     otherwise the timing difference is noted and the tolerance widened """
     index = factsheet.series.get("index") if factsheet else None
+    if profile.pricing_point is None:
+        return ComparisonBasis("fund_nav", flags=[DataFlag(
+            check="pricing_point", level="info",
+            message="Fund pricing time not stated in the documents (noon or market close): the fund's NAV is compared "
+                    "with the index as published, so a timing difference cannot be ruled out")])
     if profile.pricing_point != "midday" or index is None or index.pricing != "market_close":
         return ComparisonBasis("fund_nav")
     if "fund_pnav" in factsheet.series:
@@ -251,7 +271,7 @@ def check_prices(data: PriceData, profile: FundProfile, thresholds: Thresholds,
     (the cross-check and the tracker-gap check run once the calculator has produced figures) """
     t = thresholds.data_checks
     prices, cutoff = after_review_date(data.prices, profile.as_of_date)
-    flags = currency_match(profile.currency, index_currency) + cutoff
+    flags = currency_match(profile.currency, index_currency) + inferred_date_order(data) + cutoff
     if factsheet is not None:
         flags += index_currency_vs_factsheet(prices, factsheet, t.currency_mismatch_calendar_year_pp)
     prices, aligned = align_end_dates(prices)

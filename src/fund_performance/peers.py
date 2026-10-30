@@ -173,6 +173,9 @@ def _fund_return(reported: ReportedFigures, series: str, years: int) -> float | 
 def _basis(peer: Peer, profile: FundProfile, reported: ReportedFigures, years: int) -> tuple[str, str, list[str]]:
     """ (fund series, basis in words, notes): noon with noon, market close with the fund's PNAV """
     fund_time, peer_time = profile.pricing_point, peer.pricing_point
+    if fund_time is None:
+        return PRICE_SERIES, "fund pricing time not stated", ["the fund's pricing time is not stated, so the timing "
+                                                              "may differ"]
     if peer_time is None:
         return PRICE_SERIES, f"fund {PRICING_WORDS[fund_time]} NAV; peer pricing time not stated", [
             "pricing time not stated, so the timing may differ"]

@@ -188,6 +188,7 @@ def test_real_vanguard_demo(tmp_path):
     facts = r.facts
     assert facts["scorecard"]["verdict"] == "Pending data check"                          # preserved, scoring unchanged
     assert any(f.check == "review_date_cutoff" for f in r.flags)
+    assert any(f.check == "pricing_point" and "not stated" in f.message for f in r.flags)       # not guessed
     names = {f["name"] for f in facts["figures"]}
     assert not any(n.startswith(("relative.", "risk.")) for n in names)                   # no TE, beta, R² made up
     assert facts["peers"] == []

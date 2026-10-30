@@ -69,9 +69,15 @@ def detect_frequency(dates: pd.Series) -> Frequency:
 
 
 def _one_per_month_in_order(dates: pd.Series) -> bool:
-    """ One price per month, in date order (oldest first or newest first, as downloads often are) """
+    """ One price per month, in date order: oldest first or newest first (as downloads often are), the same direction
+    through the whole file, and every step a month apart (20 to 40 days). A reading that needs anything looser is not
+    accepted, so an ambiguous file is never resolved by a lucky fit: it stops and asks instead """
+    if len(dates) < 2:
+        return False
     months = dates.dt.year * 12 + dates.dt.month
-    return bool((dates.is_monotonic_increasing or dates.is_monotonic_decreasing) and months.is_unique)
+    steps = dates.diff().dropna().dt.days.abs()
+    return bool((dates.is_monotonic_increasing or dates.is_monotonic_decreasing) and months.is_unique
+                and steps.between(20, 40).all() and months.diff().dropna().abs().eq(1).all())
 
 
 MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov",
@@ -121,7 +127,8 @@ def parse_dates(values: pd.Series) -> tuple[pd.Series, str, str]:
             fits[name] = dates
     if len(fits) == 1:
         name, dates = fits.popitem()
-        return dates, name, "only this order gives one price per month in date order"
+        order = "oldest first" if dates.is_monotonic_increasing else "newest first"
+        return dates, name, f"only this order gives one price per month in date order ({order})"
     raise AmbiguousDatesError(
         "Cannot tell whether dates are DD/MM/YYYY or MM/DD/YYYY: "
         + ("both orders fit" if fits else "neither order gives one price per month")

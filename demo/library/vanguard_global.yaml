@@ -30,5 +30,5 @@ disclosures:
   - "Benchmark returns are the GBP figures printed in Vanguard's factsheet. The FTSE Russell factsheet gives USD returns, which are not used."
   - "Tracking error, beta and R² are not published in the documents provided, and there is no GBP benchmark price series to calculate them, so Mandate and Performance cannot be fully rated: the verdict waits for that evidence."
   - "No verified peer fund is available, so value for investors and fees are not compared."
-  - "Pricing time not verified: the factsheet gives a 12:00 London dealing cut-off and says performance is calculated on the closing NAV; the profile records the closing NAV as stated."
+  - "Pricing time not stated: the factsheet gives a 12:00 London dealing cut-off and says performance is calculated on the closing NAV, but not the valuation time, so the profile records it as not stated and the reports say a timing difference cannot be ruled out."
   - "The price download runs to 29 Oct 2026; prices after 30 Sep 2026 are left out of the September review."

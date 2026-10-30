@@ -34,8 +34,9 @@ Instructions for Claude Code in this project. The build specification is
   `risk_3y_nav`. Risk figures carry `basis` (`nav`/`pnav`) and the two sets are never mixed.
 - Prices before `launch_date` get an info flag "pre-launch (likely simulated)" and are left out of
   risk statistics and since-launch figures. Repeated prices in that period are info, not warning.
-- Ambiguous dates: use the format that gives one price per month in date order; if both formats
-  do, stop and ask the user.
+- Ambiguous dates: use the format that gives one price per month in date order (oldest or newest first, one
+  direction, every step a month apart, with an info flag naming the order chosen and the dates); if both formats
+  do, or neither does, stop and ask the user.
 - Benchmark-relative risk (TE, beta, R², information ratio, alpha) is calculated only from an index
   price series. Without one: "not available: no index price series", factsheet figures reported with
   `source: "factsheet"`, never approximated.
@@ -166,6 +167,8 @@ Instructions for Claude Code in this project. The build specification is
 - Return basis: a `series` declared `annualised` stays annualised (its cumulative return derived by code; an
   annualised since-launch figure is never read as cumulative); the cross-check compares like with like.
 - Peer `benchmark_name` (optional): a different variant from the fund's gets an information note only.
+- Fund profile `pricing_point`: must be given; `null` = not stated in the documents (info flag: a timing
+  difference cannot be ruled out; the fund's NAV is compared as published). Never guessed.
 - Ratings waiting for figures the documents do not give are "missing evidence" in the wording (evidence quality
   "Evidence missing", "obtain the evidence missing for ..."), not a data check; ratings and verdict codes unchanged.
 - Executive summary: AI drafts over `drafting.max_summary_chars` (700) fail code's checks; if page 1 still overflows

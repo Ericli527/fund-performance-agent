@@ -148,3 +148,86 @@ def test_an_annualised_since_launch_figure_is_never_read_as_cumulative(tmp_path)
 
 def test_cumulate_is_the_inverse_of_annualise():
     assert cumulate(annualise(88.3, 5), 5) == pytest.approx(88.3)
+
+
+# --- Ambiguous numeric dates: newest first is accepted only when exactly one reading is a clean monthly series ------
+
+def test_newest_first_ambiguous_dates_resolve_only_when_one_reading_is_monthly():
+    newest_first = pd.Series(["01/12/2025", "01/11/2025", "01/10/2025", "01/09/2025"])     # 1st of each month
+    dates, fmt, why = parse_dates(newest_first)
+    assert fmt == "DD/MM/YYYY" and why.endswith("(newest first)")
+    assert list(dates.dt.strftime("%Y-%m-%d")) == ["2025-12-01", "2025-11-01", "2025-10-01", "2025-09-01"]
+    dates, fmt, why = parse_dates(newest_first[::-1].reset_index(drop=True))
+    assert fmt == "DD/MM/YYYY" and why.endswith("(oldest first)")
+
+
+@pytest.mark.parametrize("values, what", [
+    (["01/02/2024", "02/03/2024"], "both readings are monthly"),
+    (["03/04/2024", "03/05/2024", "03/06/2024", "03/09/2024"], "a missing month: no clean reading"),
+    (["01/02/2024", "01/04/2024", "01/03/2024"], "not in one direction"),
+    (["02/01/2024", "03/01/2024", "04/01/2024", "06/01/2024"], "a daily file: neither reading is monthly"),
+])
+def test_ambiguous_dates_that_are_not_clearly_one_reading_stop_and_ask(values, what):
+    from fund_performance.io import AmbiguousDatesError
+    with pytest.raises(AmbiguousDatesError, match="confirm the date format"):
+        parse_dates(pd.Series(values))
+
+
+def test_a_newest_first_file_with_ambiguous_dates_reads_the_same_as_oldest_first(tmp_path):
+    rows = [("01/09/2025", 100.0), ("01/10/2025", 101.0), ("01/11/2025", 102.0), ("01/12/2025", 103.0)]
+    oldest, newest = tmp_path / "old.csv", tmp_path / "new.csv"
+    oldest.write_text("Date,NAV\n" + "".join(f"{d},{v}\n" for d, v in rows))
+    newest.write_text("Date,NAV\n" + "".join(f"{d},{v}\n" for d, v in rows[::-1]))
+    assert read_prices(oldest).prices.equals(read_prices(newest).prices)
+
+
+def test_an_inferred_day_month_order_is_never_silent(tmp_path):
+    """ The agreed rule (one price per month in date order) still decides; the run says so in an info flag """
+    from fund_performance.checks import inferred_date_order
+    path = tmp_path / "prices.csv"
+    path.write_text("Date,NAV\n01/12/2025,103\n01/11/2025,102\n01/10/2025,101\n01/09/2025,100\n")
+    data = read_prices(path)
+    (flag,) = inferred_date_order(data)
+    assert flag.level == "info" and flag.check == "date_order"
+    assert flag.message == ("Dates could be read as day/month or month/day; read as DD/MM/YYYY because only this "
+                            "order gives one price per month in date order (newest first). First and last dates "
+                            "read: 01 Sep 2025 and 01 Dec 2025: check they match the file's provider")
+    unambiguous = tmp_path / "clear.csv"
+    unambiguous.write_text("Date,NAV\n31/10/2025,101\n30/09/2025,100\n")
+    assert inferred_date_order(read_prices(unambiguous)) == []
+
+
+
+# --- Optional pricing point (approved): null = not stated, never guessed ---------------------------------------------
+
+def test_a_pricing_time_not_stated_is_recorded_and_flagged_not_guessed():
+    from pydantic import ValidationError
+    from fund_performance.checks import pricing_point
+    from fund_performance.config import load_thresholds
+    from fund_performance.io import read_json
+    from fund_performance.models import FundProfile, Peer
+    from fund_performance.peers import _basis
+    base = json.loads((PORTABLE / "fund_profile.json").read_text())
+    profile = FundProfile.model_validate(base | {"pricing_point": None})
+    with pytest.raises(ValidationError):                                    # it must still be stated, even as null
+        FundProfile.model_validate({k: v for k, v in base.items() if k != "pricing_point"})
+    fs = read_json(PORTABLE / "factsheet_performance.json")
+    basis = pricing_point(profile, fs, load_thresholds().data_checks.timing_difference_extra_tolerance_pp)
+    assert basis.fund_series == "fund_nav" and [f.level for f in basis.flags] == ["info"]
+    assert "pricing time not stated" in basis.flags[0].message and "cannot be ruled out" in basis.flags[0].message
+    peer = Peer.model_validate({"name": "P", "ocf_pct": 0.1, "currency": "GBP", "share_class": "A",
+                                "pricing_point": "midday", "returns": {"1y": 1.0, "basis": "cumulative"}})
+    series, words, notes = _basis(peer, profile, None, 5)
+    assert (series, words) == ("fund_nav", "fund pricing time not stated") and "may differ" in notes[0]
+
+
+def test_a_review_with_the_pricing_time_not_stated_runs_with_an_info_flag(tmp_path):
+    import asyncio
+    from fund_performance.controller import run_review
+    folder = tmp_path / "in"
+    shutil.copytree(PORTABLE, folder)
+    profile = json.loads((folder / "fund_profile.json").read_text())
+    (folder / "fund_profile.json").write_text(json.dumps(profile | {"pricing_point": None}))
+    result = asyncio.run(run_review(folder, out_root=tmp_path / "runs", offline=True))
+    assert any(f.check == "pricing_point" and "not stated" in f.message for f in result.flags)
+    assert result.pdf.is_file() and result.executive_pdf is not None

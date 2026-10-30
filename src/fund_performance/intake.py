@@ -53,7 +53,7 @@ PROFILE_FIELDS = (
     FieldSpec("ocf_pct", "Ongoing charge (OCF), % a year", "number"),
     FieldSpec("as_of_date", "Figures to (YYYY-MM-DD)", "date"),
     FieldSpec("launch_date", "Share class launch date (YYYY-MM-DD)", "date"),
-    FieldSpec("pricing_point", "Pricing point", "choice", choices=("midday", "market_close")),
+    FieldSpec("pricing_point", "Pricing point", "choice", False, choices=("midday", "market_close")),
     FieldSpec("distribution", "Distribution", "choice", choices=("accumulation", "income")),
     FieldSpec("hedged", "Currency hedged (yes / no)", "bool"),
     FieldSpec("benchmark_role", "Benchmark role", "choice", choices=("target", "comparator", "constraint", "none")),
