@@ -17,6 +17,11 @@ timeouts_seconds:
   mandate: 90
   research: 240        # approved pages, planner and web searches together
   narrative: 300       # Analyst, code checks, Evaluator and the one rewrite together
+  task_planner: 60     # the Task Planner Agent's plan
+  drafting: 300        # Reporting Agents, code checks, the Judge and the send-back together
+
+drafting:
+  max_rewrites: 1      # if no draft passes the checklist, send them all back this many times, then use code's text
 
 web:
   max_ai_runs_per_day: 20          # reviews that use AI (reading documents, or a JSON run with AI), counted per day

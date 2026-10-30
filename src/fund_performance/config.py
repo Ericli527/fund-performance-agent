@@ -111,7 +111,8 @@ def load_thresholds(path: str | Path = DEFAULT_PATH) -> Thresholds:
 # --- config/models.yaml: the model for each AI agent ----------------------------------------------------
 
 MODELS_PATH = Path(__file__).resolve().parents[2] / "config" / "models.yaml"
-AgentName = Literal["extractor", "mandate", "planner", "search", "analyst", "evaluator"]
+AgentName = Literal["extractor", "mandate", "planner", "search", "analyst", "evaluator", "task_planner",
+                    "reporter", "judge"]
 
 
 class ModelSpec(_Section):
@@ -213,6 +214,13 @@ class Timeouts(_Section):
     mandate: float
     research: float
     narrative: float
+    task_planner: float = 60
+    drafting: float = 300
+
+
+class DraftingSettings(_Section):
+    """ Reporting Agents and the Judge: how many times the drafts may be sent back """
+    max_rewrites: int = Field(default=1, ge=0)
 
 
 class EmailSettings(_Section):
@@ -238,6 +246,7 @@ class RunSettings(_Section):
     timeouts_seconds: Timeouts
     web: WebSettings
     statistics: StatisticsSettings
+    drafting: DraftingSettings = Field(default_factory=DraftingSettings)
     email: EmailSettings
 
 

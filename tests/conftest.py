@@ -76,3 +76,17 @@ def _no_approved_peer_files(request, tmp_path_factory, monkeypatch):
     want approved peers point FUND_PEER_FOLDER at their own folder. Live tests use the real folder """
     if "live" not in request.keywords:
         monkeypatch.setenv("FUND_PEER_FOLDER", str(tmp_path_factory.mktemp("no_peers")))
+
+
+@pytest.fixture(autouse=True)
+def _no_real_ai_calls(request, monkeypatch):
+    """ Unit tests never reach OpenAI: an agent whose model call is not mocked fails like an unreachable service
+    (the code's fallback is then what is tested). Live tests (--run-live) are left alone """
+    if "live" in request.keywords:
+        return
+    from agents.exceptions import AgentsException
+    import fund_performance.agents.base as base
+
+    async def blocked(agent, prompt):
+        raise AgentsException(f"no real AI calls in unit tests ({agent.name})")
+    monkeypatch.setattr(base, "run_with_fresh_client", blocked)

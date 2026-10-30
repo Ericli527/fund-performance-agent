@@ -139,7 +139,8 @@ def build_facts(profile: FundProfile, reported: ReportedFigures, card: Scorecard
     facts["evidence"] = evidence.to_dict() if evidence is not None else None
     facts["candidate_actions"] = candidate_actions(facts)     # the only actions the Analyst may choose (code)
     conclusion, left_out = suggested_conclusion(facts)
-    facts["suggested_conclusion"] = {"heading": HEADING, "text": conclusion, "left_out": left_out}
+    facts["suggested_conclusion"] = {"heading": HEADING, "text": conclusion, "code_text": conclusion, "source": "code",
+                                     "left_out": left_out}
     facts["judgement_points"] = judgement_points(facts)
     facts["manager_questions"] = manager_questions(facts)
     return facts
