@@ -173,7 +173,7 @@ def test_the_controller_uses_the_confirmation_and_reports_progress(tmp_path):
     assert steps_shown == sorted(steps_shown) and steps_shown[0] == 1 and steps_shown[-1] == 5
     assert started[0] == "▶ Step 1 of 5 · Code: self-check · Checking every value the agents read against the documents…"
     assert not any("Extractor Agent" in m or "Mandate Agent" in m for m in started)   # read on the page, not again
-    assert any(m.startswith("▶ Step 4 of 5 · Reporting Agents and Judge") for m in started)
+    assert any(m.startswith("▶ Step 4 of 5 · Reporting Agent and Judge") for m in started)
 
 
 # The documents route from the command line, and the live check that it matches the JSON route

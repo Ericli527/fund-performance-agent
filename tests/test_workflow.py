@@ -109,8 +109,9 @@ def test_a_failure_in_a_critical_step_stops_the_run_naming_the_stage(tmp_path, m
 
 def test_error_messages_hide_paths_and_key_like_strings():
     from fund_performance.controller import _short
-    text = _short("open /home/app/data/secret.pdf failed with key sk-abcdefghijklmnop " + "x" * 300)
-    assert "/home" not in text and "sk-abc" not in text and len(text) <= 161
+    text = _short("open /home/app/data/secret.pdf failed with key sk-abcdefghijklmnop " + "x" * 300 + " THE REASON")
+    assert "/home" not in text and "sk-abc" not in text and len(text) <= 245
+    assert text.endswith("THE REASON")                                # the reason at the end is kept
 
 
 def test_the_progress_area_replaces_a_running_step_with_its_outcome():

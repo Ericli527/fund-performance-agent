@@ -307,7 +307,7 @@ def test_progress_runs_through_the_five_steps_in_order_with_the_agents(tmp_path)
     for step in ("read_files", "plan", "data_checks", "mandate", "calculator", "scorecard", "drafts", "report"):
         assert progress_line(*STAGES[step]) in messages, step
     assert "▶ Step 2 of 5 · Task Planner Agent · Choosing what the review should focus on…" in messages
-    assert "▶ Step 4 of 5 · Reporting Agents and Judge · Drafting and judging the summary…" in messages
+    assert "▶ Step 4 of 5 · Reporting Agent and Judge · Drafting the summary and checking it…" in messages
     assert any(m.startswith("↷ Step 3 of 5 · Research Agents · skipped: web research is off") for m in messages)
     assert any(m.startswith("✓ Step 5 of 5 · Code: reports · done (") for m in messages)
 
