@@ -772,9 +772,10 @@ def _appendix(inp: ReportInputs, compact: bool, main_text: str = "") -> str:
                          + (f"<li>… and {more} more (full list in run_log.txt)</li>" if more > 0 else "") + "</ul>")
     sources = "".join(f"<li>Input file: {escape(x)}</li>" for x in inp.input_files)
     if inp.profile.field_sources:
-        sources += ("<li>Fund details and factsheet figures were read by the Extractor Agent (AI-extracted, please "
-                    "verify) and confirmed on the page. Entered by user: "
-                    + (escape(", ".join(inp.entered_by_user)) or "nothing") + ".</li>")
+        sources += ("<li>Fund details and factsheet figures were read by the Extractor Agent (AI-extracted) and "
+                    "checked by code against the documents (any not found are flagged above)."
+                    + (" Entered by user: " + escape(", ".join(inp.entered_by_user)) + "." if inp.entered_by_user else "")
+                    + "</li>")
     sources += "".join(
         f"<li>[{s['number']}] {escape(s['query'])} · {'as at' if s.get('date_basis') == 'as_at' else 'published'} "
         f"{s['date']} · {escape(s['url'])}</li>"

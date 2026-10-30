@@ -692,9 +692,11 @@ Keep the manager's published Value Assessment Report out of the agent's inputs. 
     AI review at a time. The page's events are not exposed through Gradio's API. MAX_CONCURRENT_RUNS reviews at
     once; uploads up to 20 MB.
     Documents route (main route): the price file and the factsheet (KID and peer factsheets optional; without peer
-    factsheets the approved peers are read); the Extractor and Mandate agents read them; an editable confirmation
-    table shows each value, where it was found and its status (AI-extracted, derived by code, entered by user);
-    "Confirm and run" stays off while a required value is missing. JSON files are the "Advanced" route. The page
+    factsheets the approved peers are read); the Extractor and Mandate agents read them and the review runs
+    straight on, with no table for a person to check. Code checks itself (`intake.self_check`): it finds each value
+    in the documents (document and page, in log.json) and adds a warning for any value it cannot find; it decides
+    currency hedging from the share class name and the documents (unclear = not hedged, with a warning); a required
+    value nobody could read stops the run with a clear message ("not found in the documents"). JSON files are the "Advanced" route. The page
     has the instructions, the files table, "How the agent works" (Code / AI / Person tags) and progress messages
     (Reading the documents…, Checking the data…, Scoring…, Researching…, Writing the report…), and shows the
     suggested verdict, conclusion, ratings, points for judgement and questions for the manager.

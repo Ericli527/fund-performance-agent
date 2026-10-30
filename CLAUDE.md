@@ -116,7 +116,8 @@ Instructions for Claude Code in this project. The build specification is
   before it opens (Gradio auth); on a server with no login set up AI runs are off (offline demo only). AI-run
   limits (per day, one at a time) in `config/settings.yaml`. Page events are private (not in Gradio's API).
   Main route = documents (price file + factsheet, optional KID and peer factsheets) read by the Extractor and
-  Mandate agents, confirmed in an editable table ("entered by user" for corrections); JSON files are "Advanced".
+  Mandate agents, then run straight on: no confirmation table. Code checks itself (`intake.self_check`): values
+  not found in the documents are warnings; a required value nobody could read stops the run. JSON = "Advanced".
 - Peers: approved peers per benchmark in `config/peers.yaml` (factsheets in `data/peers/`, found by ISIN), used when
   no peer is given. Peer checks in `peers.py`: returns only in the fund's currency (else fees only, info flag);
   noon vs noon NAV, market close vs PNAV; share class type and minimum investment (institutional note);

@@ -161,10 +161,10 @@ def test_the_controller_uses_the_confirmation_and_reports_progress(tmp_path):
                                     on_step=messages.append))
     log = json.loads((result.run_dir / "log.json").read_text())
     steps = {s["step"]: s for s in log["steps"]}
-    assert steps["confirmation"]["outputs"]["entered_by_user"] == ["Ongoing charge (OCF), % a year"]
-    assert steps["mandate"]["notes"] == ["Mandate Agent read the objective before the run; its answer was confirmed on the page"]
+    assert steps["self_check"]["outputs"]["entered_by_user"] == ["Ongoing charge (OCF), % a year"]
+    assert steps["mandate"]["notes"] == ["Mandate Agent read the objective before the run"]
     assert steps["extractor"]["status"] == "skipped"
-    assert "factsheet.txt (read by the Extractor Agent; values confirmed on the page)" in log["sources"]["input_files"]
+    assert "factsheet.txt (read by the Extractor Agent; values checked by code)" in log["sources"]["input_files"]
     assert messages == ["Checking the data…", "Scoring…", "Researching…", "Writing the report…"]   # read before
 
 
@@ -223,3 +223,35 @@ def test_live_test1_documents_route_matches_the_json_route(tmp_path):
     json_route = asyncio.run(run_review(TEST1, out_root=tmp_path / "json", offline=True))
     print("Documents route:", _ratings(docs_route), "\nJSON route:     ", _ratings(json_route))
     assert _ratings(docs_route) == _ratings(json_route)
+
+
+# Code's self-check (no person checks the table)
+def test_self_check_flags_values_not_found_and_counts_the_rest(tmp_path):
+    from fund_performance.intake import self_check
+    intake = read(tmp_path)
+    rows = {r["key"]: r for r in intake["rows"]}
+    rows["ocf_pct"]["source"] = NOT_FOUND                       # as if 0.1 were not printed anywhere
+    built = self_check(intake)
+    assert built.problems == [] and built.profile["ocf_pct"] == 0.1
+    messages = [f["message"] for f in built.flags]
+    assert "Read by the Extractor Agent but not found in the documents: Ongoing charge (OCF), % a year = 0.1" in messages
+    assert any(m.startswith("Code checked the values the Extractor Agent read: ") for m in messages)
+
+
+def test_self_check_names_what_nobody_could_read(tmp_path):
+    from fund_performance.intake import self_check
+    built = self_check(read(tmp_path, isin=None))
+    assert built.profile is None and built.problems == ["ISIN: not found in the documents"]
+
+
+@pytest.mark.parametrize("text, share_class, expected, source", [
+    ("Unhedged share class.", "A Acc", "no", "the documents say it is not hedged"),
+    ("Nothing about currency.", "A Acc", "no", "no hedging mentioned in the documents"),
+    ("Some classes are hedged.", "GBP Hedged Acc", "yes", "'hedged' in the share class name"),
+    ("Some classes are hedged.", "A Acc", "no", "hedging is mentioned but not stated for this share class: taken as not hedged")])
+def test_code_decides_currency_hedging(tmp_path, text, share_class, expected, source):
+    (tmp_path / "factsheet.txt").write_text(FACTSHEET + "\n" + text)
+    intake = asyncio.run(read_documents(tmp_path / "factsheet.txt", run_extractor=FakeRun(extractor_answer(share_class=share_class)),
+                                        run_mandate=FakeRun(MANDATE)))
+    row = by_key(intake)["hedged"]
+    assert (row["value"], row["status"], row["source"]) == (expected, CODE, source)

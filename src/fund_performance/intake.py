@@ -90,6 +90,7 @@ class Built:
     peers: list[dict] = field(default_factory=list)
     user_entered: list[str] = field(default_factory=list)
     rows: list[dict] = field(default_factory=list)       # the confirmed table, with final statuses (for the log)
+    flags: list[dict] = field(default_factory=list)      # code's self-check on the values (self_check)
 
 
 # --- Where a value was found (code) ---------------------------------------------------------------------------
@@ -226,9 +227,7 @@ async def read_documents(factsheet: Path, kid: Path | None = None, peer_factshee
             value = "accumulation" if "acc" in name else "income" if "inc" in name else None
             status, source = CODE, f"from the share class name '{draft['share_class']}'"
         if spec.key == "hedged" and value is None:
-            mentions = any("hedged" in t.lower() for pages in docs.values() for t in pages)
-            value, status = (None, MISSING) if mentions else (False, CODE)
-            source = "the documents mention hedging: please check" if mentions else "no hedging mentioned in the documents"
+            value, status, source = _hedged(draft, docs)
         if spec.key == "pricing_point" and value is None and fs:
             value = next((s.pricing for s in fs.series.values() if s.pricing), None)
         rows.append(_row(spec, value, status, source))
@@ -271,6 +270,49 @@ async def read_documents(factsheet: Path, kid: Path | None = None, peer_factshee
             "promises": mandate.promises if mandate else [],
             "secondary_objective": mandate.secondary_objective if mandate else None,
             "peer_origins": origins, "flags": flags, "log": log}
+
+
+_NOT_HEDGED = re.compile(r"\b(un-?hedged|not (currency[- ])?hedged|no (currency )?hedging|does not hedge)\b", re.I)
+
+
+def _hedged(draft: dict, docs: dict[str, list[str]]):
+    """ Code decides currency hedging when the Extractor did not: "hedged" in the share class or fund name = yes;
+    the documents saying it is not hedged, or not mentioning hedging = no. Mentioned but unclear = no, with a
+    warning in the report """
+    names = f"{draft.get('fund_name', '')} {draft.get('share_class', '')}".lower()
+    if "hedged" in names and not _NOT_HEDGED.search(names):
+        return True, CODE, "'hedged' in the share class name"
+    text = " ".join(t for pages in docs.values() for t in pages)
+    if _NOT_HEDGED.search(text):
+        return False, CODE, "the documents say it is not hedged"
+    if "hedged" not in text.lower():
+        return False, CODE, "no hedging mentioned in the documents"
+    return False, CODE, UNCLEAR_HEDGING
+
+
+UNCLEAR_HEDGING = "hedging is mentioned but not stated for this share class: taken as not hedged"
+
+
+def self_check(intake: dict) -> Built:
+    """ The documents route without a person checking the table: code takes the values as read, checks each one
+    against the documents, and flags what it could not confirm. A required value nobody could read stops the run """
+    built = build_inputs(intake, [r["value"] for r in intake["rows"]])
+    for r in intake["rows"]:
+        if not r["value"]:
+            continue
+        if r["source"].endswith(NOT_FOUND):
+            built.flags.append({"check": "self_check", "level": "warning", "message": (
+                f"Read by the Extractor Agent but not found in the documents: {r['label']} = {r['value']}")})
+        if r["source"] == UNCLEAR_HEDGING:
+            built.flags.append({"check": "self_check", "level": "warning", "message": (
+                "Currency hedging: the documents mention hedging but do not state it for this share class; "
+                "taken as not hedged")})
+    found = sum(1 for r in intake["rows"] if r["value"] and not r["source"].endswith(NOT_FOUND))
+    built.flags.append({"check": "self_check", "level": "info", "message": (
+        f"Code checked the values the Extractor Agent read: {found} of "
+        f"{sum(1 for r in intake['rows'] if r['value'])} found in the documents (document and page in log.json)")})
+    built.problems = [p.replace(": required, please fill it in", ": not found in the documents") for p in built.problems]
+    return built
 
 
 def table(intake: dict) -> list[list[str]]:
