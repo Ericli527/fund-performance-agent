@@ -98,11 +98,11 @@ HOW_STEPS = [
                      "to judge it."),
     (["Code"], "<b>Measure:</b> returns, risk, gaps to the index and peers, and statistical tests."),
     (["Code"], "<b>Score:</b> four questions rated Green, Amber or Red → suggested verdict."),
-    (["AI"], "<b>Research and explain:</b> approved pages plus up to 3 web searches; the AI writes the market context "
-             "only, checked by code and a separate Evaluator."),
+    (["AI"], "<b>Research:</b> the Task Planner proposes up to 5 web searches; one Search Agent reads approved pages and "
+             "runs them alongside the calculations; code keeps only dated, relevant sources whose figures agree."),
     (["AI", "Code"], "<b>Draft and judge:</b> Reporting Agents draft the conclusion for different readers (board, "
-                     "analyst, manager meeting); code checks every figure, the Judge marks each draft on a checklist, "
-                     "and code picks the best or sends them back."),
+                     "analyst, manager meeting) with a cited market context; code checks every figure and citation, the Judge "
+                     "checks facts, reasoning, prompt injection and clarity, and one targeted rewrite is allowed."),
     (["Person"], "<b>Judge and decide:</b> the analyst reviews the evidence, adds comments and signs."),
 ]
 HOW_END = ("Code decides every number and rating. AI reads documents and writes the market context, and everything "
@@ -515,10 +515,13 @@ async def start_review(question: str, price, factsheet, kid, peer_factsheets, js
 
 
 def progress_history(history: list[str], line: str) -> list[str]:
-    """ The steps so far: a step's outcome (✓ done, ↷ skipped, ✗ failed) replaces its "▶ running" line """
+    """ The steps so far: a step's outcome (✓ done, ↷ skipped, ✗ failed) replaces its "▶ running" line, wherever it
+    is (web research runs alongside other steps, so its outcome comes after theirs) """
     key = line.lstrip("▶✓↷✗• ").split(" · ")[:2]
-    if history and history[-1].startswith("▶") and history[-1].lstrip("▶ ").split(" · ")[:2] == key:
-        return history[:-1] + [line]
+    if not line.startswith("▶"):
+        for i in range(len(history) - 1, -1, -1):
+            if history[i].startswith("▶") and history[i].lstrip("▶ ").split(" · ")[:2] == key:
+                return history[:i] + [line] + history[i + 1:]
     return history + [line]
 
 

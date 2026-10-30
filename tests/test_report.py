@@ -94,12 +94,15 @@ def test_many_warnings_are_counted_not_hidden_on_the_executive_pages(tmp_path):
     assert "Warning number 5 about a price." in section(page_texts(build_report(inp, tmp_path)), APPENDIX_TITLES[3])
 
 
-def test_executive_content_that_does_not_fit_is_an_error_not_cut(tmp_path):
+def test_executive_content_that_needs_more_room_runs_on_and_is_never_cut(tmp_path):
+    from fund_performance.executive import build_executive_reliably
     long = ["A very long finding that goes on and on. " * 40] * 3
     inp = made_up_inputs(findings=long)
-    with pytest.raises(ReportLayoutError, match="Executive Report: page 1 runs over"):
-        build_executive(inp, tmp_path)
-    assert len(page_texts(build_report(inp, tmp_path))) > 2             # the Detailed Report keeps it all
+    path, note = build_executive_reliably(inp, tmp_path)
+    pages = page_texts(path)
+    assert len(pages) > 2 and note.level == "info" and f"{len(pages)} pages (target 2)" in note.message
+    assert "Comparisons and decision" in " ".join(pages[1:])
+    assert len(page_texts(build_report(inp, tmp_path))) > 2             # the Detailed Report keeps it all too
 
 
 def test_manual_check_gets_a_tick_box(tmp_path):
@@ -241,32 +244,24 @@ def test_test1_facts_keep_the_original_wording(test1_pdf):
     assert "TD_ex_cost" in facts["decision_path"][0]
 
 
-# Stage 4B: a long AI summary never stops the Executive Report being made
-def test_a_long_ai_summary_falls_back_to_codes_summary_on_the_executive_pages_only(tmp_path):
-    from fund_performance.executive import EXECUTIVE_FALLBACK, build_executive_reliably
+# Version 1: a long AI summary is kept in full; the Executive Report runs on rather than being rejected
+def test_a_long_ai_summary_is_kept_in_full_on_the_executive_pages(tmp_path):
+    from fund_performance.executive import build_executive_reliably
     inp = made_up_inputs()
     concl = inp.facts["suggested_conclusion"]
-    code_text = concl.get("code_text") or concl["text"]
     long_ai = "The evidence suggests the fund stayed close to its index over the period. " * 30
-    inp.facts["suggested_conclusion"] = concl | {"text": long_ai, "source": "ai", "angle": "board", "code_text": code_text}
-    with pytest.raises(ReportLayoutError):
-        build_executive(inp, tmp_path / "plain")                       # without the fallback it would not fit
-    path, flag = build_executive_reliably(inp, tmp_path / "exec")
-    pages = page_texts(path)
-    text = " ".join(" ".join(pages).split())
-    assert len(pages) == 2 and flag.level == "info" and flag.message == EXECUTIVE_FALLBACK
-    assert " ".join(code_text.split()) in text and long_ai.split(".")[0] not in text
-    assert "the AI draft did not fit on this page and is kept in full in the Detailed Report" in text
-    assert inp.facts["suggested_conclusion"]["text"] == long_ai          # the run's facts keep the AI text
-    detailed = " ".join(" ".join(page_texts(build_report(inp, tmp_path / "detailed"))).split())
-    assert " ".join(long_ai.split()) in detailed                         # kept in full in the Detailed Report
+    inp.facts["suggested_conclusion"] = concl | {"text": long_ai, "source": "ai", "angle": "board",
+                                                 "code_text": concl.get("code_text") or concl["text"]}
+    path, note = build_executive_reliably(inp, tmp_path / "exec")
+    text = " ".join(" ".join(page_texts(path)).split())
+    assert " ".join(long_ai.split()) in text and note is not None and note.level == "info"
 
 
 def test_a_short_ai_summary_or_code_summary_is_used_as_it_is(tmp_path):
     from fund_performance.executive import build_executive_reliably
     inp = made_up_inputs()
     path, flag = build_executive_reliably(inp, tmp_path)
-    assert flag is None and len(page_texts(path)) == 2
+    assert flag is None and len(page_texts(path)) == 2                 # the made-up fund fits the 2-page target
     inp.facts["drafts"] = []
     inp.facts["suggested_conclusion"] |= {"source": "ai", "angle": "board", "code_text": "x"}
     assert build_executive_reliably(inp, tmp_path / "b")[1] is None
@@ -293,10 +288,8 @@ def test_the_sign_off_box_can_cross_a_page_break_without_breaking_the_reports(tm
     from fund_performance.executive import build_executive_reliably
     message = "CHECK DATA: " + " ".join(["mismatch"] * words)       # pushes the sign-off box onto the page break
     inp = made_up_inputs(flags=[DataFlag(check="currency_match", level="blocking", message=message)])
-    try:
-        path, _ = build_executive_reliably(inp, tmp_path / "exec")
-        assert len(page_texts(path)) == 2
-    except ReportLayoutError:
-        pass                                                        # too long for two pages: said, never cut
+    path, _ = build_executive_reliably(inp, tmp_path / "exec")           # never a ValueError, never rejected
+    executive = " ".join(" ".join(page_texts(path)).split())
+    assert "☐ Satisfied" in executive and message.split()[-1] in executive
     detailed = " ".join(" ".join(page_texts(build_report(inp, tmp_path / "detailed"))).split())
     assert "☐ Satisfied" in detailed and "☐ Action needed" in detailed and message.split()[-1] in detailed

@@ -1,4 +1,4 @@
-""" The Executive Report (UX redesign, stage 3): exactly two A4 pages for a decision
+""" The Executive Report (UX redesign, stage 3): two A4 pages for a decision (a target, not a limit)
 
 Page 1 "Overview": fund and period, the suggested investment assessment and the evidence quality (kept apart), three
 headline figures, the summary, two or three key findings, one chart chosen for the fund's mandate and data, and the
@@ -8,8 +8,8 @@ for the manager, and the analyst's approval.
 
 Presentation only, from the same facts and shared helpers as the dashboard (presentation.py). Material warnings are
 shown in full, never shortened; when there are more data warnings than fit, the page says how many more and where
-they are (the Detailed Report's Appendix D). If page 1 or page 2 still runs over, the report is not cut: a layout
-error is raised and the caller says so.
+they are (the Detailed Report's Appendix D). If page 1 or page 2 still runs over, the report is not cut and not
+rejected (Version 1): it runs to three or more pages, with an info note. Only a broken structure is an error.
 """
 from dataclasses import dataclass
 from html import escape
@@ -337,7 +337,7 @@ def page2(inp, content: ExecutiveContent) -> str:
 <h1>{PAGE2}</h1>
 <h2>Benchmark and peers</h2>{_comparison(inp, facts)}
 {_fees_and_risk(inp, facts)}
-<h2>Material issues</h2>{material_issues(data)}
+{_market_context(inp)}<h2>Material issues</h2>{material_issues(data)}
 <h2>Recommended actions</h2>{_ul(actions) or '<p>None.</p>'}
 {'<h2>Questions for the manager</h2>' + _ul(questions) if questions else ''}
 <h2>Analyst sign-off</h2>
@@ -385,6 +385,16 @@ EXEC_CSS = f"""
 """
 
 
+def _market_context(inp) -> str:
+    """ The Reporting Agent's market context, checked by code and the Judge, with its sources in the Detailed Report;
+    nothing when there is none (offline, research off or no credible source) """
+    context = inp.narrative.output.market_context if inp.narrative else None
+    if not context:
+        return ""
+    return (f"<h2>Market context</h2><p>{escape(context)}</p><p class='small'>Written by AI from the cited web "
+            "sources [n] (listed with dates in the Detailed Report, Appendix D). It never changes a figure or rating.</p>")
+
+
 def executive_html(inp, out_dir: Path) -> tuple[str, str]:
     """ The two pages' HTML (page 1, page 2) """
     content = content_from(inp, out_dir)
@@ -392,7 +402,8 @@ def executive_html(inp, out_dir: Path) -> tuple[str, str]:
 
 
 def build_executive(inp, out_dir: Path, name: str = "report_executive.pdf") -> Path:
-    """ Exactly two pages, or ReportLayoutError: content is never dropped to make it fit """
+    """ Two pages as a target; more when the content needs them (nothing is cut). ReportLayoutError only if the
+    report's structure is broken (no "Overview" on page 1, or no "Comparisons and decision" page) """
     from fund_performance.report import CSS, ReportLayoutError, _render, page_texts
     out_dir.mkdir(parents=True, exist_ok=True)
     p1, p2 = executive_html(inp, out_dir)
@@ -402,34 +413,36 @@ def build_executive(inp, out_dir: Path, name: str = "report_executive.pdf") -> P
             f"<div style='page-break-before: always'></div>{p2}</body></html>")
     path = out_dir / name
     _render(html, path)
-    problems = executive_layout_problems(page_texts(path))
+    problems = executive_structure_problems(page_texts(path))
     if problems:
         raise ReportLayoutError("Executive Report: " + "; ".join(problems))
     return path
 
 
-EXECUTIVE_FALLBACK = ("Executive Report: the AI-written summary did not fit on page 1, so code's summary from the "
-                      "scorecard is used there; the AI summary is kept in full in the Detailed Report")
+def executive_pages_note(path: Path):
+    """ An info flag when the Executive Report runs past its two-page target, else None """
+    from fund_performance.models import DataFlag
+    from fund_performance.report import page_texts
+    pages = len(page_texts(path))
+    if pages <= 2:
+        return None
+    return DataFlag(check="report_layout", level="info", message=(
+        f"Executive Report: {pages} pages (target 2), so that no material information is cut"))
 
 
 def build_executive_reliably(inp, out_dir: Path, name: str = "report_executive.pdf"):
-    """ (path, info flag or None). If page 1 runs over and its summary is AI-written, the Executive Report is built
-    again with code's summary (deterministic, from the scorecard) instead; the Detailed Report keeps the AI text.
-    Anything else that does not fit is still a ReportLayoutError: nothing is ever cut """
-    from fund_performance.models import DataFlag
-    from fund_performance.report import ReportLayoutError
-    try:
-        return build_executive(inp, out_dir, name), None
-    except ReportLayoutError:
-        concl = (inp.facts or {}).get("suggested_conclusion") or {}
-        if concl.get("source") != "ai" or not concl.get("code_text"):
-            raise
-    import copy
-    fallback = copy.copy(inp)
-    fallback.facts = copy.deepcopy(inp.facts)
-    fallback.facts["suggested_conclusion"] |= {"text": concl["code_text"], "source": "code", "executive_fallback": True}
-    return build_executive(fallback, out_dir, name), DataFlag(check="report_layout", level="info",
-                                                              message=EXECUTIVE_FALLBACK)
+    """ (path, info flag or None): the Executive Report, with a note if it runs past two pages """
+    path = build_executive(inp, out_dir, name)
+    return path, executive_pages_note(path)
+
+
+def executive_structure_problems(texts: list[str]) -> list[str]:
+    """ Page 1 holds "Overview" and a later page starts the "Comparisons and decision" section """
+    if not texts or PAGE1 not in texts[0]:
+        return ["page 1 is missing"]
+    if not any(PAGE2 in t for t in texts[1:]):
+        return ["the 'Comparisons and decision' page is missing"]
+    return []
 
 
 def executive_layout_problems(texts: list[str], next_title: str | None = None) -> list[str]:

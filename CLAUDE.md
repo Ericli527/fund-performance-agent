@@ -78,9 +78,11 @@ Instructions for Claude Code in this project. The build specification is
 - Research (`agents/research.py`): approved sources in `config/sources.yaml` are fetched by code
   (`fetch.py`; no AI chooses URLs) and summarised by a Search agent with no web tool, with the same
   checks as web results. A failed or nearly empty page: info flag + a code-written web search, taking
-  the budget first. Then at most 3 web searches in total (config), only for fund/manager changes and
-  market drivers. Planner gets public fund details and ratings only; searches run in parallel, one
-  each, no retries; failures are left out with a flag. Market-driver
+  the budget first. Then at most 5 web searches in total (thresholds.yaml limits, a maximum not a target),
+  proposed by the Task Planner (topic, query, objective, relevance; no separate research planner) for fund/manager
+  changes and market trends, benchmark developments and risks. The Task Planner gets public fund details only;
+  one Search Agent; searches run in parallel, one each, no retries, alongside the calculator (a background task;
+  the financial review never depends on it); failures are left out with an info flag. Market-driver
   queries never name the fund (code drops them). Summaries with no date, outside the review period,
   or with fund/index returns >0.5 pp from the factsheet are excluded with an info flag (only figures
   described as returns with a period are checked; fees and tax rates are not returns). Identical URLs
@@ -92,15 +94,15 @@ Instructions for Claude Code in this project. The build specification is
   market. v2: MCP Fetch for agent-chosen URLs.
 - Risk-free rate: 0 for v1, with a flag. Prefer the factsheet Sharpe ratios where supplied.
 - Charts are built in step 9 with the report.
-- Reports (step 9, redesigned in UX stage 3): `report_executive.pdf` (exactly 2 pages: Overview; Comparisons and
+- Reports (step 9, redesigned in UX stage 3): `report_executive.pdf` (2 pages as a target: Overview; Comparisons and
   decision) and `report.pdf` (Detailed: the executive pages + Appendices A-D, free length). Material warnings are
-  never shortened; executive content that cannot fit is a layout error (the run warns and keeps the Detailed
-  Report), never a silent cut. Saved to `runs/<timestamp>/` with `facts.json` and `run_log.txt`; `--offline` skips AI steps.
+  never shortened; executive content that needs more room runs to a third page with an info note (Version 1), never
+  a silent cut and never a rejected report; only a broken structure is a layout error. Saved to `runs/<timestamp>/` with `facts.json` and `run_log.txt`; `--offline` skips AI steps.
   Plain wording (decision path, fee note) is for the report only; facts.json and the Analyst keep the codes.
 - Emailing the report is a plain code function (`emailer.py`, not an AI agent), off by default
   (`config/settings.yaml`). Resend over HTTPS, as in the old app (RESEND_API_KEY, EMAIL_FROM in .env).
   Recipients come only from the EMAIL_TO environment variable (never the public repo).
-- Evaluator (step 10, gpt-6.1-sol): judges only the market context on 5 checks (no_rating_change,
+- Evaluator (step 10, gpt-6.1-sol; not called in Version 1, the Judge reviews the market context): judges only the market context on 5 checks (no_rating_change,
   supported_claims, sources_cited, check_data_handled, plain_english); output {pass, issues} only; runs only
   on drafts that pass code's checks. Rejected -> "AI text failed quality check: the Evaluator rejected the
   draft (...); market context left out"; unreachable or no valid answer -> "AI text not quality-checked: ...".
@@ -183,13 +185,14 @@ Instructions for Claude Code in this project. The build specification is
   "Monitor (data check needed: Fees)"); Amber/Red stand with a missing-evidence note. The review is not stopped.
 - Live progress (Stage 6C): "Step X of 5 · agent or component · status", sent by the controller as each step really
   starts (`controller.STAGES`); skipped AI steps are not announced.
-- Version 1 pilot workflow (hotfix): one Reporting Agent draft (`drafting.max_drafts: 1`), one Judge pass, at most
-  one targeted rewrite accepted on code's checks (`rejudge_after_rewrite: false`); web research off
-  (`research.enabled: false`), so no Research, Analyst or Evaluator calls; email off. The code for all of them stays
-  (tests switch them on). Optional AI steps (Task Planner, Mandate, Extractor in the controller, research, AI text,
+- Version 1 workflow: one Reporting Agent draft (`drafting.max_drafts: 1`), one Judge pass, at most one targeted
+  rewrite accepted on code's checks (`rejudge_after_rewrite: false`); web research on (`research.enabled: true`):
+  the Reporting Agent writes the cited market context (code's market-context checks: no figures, citations to
+  existing sources, citation dates, at most 3 sentences; it never changes a rating), so the Analyst and Evaluator are
+  not called (their code stays, with its tests); email off. Optional AI steps (Task Planner, Mandate, Extractor in the controller, research, AI text,
   drafts) never destroy a review: an unexpected error or timeout gives the step's fallback and a flag with the reason;
   a critical step's error stops the run naming "Step X of 5 (component)". One OpenAI trace per review (the page's
   reading agents included); log.json records run_id, trace_id and every AI call (agent, attempt, seconds, outcome).
   Progress shows "▶" when a step starts and its outcome (✓ done, ↷ skipped, ✗ failed) when it ends.
-- Executive summary: AI drafts over `drafting.max_summary_chars` (700) fail code's checks; if page 1 still overflows
-  with an AI summary, the Executive Report uses code's summary (info flag) and the Detailed Report keeps the AI text.
+- Executive summary: AI drafts over `drafting.max_summary_chars` (700) fail code's checks; an Executive Report that
+  still runs past two pages keeps everything and says so (info flag).

@@ -11,8 +11,9 @@ from dataclasses import asdict, dataclass, field
 import json
 from typing import Literal
 from agents import Agent
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from fund_performance.agents.base import RunFn, model_kwargs, run_structured
+from fund_performance.agents.research import PlannedSearch, SearchPlan, Topic, tidy_plan
 from fund_performance.models import DataFlag, FundProfile
 
 ReportType = Literal["quarterly_review", "fee_question", "performance_question", "mandate_question"]
@@ -34,8 +35,25 @@ From the request and the fund's public details, choose from the menu only:
   performance question; usually false for a fee question).
 - manager_questions: true if the reader will need questions to ask the fund manager.
 - angles: the readers to draft a summary for, from: board, analyst, manager_meeting. At least one.
+- searches: if market_context is true, up to {max_searches} web searches that would help this review, else none.
+  Fewer is better: only searches with a clear purpose, never two on the same thing. Each has:
+  - topic: fund_news (changes to this fund, share class, fees or index), manager_changes (the manager or the team
+    that runs the fund) or market_drivers (market trends, benchmark developments and risks in the review period);
+  - query: plain words, no search operators (site:, inurl:, quotes). market_drivers queries name the market and the
+    review period, never the fund (e.g. "S&P 500 review Oct 2025 to Sep 2026"); fund_news and manager_changes
+    queries use the fund's or manager's name;
+  - objective: what the search should find; relevance: why it matters for this review.
 - reason: one short sentence on why.
+Use only the public details given; never include personal or client information.
 """
+
+
+class ResearchTask(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    topic: Topic
+    query: str
+    objective: str
+    relevance: str
 
 
 class PlanOutput(BaseModel):
@@ -45,6 +63,7 @@ class PlanOutput(BaseModel):
     market_context: bool
     manager_questions: bool
     angles: list[Angle]
+    searches: list[ResearchTask] = Field(default_factory=list)
     reason: str
 
 
@@ -57,6 +76,7 @@ class TaskPlan:
     angles: list[str] = field(default_factory=lambda: list(ANGLES))
     reason: str = "Default plan: a full review"
     source: str = "default"                                              # "planner" or "default"
+    searches: list[dict] = field(default_factory=list)                   # web searches, checked by code (research.tidy_plan)
 
     @property
     def tasks(self) -> list[str]:
@@ -64,7 +84,10 @@ class TaskPlan:
         steps = ["Read and check the documents and prices (Extractor Agent and code)",
                  "Measure and rate all four questions (code); focus: " + ", ".join(self.focus[:2]),
                  "Compare with approved peers (code)"]
-        if self.market_context:
+        if self.market_context and self.searches:
+            steps.append(f"Research the market context (approved pages and {len(self.searches)} planned web "
+                         f"search{'es' if len(self.searches) > 1 else ''}, alongside the calculations)")
+        elif self.market_context:
             steps.append("Research the market context (approved pages and up to 3 web searches)")
         steps.append("Draft the summary for: " + ", ".join(ANGLE_WORDS[a] for a in self.angles) + " (Reporting Agents)")
         steps.append("Judge the drafts against the checklist and pick the best (Judge Agent and code)")
@@ -74,33 +97,54 @@ class TaskPlan:
         return steps
 
     def to_dict(self) -> dict:
-        return asdict(self) | {"tasks": self.tasks}
+        out = asdict(self) | {"tasks": self.tasks}
+        if not self.searches:
+            out.pop("searches")                     # no searches planned: the plan reads as before
+        return out
 
 
-def checked_plan(out: PlanOutput) -> TaskPlan:
-    """ Code's checks: every question stays (named ones first), angles from the menu, at least one """
+def checked_plan(out: PlanOutput, profile: FundProfile | None = None, max_searches: int = 0) -> TaskPlan:
+    """ Code's checks: every question stays (named ones first), angles from the menu, at least one; searches only
+    with market context, within the limit, plain words, no repeats, no market-driver query naming the fund """
     focus = list(dict.fromkeys(q for q in out.focus if q in QUESTIONS))
     focus += [q for q in QUESTIONS if q not in focus]
     angles = list(dict.fromkeys(a for a in out.angles if a in ANGLES)) or list(ANGLES)
+    searches = []
+    if out.market_context and max_searches > 0:
+        planned = [PlannedSearch(topic=x.topic, query=x.query, reason=f"{x.objective.strip()} ({x.relevance.strip()})"[:300])
+                   for x in out.searches]
+        kept, _ = tidy_plan(SearchPlan(searches=planned), max_searches, profile)
+        searches = [k.model_dump() for k in kept]
     return TaskPlan(out.report_type, focus, out.market_context, out.manager_questions, angles,
-                    out.reason.strip()[:200], "planner")
+                    out.reason.strip()[:200], "planner", searches)
 
 
-def task_planner_agent() -> Agent:
-    return Agent(name="Task Planner Agent", instructions=INSTRUCTIONS, output_type=PlanOutput,
-                 **model_kwargs("task_planner"))
+def task_planner_agent(max_searches: int = 0) -> Agent:
+    return Agent(name="Task Planner Agent", instructions=INSTRUCTIONS.format(max_searches=max_searches),
+                 output_type=PlanOutput, **model_kwargs("task_planner"))
 
 
-def planner_input(question: str, profile: FundProfile) -> str:
-    """ Public details only """
+def planner_input(question: str, profile: FundProfile, max_searches: int = 0) -> str:
+    """ Public details only: no figures, documents or client data """
     details = {"fund_name": profile.fund_name, "objective_type": profile.objective_type,
                "benchmark_name": profile.benchmark_name, "as_of_date": profile.as_of_date.isoformat()}
-    return f"Request: {question}\nFund (public details): {json.dumps(details)}"
+    text = f"Request: {question}\nFund (public details): {json.dumps(details)}"
+    if max_searches > 0:
+        from fund_performance.agents.research import _period_words, market_name
+        period = _period_words(profile)
+        text += (f"\nISIN: {profile.isin}\nShare class: {profile.share_class}\nMarket (for market_drivers queries): "
+                 f"{market_name(profile)}\nReview period: {period} (market_drivers queries ask about the whole "
+                 f"period, e.g. \"{market_name(profile)} review {period}\")\nWeb searches allowed: at most {max_searches}")
+    else:
+        text += "\nWeb searches allowed: none (return an empty searches list)"
+    return text
 
 
-async def plan_tasks(question: str, profile: FundProfile, run: RunFn | None = None) -> tuple[TaskPlan, list[DataFlag]]:
-    result = await run_structured(task_planner_agent(), planner_input(question, profile), PlanOutput,
-                                  convert=checked_plan, run=run)
+async def plan_tasks(question: str, profile: FundProfile, run: RunFn | None = None,
+                     max_searches: int = 0) -> tuple[TaskPlan, list[DataFlag]]:
+    """ The plan; with max_searches > 0 (web research on) it also proposes up to that many web searches """
+    result = await run_structured(task_planner_agent(max_searches), planner_input(question, profile, max_searches),
+                                  PlanOutput, convert=lambda out: checked_plan(out, profile, max_searches), run=run)
     if result.ok:
         return result.output, []
     return TaskPlan(reason="Default plan: the Task Planner gave no valid answer"), [DataFlag(

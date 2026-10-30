@@ -22,8 +22,8 @@ def settings(**timeouts):
 
 
 def full_settings(**timeouts):
-    """ The features the Version 1 pilot switches off in settings.yaml, switched on: web research (and so the
-    Analyst and Evaluator), one draft per angle, and the Judge after the rewrite. Their code is kept and tested """
+    """ The features Version 1 switches off in settings.yaml, switched on: one draft per angle and the Judge after
+    the rewrite. Their code is kept and tested """
     s = settings(**timeouts)
     s.research.enabled = True
     s.drafting.max_drafts, s.drafting.rejudge_after_rewrite = 3, True
@@ -76,11 +76,10 @@ def test_test1_offline_run_logs_every_step(tmp_path):
     log = json.loads((result.run_dir / "log.json").read_text())
     assert [(s["step"], s["status"]) for s in log["steps"]] == [
         ("read_files", "ok"), ("extractor", "skipped"), ("peers", "skipped"), ("plan", "skipped"), ("data_checks", "ok"),
-        ("mandate", "skipped"),
-        ("calculator", "ok"), ("scorecard", "ok"), ("research", "skipped"), ("narrative", "skipped"),
+        ("mandate", "skipped"), ("research", "skipped"), ("calculator", "ok"), ("scorecard", "ok"),
         ("drafts", "skipped"), ("report", "ok"), ("email", "skipped")]
     assert log["run"]["status"] == "ok" and all(s["ended"] for s in log["steps"])
-    assert log["steps"][7]["outputs"]["verdict"] == "Monitor until a peer is added"
+    assert log["steps"][8]["outputs"]["verdict"] == "Monitor until a peer is added"
     assert "fund_profile.json" in log["sources"]["input_files"] and log["sources"]["web"] == []
     texts = page_texts(result.pdf)
     appendix = " ".join(texts[next(i for i, x in enumerate(texts) if "Appendix D" in x):])
@@ -136,14 +135,21 @@ def mocked(evaluator_answer=None, mandate_delay=0.0, planner_queries=5):
 
 
 TASK_PLAN = {"report_type": "quarterly_review", "focus": ["Performance", "Fees"], "market_context": True,
-             "manager_questions": True, "angles": ["board", "analyst"], "reason": "A full quarterly review."}
+             "manager_questions": True, "angles": ["board", "analyst"], "reason": "A full quarterly review.",
+             "searches": [{"topic": "market_drivers", "query": "S&P 500 review Oct 2025 to Sep 2026",
+                           "objective": "What drove US shares", "relevance": "Context for the fund's return"},
+                          {"topic": "fund_news", "query": "Fidelity Index US Fund fee change 2026",
+                           "objective": "Changes to the fund", "relevance": "Fees and index"}]}
+CONTEXT = "US shares rose over the period, led by large technology companies [1]."
 
 
 def reporter_answer(prompt):
     """ A draft that passes code's checks: plain words and code's verdict sentence at the end """
     ending = re.search(r"Verdict sentence to end with: (.*)", prompt).group(1)
     who = "the board" if "For the board" in prompt else "the analyst"
-    return {"text": f"For {who}: the evidence suggests the fund tracked its index closely. {ending}"}
+    has_sources = "Numbered sources (web research, vetted by code):\nnone" not in prompt
+    return {"text": f"For {who}: the evidence suggests the fund tracked its index closely. {ending}",
+            "market_context": CONTEXT if has_sources else None}
 
 
 def judge_answer(prompt):
@@ -159,28 +165,22 @@ def test_test1_full_run_mocked(tmp_path):
     log = json.loads((result.run_dir / "log.json").read_text())
     status = {s["step"]: s["status"] for s in log["steps"]}
     assert status == {"read_files": "ok", "plan": "ok", "drafts": "ok", "extractor": "skipped", "peers": "skipped",
-                      "data_checks": "ok", "mandate": "ok",
-                      "calculator": "ok", "scorecard": "ok", "research": "ok", "narrative": "ok",
-                      "report": "ok", "email": "skipped"}
+                      "data_checks": "ok", "mandate": "ok", "research": "ok",
+                      "calculator": "ok", "scorecard": "ok", "report": "ok", "email": "skipped"}
     research = next(s for s in log["steps"] if s["step"] == "research")
-    assert research["outputs"]["web_searches"] <= 3                        # the limit, fallback included
+    assert research["outputs"]["web_searches"] <= 5                        # the limit, fallback included
     assert any("spglobal" in i for i in research["inputs"])
-    assert result.narrative.source == "ai" and len(runners.evaluator.prompts) == 1
-    assert "Evaluator passed draft 1" in next(s for s in log["steps"] if s["step"] == "narrative")["notes"]
+    assert [q["query"] for q in research["outputs"]["queries"]][-2:] == [
+        "S&P 500 review Oct 2025 to Sep 2026", "Fidelity Index US Fund fee change 2026"]   # the Planner's searches
+    assert all(x["url"] and x["date"] for x in research["outputs"]["sources"])
+    assert runners.analyst.prompts == [] and runners.evaluator.prompts == [] and runners.planner.prompts == []
+    assert result.narrative.source == "ai" and result.narrative.output.market_context == CONTEXT
     web = log["sources"]["web"]
-    assert web and web == result.narrative.sources or not result.narrative.output.market_context
+    assert web and web == result.narrative.sources and web[0]["number"] == 1
     assert result.facts["scorecard"]["verdict"] == "Monitor until a peer is added"
-    assert len(page_texts(result.executive_pdf)) == 2 and len(page_texts(result.pdf)) >= 6
-
-
-@requires_test1
-def test_test1_evaluator_failing_twice_gives_the_template_and_a_flag(tmp_path):
-    fail = {"pass": False, "issues": [{"check": "plain_english", "detail": "sentence too long"}]}
-    result = asyncio.run(run_review(TEST1, out_root=tmp_path, runners=mocked(evaluator_answer=fail),
-                                    settings=full_settings()))
-    assert result.narrative.source == "template"
-    assert ("AI text failed quality check: the Evaluator rejected the draft (plain_english)"
-            in (result.run_dir / "run_log.txt").read_text())
+    assert len(page_texts(result.executive_pdf)) >= 2 and len(page_texts(result.pdf)) >= 6
+    detailed = " ".join(" ".join(page_texts(result.pdf)).split())
+    assert CONTEXT in detailed and web[0]["url"] in detailed
 
 
 @requires_test1
@@ -307,7 +307,9 @@ def test_progress_runs_through_the_five_steps_in_order_with_the_agents(tmp_path)
         assert progress_line(*STAGES[step]) in messages, step
     assert "▶ Step 2 of 5 · Task Planner Agent · Choosing what the review should focus on…" in messages
     assert "▶ Step 4 of 5 · Reporting Agent and Judge · Drafting the summary and checking it…" in messages
-    assert any(m.startswith("↷ Step 3 of 5 · Research Agents · skipped: web research is off") for m in messages)
+    assert any(m.startswith("▶ Step 3 of 5 · Search Agent · ") for m in messages)
+    assert any(m.startswith("↷ Step 3 of 5 · Search Agent · unavailable") or m.startswith("✓ Step 3 of 5 · Search Agent · done")
+               for m in messages)
     assert any(m.startswith("✓ Step 5 of 5 · Code: reports · done (") for m in messages)
 
 

@@ -559,6 +559,13 @@ analyst signs off. Code keeps every number, rating and the final pick.
   verdict follows) from the facts JSON only, 3 to 5 sentences, ending with code's verdict sentence word for word.
   Code checks each draft: number guard, label and rating guards, no web addresses, no minus after "behind", at most
   5 sentences and the length limit, the verdict sentence at the end.
+- **Web research (Version 1):** the Task Planner also proposes up to `limits.max_web_searches` (5) searches (topic,
+  query, objective, relevance), checked by code (`research.tidy_plan`); there is no separate research planner. One
+  Search Agent reads the approved pages and runs the searches as a background task alongside the calculator; code
+  vets every summary (dates, relevance, figures) and marks it within the review period or after the review date.
+  The Reporting Agent's optional `market_context` (at most 3 sentences, [n] citations, no figures) is checked by
+  code's market-context checks and reviewed by the Judge with the numbered sources; the Analyst and Evaluator are not
+  called. Research failures or timeouts leave the financial review complete, with an info note.
 - **Judge** (`agents/judge.py`): reviews each draft that passed code's checks like a senior analyst reviewing a
   junior's, one call per draft, and returns `ReviewResult` {approved, factual_issue, security_issue,
   conclusion_reasonable, clear_for_analysts, feedback}. Facts and drafts are untrusted data. It writes no text, gives
