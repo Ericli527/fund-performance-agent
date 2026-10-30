@@ -177,7 +177,7 @@ async def run_review(folder: Path, question: str = DEFAULT_QUESTION, out_root: P
                      offline: bool = False, thresholds: Thresholds | None = None,
                      settings: RunSettings | None = None, runners: Runners | None = None,
                      intake: dict | None = None, on_step: ProgressFn | None = None) -> RunResult:
-    """ One review. `intake` is the documents route's confirmation (intake.read_documents + the confirmed table):
+    """ One review. `intake` is the documents route (intake.read_documents + code's self-check of the values):
     the Extractor and Mandate agents have already run, so they are not run again. `on_step` gets a short message
     as each step starts, for the page's progress line """
     t = thresholds or load_thresholds()
@@ -243,10 +243,11 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
 
     # 0. The documents route: what the agents read and what the person confirmed, before the run
     if intake:
-        step = log.start("confirmation", intake.get("documents", []))
+        step = log.start("self_check", intake.get("documents", []))
         changed = [r["label"] for r in intake.get("rows", []) if r.get("status") == "Entered by user"]
         text_log += intake.get("log", []) + [f"Entered by user on the page: {', '.join(changed) or 'nothing'}"]
-        log.end(step, outputs={"values": intake.get("rows", []), "entered_by_user": changed})
+        log.end(step, outputs={"values": intake.get("rows", []), "entered_by_user": changed},
+                notes=["values read by the Extractor Agent; code found each in the documents or flagged it"])
 
     # 1. Read files
     step = log.start("read_files", [str(folder)])
@@ -269,7 +270,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     input_files = structured + [p.name if documents_read else f"{p.name} {NOT_READ}" for p in files["documents"]]
     if intake:
         input_files = [f for f in structured if not f.endswith(".json")] + [
-            f"{name} (read by the Extractor Agent; values confirmed on the page)" for name in intake.get("documents", [])]
+            f"{name} (read by the Extractor Agent; values checked by code)" for name in intake.get("documents", [])]
     log.end(step, outputs={"input_files": input_files})
 
     # 1b. Task plan: the Task Planner Agent turns the request into tasks (menu choices only, checked by code)
@@ -294,7 +295,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     step = log.start("extractor", [p.name for p in files["documents"]],
                      announce=not intake and factsheet is None and not offline and bool(files["documents"]))
     if intake:
-        log.end(step, "skipped", notes=["documents read before the run; values confirmed on the page"])
+        log.end(step, "skipped", notes=["documents read before the run; values checked by code"])
     elif factsheet is not None:
         log.end(step, "skipped", notes=["factsheet_performance.json supplied"])
     elif offline or not files["documents"]:
@@ -360,7 +361,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     elif intake:
         promises = list(intake.get("promises", []))
         log.end(step, outputs={"promises": len(promises)},
-                notes=["Mandate Agent read the objective before the run; its answer was confirmed on the page"])
+                notes=["Mandate Agent read the objective before the run"])
     else:
         mandate = await _timed(read_mandate(profile, r.mandate), s.timeouts_seconds.mandate)
         if mandate is None:

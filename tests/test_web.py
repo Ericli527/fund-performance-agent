@@ -1,4 +1,4 @@
-""" The Gradio front end: the login and the limits, the documents route with its confirmation step, the Advanced
+""" The Gradio front end: the login and the limits, the documents route (read, checked by code, run), the Advanced
 JSON route, the demo and example files, and the page's text. No server is started and no AI is called (offline
 runs and stand-ins for the reader and the controller) """
 import asyncio
@@ -10,7 +10,7 @@ import pytest
 from fund_performance.config import WebSettings
 from fund_performance.controller import RunStopped
 from fund_performance.web import (AI_OFF, BUSY, FILES_TABLE, HOW_END, INSTRUCTIONS, LIMIT_REACHED, NEED_FILES, NEEDS_AI,
-                                  PUBLIC_DATA, AiLimits, build_ui, confirm_review, demo_files, example_zip,
+                                  PUBLIC_DATA, AiLimits, build_ui, demo_files, example_zip,
                                   prepare_inputs, start_review, summary_markdown, with_progress)
 from test_intake import extractor_answer, MANDATE, peer_answer
 
@@ -112,13 +112,22 @@ def documents(tmp_path):
     return str(Path(demo()["price"])), paths[0], paths[1]
 
 
-def test_documents_are_read_and_shown_for_confirmation(tmp_path, limits):
+def test_documents_are_read_checked_by_code_and_run_in_one_click(tmp_path, limits):
     price, factsheet, peer = documents(tmp_path)
+    seen = {}
+
+    async def runner(folder, question, out_root, offline, intake=None, on_step=None):
+        seen["profile"] = json.loads((folder / "fund_profile.json").read_text())
+        seen["files"] = sorted(p.name for p in folder.iterdir())
+        seen["intake"], seen["offline"] = intake, offline
+        raise RunStopped("stop here")
     outcome = asyncio.run(start_review("q", price, factsheet, None, [peer, peer], [], False, limits, out_root=tmp_path,
-                                       reader=fake_reader))
-    assert len([r for r in outcome.state["intake"]["rows"] if r["key"].endswith(".ocf_pct")]) == 2   # 2 peers
-    assert outcome.pdf is None and outcome.message.startswith("**Check what the agent read.**")
-    assert outcome.state["paid"] is True and outcome.state["price"] == price
+                                       runner=runner, reader=fake_reader))
+    assert outcome.message == "**stop here**" and seen["offline"] is False
+    assert seen["files"] == ["factsheet_performance.json", "fund_profile.json", "peer.json", "prices.csv"]
+    assert seen["profile"]["ocf_pct"] == 0.1 and seen["profile"]["field_sources"]["ocf_pct"] == "ai_extracted"
+    checks = [f["message"] for f in seen["intake"]["flags"] if f["check"] == "self_check"]
+    assert any(m.startswith("Code checked the values the Extractor Agent read:") for m in checks)
     assert limits.used_today() == 1 and limits.active == 0
 
 
@@ -139,35 +148,17 @@ def test_the_price_file_and_factsheet_are_required(tmp_path, limits):
         "The factsheet must be .pdf or .docx")
 
 
-def test_confirm_and_run_uses_the_confirmed_values_and_is_not_counted_twice(tmp_path, limits):
-    price, factsheet, peer = documents(tmp_path)
-    started = asyncio.run(start_review("q", price, factsheet, None, peer, [], False, limits, out_root=tmp_path,
-                                       reader=fake_reader))
-    rows = [[r["label"], r["value"], r["status"], r["source"]] for r in started.state["intake"]["rows"]]
-    rows[[r[0] for r in rows].index("Ongoing charge (OCF), % a year")][1] = "0.12"
-    seen = {}
+def test_a_value_nobody_could_read_stops_the_run_with_a_clear_message(tmp_path, limits):
+    from fund_performance.intake import read_documents
+    from conftest import FakeRunBy
 
-    async def runner(folder, question, out_root, offline, intake=None, on_step=None):
-        seen["profile"] = json.loads((folder / "fund_profile.json").read_text())
-        seen["files"] = sorted(p.name for p in folder.iterdir())
-        seen["intake"], seen["offline"] = intake, offline
-        raise RunStopped("stop here")
-    outcome = asyncio.run(confirm_review("q", rows, started.state, limits, out_root=tmp_path, runner=runner))
-    assert seen["profile"]["ocf_pct"] == 0.12 and seen["profile"]["field_sources"]["ocf_pct"] == "user"
-    assert seen["files"] == ["factsheet_performance.json", "fund_profile.json", "peer.json", "prices.csv"]
-    assert seen["offline"] is False and "Ongoing charge (OCF), % a year" in [
-        r["label"] for r in seen["intake"]["rows"] if r["status"] == "Entered by user"]
-    assert limits.used_today() == 1 and outcome.state["paid"] is False and outcome.message == "**stop here**"
-
-
-def test_a_missing_required_value_stops_confirm_and_run(tmp_path, limits):
-    price, factsheet, peer = documents(tmp_path)
-    started = asyncio.run(start_review("q", price, factsheet, None, peer, [], False, limits, reader=fake_reader))
-    rows = [[r["label"], r["value"], r["status"], r["source"]] for r in started.state["intake"]["rows"]]
-    rows[[r[0] for r in rows].index("ISIN")][1] = ""
-    outcome = asyncio.run(confirm_review("q", rows, started.state, limits))
-    assert outcome.message.startswith("**Please fix these values before the run:**") and "ISIN: required" in outcome.message
-    assert outcome.state == started.state                              # the table stays for the fix
+    async def no_isin(factsheet, kid, peers):
+        return await read_documents(factsheet, kid, peers, run_extractor=FakeRunBy(lambda p: extractor_answer(isin=None)),
+                                    run_mandate=FakeRunBy(lambda p: MANDATE), run_peer=FakeRunBy(lambda p: peer_answer()))
+    price, factsheet, _ = documents(tmp_path)
+    outcome = asyncio.run(start_review("q", price, factsheet, None, None, [], False, limits, reader=no_isin))
+    assert outcome.message.startswith("**The review could not run: these values were not found in the documents.**")
+    assert "- ISIN: not found in the documents" in outcome.message and outcome.pdf is None
 
 
 # The Advanced JSON route and the demo
@@ -219,7 +210,7 @@ def test_the_page_has_the_instructions_files_table_and_how_it_works():
     ui = build_ui()
     texts = " ".join(str(getattr(c, "value", "") or "") for c in ui.blocks.values())
     assert PUBLIC_DATA in texts and INSTRUCTIONS in texts and FILES_TABLE in texts and HOW_END in texts
-    for step in ("Try the demo", "Upload a real fund", "Check what the agent read", "Read the evidence",
+    for step in ("Try the demo", "Upload a real fund", "Let the agent check itself", "Read the evidence",
                  "Make the judgement"):
         assert step in INSTRUCTIONS
     accordions = {c.label: c.open for c in ui.blocks.values() if isinstance(c, gr.Accordion)}
@@ -251,6 +242,5 @@ def test_when_the_extractor_cannot_read_the_documents_the_page_says_so(tmp_path,
         return await read_documents(factsheet, kid, peers, run_extractor=FakeRun(AgentsException("no key")))
     price, factsheet, _ = documents(tmp_path)
     outcome = asyncio.run(start_review("q", price, factsheet, None, None, [], False, limits, reader=failing_reader))
-    assert "**The Extractor Agent could not read the documents**" in outcome.message
-    filled = {r["key"]: r["value"] for r in outcome.state["intake"]["rows"] if r["value"]}
-    assert filled == {"hedged": "no"}                     # only what code derives: no hedging mentioned
+    assert outcome.message.startswith("**The review could not run")
+    assert "The Extractor Agent could not read the documents" in outcome.message and "- ISIN: not found" in outcome.message

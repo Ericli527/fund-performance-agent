@@ -9,7 +9,8 @@ The folder holds fund_profile.json, a price file, and factsheet_performance.json
 PDFs, read by the Extractor Agent), and optionally peer.json.
 
 --from-documents uses only the price file and the documents, as the page's main route does: the Extractor and
-Mandate agents read them, the values are accepted as read (there is no one to correct them here), and the review
+Mandate agents read them, code checks each value against the
+documents (as on the page), and the review
 runs. It prints what was read and, when typed JSON files are in the folder, every value that differs from them;
 both are saved in extraction_check.txt in the run folder.
 """
@@ -22,7 +23,7 @@ import sys
 import tempfile
 from fund_performance.controller import DEFAULT_QUESTION, RunResult, RunStopped, find_inputs
 from fund_performance.controller import run_review as run_controller
-from fund_performance.intake import build_inputs, differences, read_documents, write_inputs
+from fund_performance.intake import differences, read_documents, self_check, write_inputs
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -60,14 +61,15 @@ async def from_documents(folder: Path, question: str, out_root: Path, scoring_of
         diffs = differences(intake, *typed)
         lines += ["", f"Compared with the typed JSON files: {len(diffs)} value(s) differ"]
         lines += [f"  {label}: read '{got}', typed '{want}'" for label, got, want in diffs]
-    built = build_inputs(intake, [r["value"] for r in intake["rows"]])
+    built = self_check(intake)
     if built.problems:
         return None, "\n".join(lines + ["", "Cannot run: " + "; ".join(built.problems)])
     work = Path(tempfile.mkdtemp(prefix="fund-review-"))
     try:
         write_inputs(built, work)
         shutil.copy(files["prices"], work / files["prices"].name)
-        result = await run_controller(work, question, out_root, scoring_offline, intake=intake | {"rows": built.rows})
+        result = await run_controller(work, question, out_root, scoring_offline,
+                                      intake=intake | {"rows": built.rows, "flags": intake.get("flags", []) + built.flags})
     finally:
         shutil.rmtree(work, ignore_errors=True)
     text = "\n".join(lines)

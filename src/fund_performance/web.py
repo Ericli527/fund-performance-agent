@@ -1,10 +1,10 @@
-""" The Gradio front end (step 11): upload the fund's documents, check what the agent read, download the PDF
+""" The Gradio front end (step 11): upload the fund's documents, run the review, download the PDF
 
 Plain code around the intake (intake.py) and the workflow controller. The main route: a price file and the
 factsheet (optionally the KID or prospectus and peer funds' factsheets; without them the approved peers in
 config/peers.yaml are used). The Extractor and Mandate agents read the
-documents, the page shows what they read in an editable table, and the person confirms it before anything is
-scored. JSON files are an optional "Advanced" route that skips the reading step. Public data only: the page says
+documents and the review runs straight on: code checks every value against the documents (intake.self_check) and
+flags what it cannot confirm; a required value it cannot find stops the run with a clear message. JSON files are an optional "Advanced" route that skips the reading step. Public data only: the page says
 so first.
 
 The login: when APP_USERNAME and APP_PASSWORD are set, the page asks for them before it opens (Gradio's own
@@ -13,7 +13,7 @@ offline demo works; on your own computer no login is needed. Limits in config/se
 key: a daily number of AI reviews, and at most one AI review at a time. Offline runs (no AI) are not limited.
 """
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 import json
 import os
@@ -29,7 +29,7 @@ from fund_performance.config import WebSettings, load_settings
 from fund_performance.controller import DEFAULT_QUESTION, RunResult, RunStopped, run_review
 from fund_performance.plain import verdict_meaning, verdict_name
 from fund_performance.report import ANGLE_WORDS, REPORT_TYPE_WORDS
-from fund_performance.intake import COLUMNS, build_inputs, missing, read_documents, table, write_inputs
+from fund_performance.intake import read_documents, self_check, write_inputs
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNS = ROOT / "runs"
@@ -53,7 +53,7 @@ PUBLIC_DATA = ("**Public data only.** Files and figures may be sent to OpenAI, w
 INSTRUCTIONS = """### How to use it
 1. **Try the demo:** click **Use the demo files**, then **Run the review**. Free, takes seconds.
 2. **Upload a real fund:** the price file and factsheet (KID and peer factsheets optional). Untick **Offline**.
-3. **Check what the agent read:** review the table, correct anything, click **Confirm and run**. Takes 1–2 minutes.
+3. **Let the agent check itself:** code checks every value the AI read against the documents and the prices, and flags anything it cannot confirm. Takes 1–2 minutes.
 4. **Read the evidence:** the suggested verdict, conclusion, ratings and charts; download the PDF.
 5. **Make the judgement:** the verdict is a suggestion. The analyst decides and signs the approval box."""
 FILES_TABLE = """### Which files do I need?
@@ -68,9 +68,9 @@ TAGS = {"Code": "#1f3a5f", "AI": "#6d4c9f", "Person": "#2e7d32"}
 HOW_STEPS = [
     (["Person", "AI"], "You provide public documents, a price file and a question; the Task Planner turns the question "
                        "into tasks (which questions come first, what to research, who the summary is for)."),
-    (["AI", "Person", "Code"], "<b>Read and check:</b> the Extractor reads the documents and you confirm the values; "
-                               "code checks currency, pricing time (noon vs close), gaps, repeated prices and "
-                               "factsheet cross-checks."),
+    (["AI", "Code"], "<b>Read and check:</b> the Extractor reads the documents; code finds every value in the "
+                     "documents and flags any it cannot, then checks currency, pricing time (noon vs close), gaps, "
+                     "repeated prices and factsheet cross-checks."),
     (["AI", "Code"], "<b>Understand the fund:</b> the Mandate Agent reads the objective; a decision tree chooses how "
                      "to judge it."),
     (["Code"], "<b>Measure:</b> returns, risk, gaps to the index and peers, and statistical tests."),
@@ -193,7 +193,6 @@ class Outcome:
     message: str                             # Markdown for the page
     pdf: str | None = None
     log: str | None = None
-    state: dict = field(default_factory=dict)  # kept between the two clicks: the intake and the price file
 
 
 def summary_markdown(result: RunResult) -> str:
@@ -261,7 +260,7 @@ async def _run_controller(folder: Path, question: str, offline: bool, on_step: P
 async def start_review(question: str, price, factsheet, kid, peer_factsheets, json_files, offline: bool,
                        limits: AiLimits, on_step: Progress | None = None, out_root: Path = RUNS,
                        runner=run_review, reader=read_documents) -> Outcome:
-    """ "Run the review": JSON files run straight away; documents are read first and shown for confirmation """
+    """ "Run the review": JSON files run straight away; documents are read, checked by code, then run """
     price, factsheet, kid = map(_one, (price, factsheet, kid))
     peers = _many(peer_factsheets)
     json_files = [p for p in (json_files or []) if p]
@@ -294,49 +293,33 @@ async def start_review(question: str, price, factsheet, kid, peer_factsheets, js
         return Outcome(NEEDS_AI)
     if (refused := limits.start()):
         return Outcome(refused)
+    folder = Path(tempfile.mkdtemp(prefix="fund-review-"))
     try:
         if on_step:
             on_step("Reading the documents…")
-        intake = await reader(Path(factsheet), Path(kid) if kid else None, [Path(p) for p in peers])
-    except Exception as e:                       # noqa: BLE001
-        traceback.print_exc()
-        return Outcome(f"**The documents could not be read** ({type(e).__name__}). Check they are PDF or Word files.")
-    finally:
-        limits.finish()
-    message = ("**Check what the agent read.** Correct anything wrong in the **Value** column, then click "
-               "**Confirm and run**.")
-    failed = [f["message"] for f in intake.get("flags", []) if f.get("level") == "blocking"]
-    if failed:
-        message += ("\n\n**The Extractor Agent could not read the documents**, so the values below are empty. "
-                    "Fill them in, or try again later. (" + "; ".join(failed)[:300] + ")")
-    return Outcome(message, state={"intake": intake, "price": price, "paid": True})
-
-
-async def confirm_review(question: str, rows: list[list[str]], state: dict, limits: AiLimits,
-                         on_step: Progress | None = None, out_root: Path = RUNS, runner=run_review) -> Outcome:
-    """ "Confirm and run": check the confirmed values, write the inputs and run the review """
-    intake = (state or {}).get("intake")
-    if not intake:
-        return Outcome("Please click **Run the review** first, so the agent can read the documents.")
-    values = [row[1] for row in rows]
-    built = build_inputs(intake, values)
-    if built.problems:
-        return Outcome("**Please fix these values before the run:**\n" + "\n".join(f"- {p}" for p in built.problems),
-                       state=state)
-    paid = state.get("paid", False)
-    if (refused := limits.start(count=not paid)):
-        return Outcome(refused, state=state)
-    folder = Path(tempfile.mkdtemp(prefix="fund-review-"))
-    try:
+        try:
+            intake = await reader(Path(factsheet), Path(kid) if kid else None, [Path(p) for p in peers])
+        except Exception as e:                   # noqa: BLE001
+            traceback.print_exc()
+            return Outcome(f"**The documents could not be read** ({type(e).__name__}). Check they are PDF or Word files.")
+        # No person checks the values: code checks each one against the documents and flags what it cannot confirm
+        built = self_check(intake)
+        if built.problems:
+            failed = [f["message"] for f in intake.get("flags", []) if f.get("level") == "blocking"]
+            why = (" The Extractor Agent could not read the documents (" + "; ".join(failed)[:300] + ")."
+                   if failed else "")
+            return Outcome("**The review could not run: these values were not found in the documents.**" + why
+                           + "\n" + "\n".join(f"- {x}" for x in built.problems)
+                           + "\n\nUpload the fund's factsheet (and its KID for the objective), or use the JSON files "
+                             "under Advanced.")
         write_inputs(built, folder)
-        prepare_inputs([state["price"]], folder)
-        outcome = await _run_controller(folder, question, False, on_step, out_root, runner,
-                                        intake=intake | {"rows": built.rows})
+        prepare_inputs([price], folder)
+        return await _run_controller(folder, question, False, on_step, out_root, runner,
+                                     intake=intake | {"rows": built.rows,
+                                                      "flags": intake.get("flags", []) + built.flags})
     finally:
         limits.finish()
         shutil.rmtree(folder, ignore_errors=True)
-    outcome.state = state | {"paid": False}
-    return outcome
 
 
 async def with_progress(work: Callable[[Progress], Awaitable[Outcome]]):
@@ -382,7 +365,6 @@ CSS = f"""
 def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
     limits = limits or AiLimits(load_settings().web)
     with gr.Blocks(title="Fund Performance Review") as ui:
-        state = gr.State({})
         gr.HTML("<div class='fp-header'><h1>Fund performance review</h1><p>Code does the maths and the ratings, AI "
                 "reads and writes, and a person makes the call.</p></div>")
         gr.Markdown(PUBLIC_DATA, elem_classes="fp-notice")
@@ -408,48 +390,18 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             use_demo = gr.Button("Use the demo files (made-up fund)", size="sm")
         run = gr.Button("Run the review", variant="primary")
         progress = gr.Markdown(elem_classes="fp-progress")
-        with gr.Group(visible=False) as confirm_box:
-            values = gr.Dataframe(headers=COLUMNS, datatype=["str"] * 4, interactive=True, static_columns=[0, 2, 3],
-                                  wrap=True, column_widths=["28%", "24%", "20%", "28%"],
-                                  label="What the agent read (edit the Value column)")
-            confirm = gr.Button("Confirm and run", variant="primary")
         status = gr.Markdown()
         with gr.Row():
             pdf = gr.File(label="PDF report", interactive=False)
             log = gr.File(label="Run log (log.json)", interactive=False)
 
-        async def on_run(q, p, f, k, pr, j, off, st):
-            keep = gr.update()
-            yield "Starting…", keep, gr.update(visible=False), keep, "", None, None, st
+        async def on_run(q, p, f, k, pr, j, off):
+            yield "Starting…", "", None, None
             async for kind, item in with_progress(lambda say: start_review(q, p, f, k, pr, j, off, limits, say)):
                 if kind == "progress":
-                    yield item, keep, keep, keep, keep, keep, keep, keep
-                elif item.state.get("intake"):                     # documents read: show the table to confirm
-                    gaps = missing(item.state["intake"])
-                    note = f"⚠ Please fill in: {', '.join(gaps)}." if gaps else "All required values are filled in."
-                    yield (note, table(item.state["intake"]), gr.update(visible=True), gr.update(interactive=not gaps),
-                           item.message, None, None, item.state)
+                    yield item, gr.update(), gr.update(), gr.update()
                 else:
-                    yield "", keep, gr.update(visible=False), keep, item.message, item.pdf, item.log, {}
-
-        async def on_confirm(q, rows, st):
-            rows = rows.values.tolist() if hasattr(rows, "values") else rows
-            yield "Starting…", gr.update(), None, None, st
-            async for kind, item in with_progress(lambda say: confirm_review(q, rows, st, limits, say)):
-                if kind == "progress":
-                    yield item, gr.update(), gr.update(), gr.update(), gr.update()
-                else:
-                    yield "", item.message, item.pdf, item.log, item.state
-
-        def on_edit(rows, st):
-            """ Keep "Confirm and run" off while a required value is empty """
-            intake = (st or {}).get("intake")
-            if not intake:
-                return gr.update(), gr.update()
-            rows = rows.values.tolist() if hasattr(rows, "values") else rows
-            gaps = missing(intake, [r[1] for r in rows])
-            note = f"⚠ Please fill in: {', '.join(gaps)}." if gaps else "All required values are filled in."
-            return gr.update(interactive=not gaps), note
+                    yield "", item.message, item.pdf, item.log
 
         def on_demo():
             d = demo_files()
@@ -457,11 +409,8 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
 
         private = {"api_visibility": "private"}         # the page is the only way in, with its limits
         use_demo.click(on_demo, outputs=[price, factsheet, kid, peer, json_files, offline, advanced], **private)
-        run.click(on_run, inputs=[question, price, factsheet, kid, peer, json_files, offline, state],
-                  outputs=[progress, values, confirm_box, confirm, status, pdf, log, state], **private)
-        values.change(on_edit, inputs=[values, state], outputs=[confirm, progress], **private)
-        confirm.click(on_confirm, inputs=[question, values, state], outputs=[progress, status, pdf, log, state],
-                      **private)
+        run.click(on_run, inputs=[question, price, factsheet, kid, peer, json_files, offline],
+                  outputs=[progress, status, pdf, log], **private)
     return ui
 
 

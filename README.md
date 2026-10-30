@@ -24,7 +24,7 @@ The build specification is [`docs/FUND_PERFORMANCE_AGENT_SPEC.md`](docs/FUND_PER
 Upload: price file (CSV/Excel) + factsheet (PDF/Word) [+ KID, peer factsheets] + a question   or, Advanced: JSON files
    │
    ├─ Task Planner (AI)       turns the question into tasks from a fixed menu; code keeps all four ratings
-   ├─ Extractor Agent (AI)    reads the documents; you confirm the values in a table before anything is scored
+   ├─ Extractor Agent (AI)    reads the documents; code finds every value in them and flags any it cannot
    ├─ Approved peers          config/peers.yaml per benchmark, used when you give no peer (factsheets in data/peers/)
    ├─ Data checks (code)      dates, gaps, repeated prices, currency, pre-launch prices
    ├─ Mandate Agent (AI)      reads the objective; the profile wins on any disagreement
@@ -58,7 +58,7 @@ Click **Use the demo files (made-up fund)** and **Run the review** to try it wit
 can leave them blank (no login).
 
 For a real fund: add the price file and the factsheet (KID and peer factsheets optional; for an S&P 500 fund the
-approved peers are used), untick **Offline**, check the table of values the agent read, then **Confirm and run**.
+approved peers are used), untick **Offline** and click **Run the review**; code checks every value the agent read.
 Put the approved peers' factsheets in `data/peers/` (gitignored; found by the ISIN).
 
 From the command line:
