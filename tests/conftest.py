@@ -82,7 +82,7 @@ def _no_approved_peer_files(request, tmp_path_factory, monkeypatch):
 def _no_real_ai_calls(request, monkeypatch):
     """ Unit tests never reach OpenAI: an agent whose model call is not mocked fails like an unreachable service
     (the code's fallback is then what is tested). Live tests (--run-live) are left alone """
-    if "live" in request.keywords:
+    if "live" in request.keywords or request.node.path.name == "test_agent_base.py":   # that file tests the helper
         return
     from agents.exceptions import AgentsException
     import fund_performance.agents.base as base
