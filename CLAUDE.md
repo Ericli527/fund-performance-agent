@@ -127,5 +127,10 @@ Instructions for Claude Code in this project. The build specification is
   box has "Analyst's comments" and "If you disagree with the suggested verdict, why?".
 - Report: 5 pages (Summary; Evidence dashboard; Mandate and performance; Value, fees and AoV; Appendix).
   Dashboard is code only (`evidence.py`, charts): t-test level and min points in `config/settings.yaml`.
+- Agent team (spec 8.6): Task Planner (menu choices only; code keeps all four ratings; default plan offline or on
+  failure), Reporting Agents (one draft per angle: board, analyst, manager meeting; facts only; must end with code's
+  verdict sentence; code's checks), Judge (5 checklist items true/false + preferred; no text, numbers or ratings).
+  Code scores (figures match + checklist, out of 6), picks, sends back once (settings.yaml drafting.max_rewrites),
+  else code's conclusion with a flag. Unit tests can never reach OpenAI (conftest blocks the real client).
 - Value and Fees reasons (findings, report, page) give the peer return gap and the fee gap (`plain.py`,
   from the figures the scorecard keeps in `Pillar.values`).

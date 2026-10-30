@@ -337,7 +337,8 @@ The report must state clearly: "This is an indicative assessment from public dat
 
 All agents return structured JSON validated with Pydantic. Use the OpenAI Agents SDK (or LangGraph). Temperature low (0 to 0.3).
 - Models per agent in `config/models.yaml` (nothing hard-coded): Extractor, Mandate, Planner and Search `gpt-5.4-mini`;
-  Oversight Analyst `gpt-5.4`; Evaluator `gpt-6.1-sol` with its own strict checking prompt. `FUND_MODEL_<AGENT>` may
+  Oversight Analyst `gpt-5.4`; Evaluator `gpt-6.1-sol` with its own strict checking prompt; Task Planner
+  `gpt-5.4-mini`; Reporting Agents `gpt-5.4`; Judge `gpt-6.1-sol` (a different model from the Reporting Agents). `FUND_MODEL_<AGENT>` may
   override one agent's model for testing (it must be listed in the file). Temperature 0 is sent only if the config
   says the model supports it; otherwise a low reasoning effort is sent.
 - The API key is read from the `OPENAI_API_KEY` environment variable, loaded from `.env` (gitignored) by python-dotenv.
@@ -357,6 +358,9 @@ All agents return structured JSON validated with Pydantic. Use the OpenAI Agents
 | Search (parallel) | One query each, or the text of one approved page fetched by code | `{query, summary, url, date}` (for a page, the URL comes from the config) | One search or page each, no retries |
 | Oversight Analyst | search summaries + facts JSON (+ code's findings and actions, not to repeat) | Market context only (v1); the findings and the actions are written by code | No figures, direction only, [n] citations, at most 3 sentences; 2 rewrites after code's checks |
 | Evaluator | AI text (market context) + facts JSON + search summaries | `{pass: bool, issues: [..]}` (Section 8.4) | Its own one rewrite, then template fallback |
+| Task Planner | The question + the fund's public details | Plan from a fixed menu: report type, focus order of the four questions, market context yes/no, manager questions yes/no, drafting angles (Section 8.6) | Menu only; code keeps all four ratings; default plan offline or on failure |
+| Reporting Agents (parallel) | Facts JSON + one angle (board, analyst, meeting with the manager) + code's verdict sentence | One draft of the suggested conclusion, 3 to 5 sentences (Section 8.6) | Figures only from the facts; code's number, label, rating and style checks; must end with code's verdict sentence |
+| Judge | Facts JSON + the drafts that passed code's checks | Per draft: 5 checklist items true/false with issues; the preferred draft (Section 8.6) | No text, no numbers, no ratings; code scores, picks and sends back once |
 
 ### 8.1 Oversight Analyst system prompt (core rules)
 Who writes what in v1 (owner decision after the full Test 1 runs: the data-note insights are fixed facts, and
@@ -510,9 +514,11 @@ Flow:
 
 ### 8.5 Workflow controller (code)
 A plain Python function (not an AI agent, `controller.py`; `run_report.py` is its command line) that runs:
-read files -> extractor (only without `factsheet_performance.json`) -> data checks -> mandate -> calculator (with
-factsheet precedence) -> scorecard -> approved sources, planner and search (parallel) -> vetting -> analyst ->
-number, label, rating and wording checks -> evaluator -> report -> email (off by default).
+read files -> task plan -> extractor (only without `factsheet_performance.json`) -> approved peers -> data checks
+-> mandate -> calculator (with factsheet precedence) -> scorecard and evidence -> approved sources, planner and
+search (parallel; only if the plan needs market context) -> vetting -> analyst -> number, label, rating and wording
+checks -> evaluator -> reporting agents (parallel) -> code's checks and the judge -> report -> email (off by
+default).
 - The extractor runs before the data checks because the repeated-price check compares with the factsheet.
 - Stops the run with a clear message (`RunStopped`, printed, exit code 1, log.json still written) only when the
   fund cannot be scored: no folder, no or an invalid fund profile or input file, no or an unreadable price file,
@@ -521,7 +527,8 @@ number, label, rating and wording checks -> evaluator -> report -> email (off by
   and 6.5), so the report says what to fix.
 - Enforces limits from config: `limits.max_web_searches`, `limits.max_analyst_rewrites` (code checks) and
   `limits.max_evaluator_rewrites` (Evaluator) in thresholds.yaml, and a
-  timeout for each AI step (`config/settings.yaml`: extractor 180 s, mandate 90 s, research 240 s, narrative 300 s).
+  timeout for each AI step (`config/settings.yaml`: extractor 180 s, mandate 90 s, research 240 s, narrative 300 s,
+  task planner 60 s, drafting 300 s); `drafting.max_rewrites` (1) in settings.yaml.
   A step that runs over is handled like a failed step: mandate -> CHECK DATA (blocking flag); research -> no market
   context (warning); narrative -> template (warning); extractor -> calculated figures only (warning).
 - Logs each step to `runs/<timestamp>/log.json`: the run (folder, question, offline, start, end, status, message),
@@ -534,6 +541,34 @@ number, label, rating and wording checks -> evaluator -> report -> email (off by
   failed email is logged and never loses the report.
 - Tests replace every model call, page fetch and email with stand-ins (`Runners`), so the full flow runs with no
   network.
+
+### 8.6 Task Planner, Reporting Agents and the Judge (the agent team)
+
+The framework: a planner breaks the request into tasks, specialists do one job each, reporting agents write drafts
+from different angles, a judge scores them against a checklist and picks the best or sends them back, and the
+analyst signs off. Code keeps every number, rating and the final pick.
+
+- **Task Planner** (`agents/task_planner.py`): turns the question into a plan from a fixed menu (report type:
+  quarterly review, fee, performance or mandate question; focus order of the four questions; market context yes/no;
+  manager questions yes/no; angles). Code checks it: all four questions are always measured and rated (named ones
+  first), angles come from the menu (at least one). The plan decides whether market research runs, whether manager
+  questions are listed, and which drafts are written. Offline, on failure or timeout: the default plan (everything).
+  The task list is logged and shown in the appendix.
+- **Reporting Agents** (`agents/reporter.py`): one per angle in the plan, in parallel. Each drafts the suggested
+  conclusion from the facts JSON only, 3 to 5 plain sentences, ending with code's verdict sentence word for word.
+  Code checks each draft: number guard, label and rating guards, no web addresses, no minus after "behind", at most
+  5 sentences, the verdict sentence at the end.
+- **Judge** (`agents/judge.py`): sees only the drafts that passed code's checks. For each it marks true or false:
+  key points covered, conclusion clear, plain English, no rating change, supported by the facts, with issues, and
+  names its preferred draft. It writes no text, gives no number and changes no rating.
+- **Code's pick:** score = figures match (code) + the Judge's passed items, out of 6. Only a draft that passes all 6
+  can be chosen: the highest score, then the Judge's preferred draft, then the plan's angle order. If none passes,
+  every draft is sent back once with all its issues and judged again; if still none passes (or the Judge cannot
+  answer), code's own conclusion (`conclusion.py`) is used with a warning flag ("AI drafts failed the checklist
+  (...); code's conclusion used").
+- **Report:** page 1 says who wrote the conclusion ("AI draft for the oversight analyst, chosen by the Judge and
+  code" or code). The appendix lists the plan and each draft's score, failed items and which was chosen; facts.json
+  keeps the plan, every draft and code's own text (`code_text`).
 
 ## 9. Report (Step 7): 4 main pages plus an appendix
 
@@ -671,6 +706,9 @@ Keep the manager's published Value Assessment Report out of the agent's inputs. 
     caught, and the comparison with Fidelity's 2025 Value Assessment (consistent conclusions). Tests 2 to 4 wait
     for their input files.
 
+13. **Agent team** (Section 8.6): Task Planner, Reporting Agents (one per angle, in parallel) and the Judge, with
+    code checking every draft, scoring and picking; code's conclusion as the fallback. Unit tests mock every call.
+
 Definition of done: all unit tests pass; Test 1 and Test 2 expected values reproduced; no rating can be changed by the AI; every figure in the PDF has a source; the Evaluator rejects a bad draft in tests.
 
 ---
@@ -690,6 +728,7 @@ Definition of done: all unit tests pass; Test 1 and Test 2 expected values repro
 | **v1: next two days** | Steps 1 to 11 above on Test 1 (Fidelity Index US Fund). Value and Fees show "Add peer" when no peer is supplied. |
 | **v2: next step** | Run Tests 2, 3 and 4: Test 2 (Irish fund, currency trap), Test 3 (dual objective), short history and an active fund. (Peers for value and fees are built: approved peers per benchmark.) |
 | **v2: evidence** | Rolling 12-month tracking difference from monthly index prices; up/down capture for active funds; fee vs 5-year return chart for peers; AI rewording of the manager questions, only if they pass the checks. |
+| **v2: agent team** | Holdings and positions from an internal database for the Extractor (mandate and risk checks on holdings); research specialists per area once their outputs can be checked by code like the drafts. |
 | **v2: insights** | AI-written insight findings, once canonical phrasing per data note is defined (v1: code writes all findings; the AI writes only the market context). |
 | **v2: peers** | Rate against a sector median OCF (e.g. IA North America index funds), as Fidelity's own Assessment of Value does; v1 shows `sector_average_ocf` from `config/peers.yaml` as context only. |
 | **v2: share classes** | Optional share-class table input (class, OCF, minimum investment, who can buy it) for the AoV "Classes of units" factor, which is "Not assessed" without it. |

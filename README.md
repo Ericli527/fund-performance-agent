@@ -21,8 +21,9 @@ The build specification is [`docs/FUND_PERFORMANCE_AGENT_SPEC.md`](docs/FUND_PER
 ## How it works
 
 ```
-Upload: price file (CSV/Excel) + factsheet (PDF/Word) [+ KID, peer factsheets]   or, Advanced: JSON files
+Upload: price file (CSV/Excel) + factsheet (PDF/Word) [+ KID, peer factsheets] + a question   or, Advanced: JSON files
    │
+   ├─ Task Planner (AI)       turns the question into tasks from a fixed menu; code keeps all four ratings
    ├─ Extractor Agent (AI)    reads the documents; you confirm the values in a table before anything is scored
    ├─ Approved peers          config/peers.yaml per benchmark, used when you give no peer (factsheets in data/peers/)
    ├─ Data checks (code)      dates, gaps, repeated prices, currency, pre-launch prices
@@ -34,6 +35,9 @@ Upload: price file (CSV/Excel) + factsheet (PDF/Word) [+ KID, peer factsheets]  
    ├─ Research                approved pages fetched by code + up to 3 web searches (AI), vetted by code
    ├─ Findings and actions    written by code
    ├─ Market context (AI)     checked by code, then by the Evaluator Agent (AI)
+   ├─ Reporting Agents (AI)   draft the conclusion for the board, the analyst and the manager meeting, in parallel
+   ├─ Judge (AI) + code       code checks every figure; the Judge marks a checklist; code scores and picks the best,
+   │                          or sends the drafts back once; code's own conclusion is the fallback
    └─ Report (code)           5-page PDF: summary, evidence dashboard, mandate and performance, value and fees,
                               appendix; optional email (Resend)
 ```

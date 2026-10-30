@@ -14,7 +14,7 @@ comparison with Fidelity's own 2025 Value Assessment. The spec is `docs/FUND_PER
 - **Comparison with Fidelity's 2025 Value Assessment: the conclusions are consistent.** The fund tracks its
   index closely and its fee is low: Fidelity says "Good value", this review suggests "Satisfied".
 - **Tests 2, 3 and 4 were not run:** their input files have not been supplied yet (see the end).
-- **Automated tests:** 509 passed, 6 skipped (the live AI tests, run with `pytest --run-live`).
+- **Automated tests:** 523 passed, 6 skipped (the live AI tests, run with `pytest --run-live`).
 
 ## Test 1: Fidelity Index US Fund P Acc (GB00BJS8SH10), figures to 30 Sep 2026
 
@@ -201,6 +201,16 @@ PYTHONPATH=src python -m fund_performance.run_report --data data/test1 --from-do
 
 The second command saves `extraction_check.txt` in the run folder with each value the Extractor read and every value
 that differs from the typed JSON files. Result and the Extractor's mistakes: *to be recorded after the live run.*
+
+## Agent team: Task Planner, Reporting Agents and Judge (live test: to be run)
+
+Built to match the team framework (spec Section 8.6): the Task Planner turns the question into tasks, Reporting
+Agents draft the conclusion for the board, the analyst and the manager meeting in parallel, and the Judge marks each
+draft on a 5-item checklist; code checks the figures, scores, picks the best or sends the drafts back once, and
+falls back to its own conclusion. Unit tests (mocked) pass: the chosen draft becomes the suggested conclusion, a
+fee-question plan skips the market research, and with no planner, reporter or judge the run uses the default plan
+and code's conclusion. Live result (which draft wins, how often drafts are sent back): *to be recorded after the
+live run.*
 
 ## Tests 2, 3 and 4
 
