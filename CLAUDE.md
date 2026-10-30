@@ -150,10 +150,12 @@ Instructions for Claude Code in this project. The build specification is
   both PDFs: Analyst view = Detailed primary, Management view = Executive primary (no rerun). Evidence dashboard
   (Appendix A) is code only (`evidence.py`, charts): t-test level and min points in `config/settings.yaml`.
 - Agent team (spec 8.6): Task Planner (menu choices only; code keeps all four ratings; default plan offline or on
-  failure), Reporting Agents (one draft per angle: board, analyst, manager meeting; facts only; must end with code's
-  verdict sentence; code's checks), Judge (5 checklist items true/false + preferred; no text, numbers or ratings).
-  Code scores (figures match + checklist, out of 6), picks, sends back once (settings.yaml drafting.max_rewrites),
-  else code's conclusion with a flag. Unit tests can never reach OpenAI (conftest blocks the real client).
+  failure), Reporting Agent (explains the verified findings for one angle; facts only; must end with code's verdict
+  sentence; code's checks), Judge (`ReviewResult`: approved, factual_issue, security_issue, conclusion_reasonable,
+  clear_for_analysts, feedback; no text, numbers or ratings). Code decides: security -> code's conclusion; factual,
+  reasoning or not approved -> one targeted rewrite; else pass (clarity alone never rejects). Each agent is a plain
+  `Agent(name, instructions, output_type, **model_kwargs(...))`. Unit tests can never reach OpenAI (conftest blocks
+  the real client).
 - Value and Fees reasons (findings, report, page) give the peer return gap and the fee gap (`plain.py`,
   from the figures the scorecard keeps in `Pillar.values`).
 - Real-fund demo library (Stage 4B, `demos.py`): metadata in `demo/library/*.yaml` (no document figures); inputs and

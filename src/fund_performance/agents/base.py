@@ -41,12 +41,17 @@ def model_settings(spec: ModelSpec, tool_choice: str | None = None) -> ModelSett
     return ModelSettings(reasoning=Reasoning(effort=spec.reasoning_effort), tool_choice=tool_choice)
 
 
-def build_agent(name: str, instructions: str, output_type: type[BaseModel], agent: AgentName,
-                tools: list | None = None, tool_choice: str | None = None) -> Agent:
+def model_kwargs(agent: AgentName, tool_choice: str | None = None) -> dict:
+    """ The agent's model and settings from config/models.yaml, for Agent(..., **model_kwargs("judge")) """
     load_env()
     model, spec = load_models().for_agent(agent)
-    return Agent(name=name, instructions=instructions, model=model, output_type=output_type,
-                 model_settings=model_settings(spec, tool_choice), tools=tools or [])
+    return {"model": model, "model_settings": model_settings(spec, tool_choice)}
+
+
+def build_agent(name: str, instructions: str, output_type: type[BaseModel], agent: AgentName,
+                tools: list | None = None, tool_choice: str | None = None) -> Agent:
+    return Agent(name=name, instructions=instructions, output_type=output_type, tools=tools or [],
+                 **model_kwargs(agent, tool_choice))
 
 
 async def run_with_fresh_client(agent: Agent, prompt: str) -> Any:

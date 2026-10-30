@@ -45,7 +45,7 @@ from agents import trace
 from fund_performance.agents.base import AI_CALLS, api_key_present
 from fund_performance.presentation import MISSING_MEANING, download_copy, missing_evidence
 from fund_performance.demos import Demo, find_demo, matching_demo, return_checks, shown_demos
-from fund_performance.report import ANGLE_WORDS, REPORT_TYPE_WORDS
+from fund_performance.report import ANGLE_WORDS, JUDGE_WORDS, REPORT_TYPE_WORDS
 from fund_performance.intake import read_documents, self_check, write_inputs
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -365,9 +365,10 @@ def summary_markdown(result: RunResult) -> str:
                       f"{', '.join(plan.get('focus', [])[:2])}._"]
     drafts = facts.get("drafts") or []
     if drafts:
-        lines += ["", "**Drafts and the Judge's checklist**", "| Draft for | Checks passed | Chosen |", "|---|---|---|"]
-        lines += [f"| {ANGLE_WORDS.get(d['angle'], d['angle'])} | {d['score']} of {d['max_score']} | "
-                  f"{'✅' if d['chosen'] else ''} |" for d in drafts]
+        lines += ["", "**Draft and the Judge's review**", "| Draft for | Judge's decision | Reason | Chosen |",
+                  "|---|---|---|---|"]
+        lines += [f"| {ANGLE_WORDS.get(d['angle'], d['angle'])} | {JUDGE_WORDS.get(d.get('decision'), '')} | "
+                  f"{cell(d.get('reason', ''))} | {'✅' if d['chosen'] else ''} |" for d in drafts]
     lines += ["", "| Question | Rating | Why |", "|---|---|---|"]
     lines += [f"| {p['name']} | {RATING_WORDS.get(p['rating'], p['rating'])} | {cell(reasons.get(p['name'], ''))} |"
               for p in card.get("pillars", [])]

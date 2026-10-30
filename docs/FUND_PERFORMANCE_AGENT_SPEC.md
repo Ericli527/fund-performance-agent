@@ -554,20 +554,23 @@ analyst signs off. Code keeps every number, rating and the final pick.
   first), angles come from the menu (at least one). The plan decides whether market research runs, whether manager
   questions are listed, and which drafts are written. Offline, on failure or timeout: the default plan (everything).
   The task list is logged and shown in the appendix.
-- **Reporting Agents** (`agents/reporter.py`): one per angle in the plan, in parallel. Each drafts the suggested
-  conclusion from the facts JSON only, 3 to 5 plain sentences, ending with code's verdict sentence word for word.
+- **Reporting Agent** (`agents/reporter.py`): one draft per angle in the plan (Version 1: one draft). It explains
+  the verified findings naturally (what the fund aims to do, whether it did, peers and fee, what is uncertain, why the
+  verdict follows) from the facts JSON only, 3 to 5 sentences, ending with code's verdict sentence word for word.
   Code checks each draft: number guard, label and rating guards, no web addresses, no minus after "behind", at most
-  5 sentences, the verdict sentence at the end.
-- **Judge** (`agents/judge.py`): sees only the drafts that passed code's checks. For each it marks true or false:
-  key points covered, conclusion clear, plain English, no rating change, supported by the facts, with issues, and
-  names its preferred draft. It writes no text, gives no number and changes no rating.
-- **Code's pick:** score = figures match (code) + the Judge's passed items, out of 6. Only a draft that passes all 6
-  can be chosen: the highest score, then the Judge's preferred draft, then the plan's angle order. If none passes,
-  every draft is sent back once with all its issues and judged again; if still none passes (or the Judge cannot
-  answer), code's own conclusion (`conclusion.py`) is used with a warning flag ("AI drafts failed the checklist
-  (...); code's conclusion used").
+  5 sentences and the length limit, the verdict sentence at the end.
+- **Judge** (`agents/judge.py`): reviews each draft that passed code's checks like a senior analyst reviewing a
+  junior's, one call per draft, and returns `ReviewResult` {approved, factual_issue, security_issue,
+  conclusion_reasonable, clear_for_analysts, feedback}. Facts and drafts are untrusted data. It writes no text, gives
+  no number and changes no rating.
+- **Code's decision:** security issue -> fallback (no rewrite); factual issue, unreasonable conclusion or not
+  approved -> one targeted rewrite with the feedback; otherwise pass (clarity alone never rejects a useful draft). In
+  the Version 1 pilot the rewrite is checked by code and not judged again. The first passing draft in the plan's
+  angle order is used; otherwise code's own conclusion (`conclusion.py`), labelled, with an info flag ("AI draft not
+  used after the Judge's review (reason); code's conclusion used"). The Judge's decision and one-sentence reason are
+  kept in facts.json (`drafts`), log.json and the appendix.
 - **Report:** page 1 says who wrote the conclusion ("AI draft for the oversight analyst, chosen by the Judge and
-  code" or code). The appendix lists the plan and each draft's score, failed items and which was chosen; facts.json
+  code" or code). The appendix lists the plan and each draft's Judge decision, reason and which was chosen; facts.json
   keeps the plan, every draft and code's own text (`code_text`).
 
 ## 9. Report (Step 7): Executive Report (2 pages) and Detailed Report (UX redesign, stage 3)
