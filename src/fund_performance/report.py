@@ -171,10 +171,15 @@ def _page1(inp: ReportInputs) -> str:
         for name, pillar in card.pillars.items())
     findings = "".join(f"<li>{escape(t)}</li>" for t in inp.narrative.output.key_findings)
     actions = "".join(f"<li>{escape(t)}</li>" for t in inp.narrative.output.action_texts)
-    conclusion = (facts.get("suggested_conclusion") or {}).get("text", "")
+    concl = facts.get("suggested_conclusion") or {}
+    conclusion = concl.get("text", "")
+    who = (f"AI draft for the {ANGLE_WORDS.get(concl.get('angle'), concl.get('angle'))}, chosen by the Judge and code; "
+           "draft for the analyst" if concl.get("source") == "ai" else "draft for the analyst")
     points = "".join(f"<li>{escape(x)}</li>" for x in facts.get("judgement_points", []))
     questions = "".join(f"<li>{escape(x)}</li>" for x in facts.get("manager_questions", []))
-    origin = ("The conclusion, points, findings, actions and questions are written by code from the scorecard and "
+    origin = ("The conclusion is an AI draft checked by code and the Judge (appendix); the points, findings, actions "
+              "and questions are written by code." if concl.get("source") == "ai" else
+              "The conclusion, points, findings, actions and questions are written by code from the scorecard and "
               "data notes.") + (
         f" {inp.run_note}." if inp.run_note else
         " The market context (page 4) is written by AI from the cited sources and checked by code and a separate "
@@ -194,7 +199,7 @@ def _page1(inp: ReportInputs) -> str:
 <table class="facts"><tr><td class="label">Question</td><td>{escape(inp.question)}</td></tr></table>
 <table class="verdict"><tr><td class="vlabel" style="background-color:{_verdict_colour(card.verdict)}">Suggested verdict</td>
 <td class="vtext"><b>{escape(verdict_name(card.verdict))}</b>: {escape(verdict_meaning(card.verdict))}<br/><span class="small">From fixed rules on the ratings below. A suggestion: the analyst makes the judgement and signs below.</span></td></tr></table>
-<p class="concl"><b>Suggested conclusion (draft for the analyst).</b> {escape(conclusion)}</p>
+<p class="concl"><b>Suggested conclusion ({escape(who)}).</b> {escape(conclusion)}</p>
 <table class="grid ratings"><tr><th width="27%">Question</th><th width="13%">Rating</th><th>Why</th></tr>{rows}</table>
 <table width="100%"><tr><td width="50%" valign="top"><h3>Points for your judgement</h3><ul class="tight">{points}</ul></td>
 <td width="2%"></td><td valign="top"><h3>Questions to ask the manager</h3><ul class="tight">{questions}</ul></td></tr></table>
@@ -720,6 +725,33 @@ def _calculated_sharpe(inp: ReportInputs) -> str:
             f"comparable with the factsheet Sharpe ratio on page 2, which uses its own risk-free rate and period.</p>")
 
 
+ANGLE_WORDS = {"board": "board", "analyst": "oversight analyst", "manager_meeting": "meeting with the manager"}
+REPORT_TYPE_WORDS = {"quarterly_review": "quarterly oversight review", "fee_question": "fee question",
+                     "performance_question": "performance question", "mandate_question": "mandate question"}
+
+
+def _plan_and_drafts(facts: dict, compact: bool = False) -> str:
+    """ The Task Planner's plan and the drafts with the Judge's checklist and code's score """
+    plan = facts.get("plan") or {}
+    lines = []
+    if plan:
+        who = "Task Planner Agent" if plan.get("source") == "planner" else plan.get("source", "default")
+        lines.append(f"Plan ({who}): {REPORT_TYPE_WORDS.get(plan.get('report_type'), plan.get('report_type'))}; "
+                     f"focus {', '.join(plan.get('focus', [])[:2])}; market context "
+                     f"{'yes' if plan.get('market_context') else 'no'}; drafts for "
+                     + ", ".join(ANGLE_WORDS.get(a, a) for a in plan.get("angles", [])) + ".")
+    for d in facts.get("drafts", []):
+        failed = [k.replace("_", " ") for k, v in d["checks"].items() if not v]
+        lines.append(f"Draft for the {ANGLE_WORDS.get(d['angle'], d['angle'])}: {d['score']} of {d['max_score']} "
+                     f"checks{' (rewritten once)' if d.get('rewritten') else ''}"
+                     + (f"; failed: {', '.join(failed)}" if failed else "") + ("; chosen" if d["chosen"] else "") + ".")
+    if facts.get("drafts") and not any(d["chosen"] for d in facts["drafts"]):
+        lines.append("No draft passed every check, so code's conclusion is used.")
+    if compact and len(lines) > 2:                       # the plan and the chosen draft (or the fallback) only
+        lines = lines[:1] + [x for x in lines[1:] if x.endswith("chosen.") or x.startswith("No draft")][:1]
+    return "".join(f"<li>{escape(x)}</li>" for x in lines)
+
+
 def plain_text(html: str) -> str:
     return re.sub(r"<[^>]+>", " ", html)
 
@@ -731,7 +763,7 @@ def _appendix(inp: ReportInputs, compact: bool, main_text: str = "") -> str:
     by_level = ""
     for level, title in (("blocking", "Blocking (Check data)"), ("warning", "Warnings"), ("info", "For the record")):
         items = [f for f in checks if f.level == level]
-        more = len(items) - 6 if compact and level == "info" else 0
+        more = len(items) - 6 if compact and level in ("info", "warning") else 0
         if more > 0:
             items = items[:6]
         if items:
@@ -751,6 +783,7 @@ def _appendix(inp: ReportInputs, compact: bool, main_text: str = "") -> str:
     thresholds = "".join(f"<li>{escape(line)}</li>" for line in _threshold_lines(inp.thresholds)[: 4 if compact else None])
     limits = "".join(f"<li>{escape(x)}</li>" for x in KNOWN_LIMITATIONS)
     sharpe = _calculated_sharpe(inp)
+    plan = _plan_and_drafts(inp.facts, compact)
     rest = f"{by_level}{excl}{sources}{sharpe}{thresholds}{limits}{PUBLIC_DATA_NOTE}{DISCLAIMER}"
     glossary = "".join(f"<li><b>{escape(term)}</b>: {escape(text)}</li>"
                        for term, text in used_in(main_text + plain_text(rest)).items())
@@ -759,6 +792,7 @@ def _appendix(inp: ReportInputs, compact: bool, main_text: str = "") -> str:
 <h3>Data checks and flags</h3>{by_level or '<p class="small">No flags.</p>'}
 <h3>Excluded web sources</h3><ul class="tight small">{excl}</ul>
 <h3>Sources</h3><ul class="tight small">{sources}</ul>
+{f'<h3>Plan and drafts</h3><ul class="tight small">{plan}</ul>' if plan else ''}
 {sharpe}<h3>Thresholds used (illustrative, to be agreed with the oversight team)</h3><ul class="tight small">{thresholds}</ul>
 <h3>Glossary (terms used in this report)</h3><ul class="tight small">{glossary}</ul>
 <h3>Known limitations</h3><ul class="tight small">{limits}</ul>

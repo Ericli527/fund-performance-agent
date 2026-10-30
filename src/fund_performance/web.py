@@ -28,6 +28,7 @@ import gradio as gr
 from fund_performance.config import WebSettings, load_settings
 from fund_performance.controller import DEFAULT_QUESTION, RunResult, RunStopped, run_review
 from fund_performance.plain import verdict_meaning, verdict_name
+from fund_performance.report import ANGLE_WORDS, REPORT_TYPE_WORDS
 from fund_performance.intake import COLUMNS, build_inputs, missing, read_documents, table, write_inputs
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -65,7 +66,8 @@ FILES_TABLE = """### Which files do I need?
 | JSON files | Advanced, optional | Pre-typed data that skips AI reading |"""
 TAGS = {"Code": "#1f3a5f", "AI": "#6d4c9f", "Person": "#2e7d32"}
 HOW_STEPS = [
-    (["Person"], "You provide public documents and a price file."),
+    (["Person", "AI"], "You provide public documents, a price file and a question; the Task Planner turns the question "
+                       "into tasks (which questions come first, what to research, who the summary is for)."),
     (["AI", "Person", "Code"], "<b>Read and check:</b> the Extractor reads the documents and you confirm the values; "
                                "code checks currency, pricing time (noon vs close), gaps, repeated prices and "
                                "factsheet cross-checks."),
@@ -75,6 +77,9 @@ HOW_STEPS = [
     (["Code"], "<b>Score:</b> four questions rated Green, Amber or Red → suggested verdict."),
     (["AI"], "<b>Research and explain:</b> approved pages plus up to 3 web searches; the AI writes the market context "
              "only, checked by code and a separate Evaluator."),
+    (["AI", "Code"], "<b>Draft and judge:</b> Reporting Agents draft the conclusion for different readers (board, "
+                     "analyst, manager meeting); code checks every figure, the Judge marks each draft on a checklist, "
+                     "and code picks the best or sends them back."),
     (["Person"], "<b>Judge and decide:</b> the analyst reviews the evidence, adds comments and signs."),
 ]
 HOW_END = ("Code decides every number and rating. AI reads documents and writes the market context, and everything "
@@ -201,9 +206,21 @@ def summary_markdown(result: RunResult) -> str:
     cell = lambda text: " ".join(str(text).split()).replace("|", "/")      # noqa: E731
     lines = [f"### {fund.get('fund_name', 'Fund')}", f"Figures to {fund.get('as_of_date', '')}", "",
              f"**Suggested verdict: {verdict_name(card.get('verdict', ''))}** ({verdict_meaning(card.get('verdict', ''))})"]
-    conclusion = (facts.get("suggested_conclusion") or {}).get("text")
-    if conclusion:
-        lines += ["", f"**Suggested conclusion (draft for the analyst).** {conclusion}"]
+    concl = facts.get("suggested_conclusion") or {}
+    if concl.get("text"):
+        who = (f"AI draft for the {ANGLE_WORDS.get(concl.get('angle'), concl.get('angle'))}, chosen by the Judge"
+               if concl.get("source") == "ai" else "written by code")
+        lines += ["", f"**Suggested conclusion ({who}; draft for the analyst).** {concl['text']}"]
+    plan = facts.get("plan") or {}
+    if plan:
+        lines += ["", f"_Plan ({'Task Planner Agent' if plan.get('source') == 'planner' else plan.get('source')}): "
+                      f"{REPORT_TYPE_WORDS.get(plan.get('report_type'), '')}, focus "
+                      f"{', '.join(plan.get('focus', [])[:2])}._"]
+    drafts = facts.get("drafts") or []
+    if drafts:
+        lines += ["", "**Drafts and the Judge's checklist**", "| Draft for | Checks passed | Chosen |", "|---|---|---|"]
+        lines += [f"| {ANGLE_WORDS.get(d['angle'], d['angle'])} | {d['score']} of {d['max_score']} | "
+                  f"{'✅' if d['chosen'] else ''} |" for d in drafts]
     lines += ["", "| Question | Rating | Why |", "|---|---|---|"]
     lines += [f"| {p['name']} | {RATING_WORDS.get(p['rating'], p['rating'])} | {cell(reasons.get(p['name'], ''))} |"
               for p in card.get("pillars", [])]

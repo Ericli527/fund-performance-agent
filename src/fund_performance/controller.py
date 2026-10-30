@@ -1,9 +1,11 @@
 """ Workflow controller (spec Section 8.5): a plain Python function, not an AI agent, that runs one review
 
-read files -> extractor (only if there is no factsheet_performance.json) -> approved peers (only if there is no
+read files -> task plan (Task Planner Agent; default plan offline) -> extractor (only if there is no
+factsheet_performance.json) -> approved peers (only if there is no
 peer.json: the Extractor reads their factsheets) -> data checks -> mandate -> calculator
--> scorecard -> approved sources, planner and searches (parallel) -> analyst -> number, label, rating and wording
-checks -> evaluator -> report -> email (off by default).
+-> scorecard -> approved sources, planner and searches (parallel; only if the plan needs market context) ->
+analyst -> number, label, rating and wording checks -> evaluator -> reporting agents (one draft per angle, in
+parallel) -> code's checks and the Judge Agent -> report -> email (off by default).
 
 The extractor runs before the data checks because the repeated-price check compares with the factsheet.
 
@@ -28,6 +30,8 @@ from fund_performance.agents.analyst import AI_TEXT_UNAVAILABLE, Narrative, temp
 from fund_performance.agents.base import RunFn
 from fund_performance.agents.evaluator import review
 from fund_performance.agents.extractor import extract
+from fund_performance.agents.judge import draft_and_judge
+from fund_performance.agents.task_planner import TaskPlan, plan_tasks
 from fund_performance.agents.mandate import read_mandate
 from fund_performance.agents.research import market_name, research, vet_summaries
 from fund_performance.calc import calculate
@@ -66,6 +70,9 @@ class Runners:
     page: RunFn | None = None
     analyst: RunFn | None = None
     evaluator: RunFn | None = None
+    task_planner: RunFn | None = None
+    reporter: RunFn | None = None
+    judge: RunFn | None = None
     http_get: GetFn = http_get
     email_post: PostFn | None = None
 
@@ -265,6 +272,24 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
             f"{name} (read by the Extractor Agent; values confirmed on the page)" for name in intake.get("documents", [])]
     log.end(step, outputs={"input_files": input_files})
 
+    # 1b. Task plan: the Task Planner Agent turns the request into tasks (menu choices only, checked by code)
+    step = log.start("plan", ["question", "fund_profile.json: public details"])
+    if offline:
+        plan = TaskPlan(reason="Default plan: offline run", source="default (offline)")
+        log.end(step, "skipped", outputs=plan.to_dict(), notes=["offline run: default plan"])
+    else:
+        planned = await _timed(plan_tasks(question, profile, r.task_planner), s.timeouts_seconds.task_planner)
+        if planned is None:
+            plan = TaskPlan(reason="Default plan: the Task Planner did not answer in time")
+            flags.append(DataFlag(check="task_planner", level="info", message=(
+                f"The Task Planner Agent did not answer within {s.timeouts_seconds.task_planner:g} seconds; default plan used")))
+            log.end(step, "timeout", outputs=plan.to_dict())
+        else:
+            plan, plan_flags = planned
+            flags += plan_flags
+            log.end(step, "ok" if plan.source == "planner" else "failed", outputs=plan.to_dict())
+    text_log.append(f"Plan ({plan.source}): {plan.report_type}; focus {', '.join(plan.focus)}; " + " -> ".join(plan.tasks))
+
     # 2. Extractor (only when no factsheet_performance.json was supplied)
     step = log.start("extractor", [p.name for p in files["documents"]],
                      announce=not intake and factsheet is None and not offline and bool(files["documents"]))
@@ -365,6 +390,9 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                  comparison.extra_tolerance_pp if comparison else 0.0)
     evidence = build_evidence(reported, profile, t, s.statistics, peer_comparison)
     facts = build_facts(profile, reported, card, flags, promises, peer_comparison, evidence)
+    facts["plan"] = plan.to_dict()
+    if not plan.manager_questions:
+        facts["manager_questions"] = []
     text_log += [f"Suggested conclusion: {x}" for x in facts["suggested_conclusion"]["left_out"]]
     log.end(step, outputs={"ratings": {p.name: p.rating for p in card.pillars.values()}, "verdict": card.verdict})
 
@@ -373,6 +401,8 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     step = log.start("research")
     if offline:
         log.end(step, "skipped", notes=["offline run"])
+    elif not plan.market_context:
+        log.end(step, "skipped", notes=["the plan needs no market context"])
     else:
         sources = load_sources()
         approved = sources.for_fund(profile.isin, market_name(profile))
@@ -418,6 +448,28 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         flags += narrative.flags
         text_log += narrative.log
     step.outputs |= {"source": narrative.source, "sources": narrative.sources}
+
+    # 8b. Reporting Agents (one draft per angle) and the Judge Agent; code checks, scores and picks
+    step = log.start("drafts", ["facts JSON"] + [f"angle: {a}" for a in plan.angles])
+    if offline:
+        log.end(step, "skipped", notes=["offline run: code's conclusion"])
+    else:
+        drafted = await _timed(draft_and_judge(facts, plan.angles, plan.focus, r.reporter, r.judge,
+                                               s.drafting.max_rewrites), s.timeouts_seconds.drafting)
+        if drafted is None:
+            flags.append(DataFlag(check="judge", level="warning", message=(
+                f"AI drafts not finished within {s.timeouts_seconds.drafting:g} seconds; code's conclusion used")))
+            log.end(step, "timeout")
+        else:
+            chosen = drafted.chosen
+            facts["drafts"] = [x.to_dict(x is chosen) for x in drafted.scored]
+            if chosen:
+                facts["suggested_conclusion"] |= {"text": chosen.draft.text, "source": "ai", "angle": chosen.draft.angle}
+            flags += drafted.flags
+            text_log += drafted.log
+            log.end(step, "ok" if chosen else "failed", outputs={
+                "chosen": chosen.draft.angle if chosen else None,
+                "scores": {x.draft.angle: x.score for x in drafted.scored}}, notes=drafted.log)
 
     # 9. Report (its sources list comes from this log)
     step = log.start("report")

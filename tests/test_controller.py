@@ -65,12 +65,12 @@ def test_test1_offline_run_logs_every_step(tmp_path):
     result = asyncio.run(run_review(TEST1, out_root=tmp_path, offline=True))
     log = json.loads((result.run_dir / "log.json").read_text())
     assert [(s["step"], s["status"]) for s in log["steps"]] == [
-        ("read_files", "ok"), ("extractor", "skipped"), ("peers", "skipped"), ("data_checks", "ok"),
+        ("read_files", "ok"), ("plan", "skipped"), ("extractor", "skipped"), ("peers", "skipped"), ("data_checks", "ok"),
         ("mandate", "skipped"),
         ("calculator", "ok"), ("scorecard", "ok"), ("research", "skipped"), ("narrative", "skipped"),
-        ("report", "ok"), ("email", "skipped")]
+        ("drafts", "skipped"), ("report", "ok"), ("email", "skipped")]
     assert log["run"]["status"] == "ok" and all(s["ended"] for s in log["steps"])
-    assert log["steps"][6]["outputs"]["verdict"] == "Monitor until a peer is added"
+    assert log["steps"][7]["outputs"]["verdict"] == "Monitor until a peer is added"
     assert "fund_profile.json" in log["sources"]["input_files"] and log["sources"]["web"] == []
     appendix = page_texts(result.pdf)[-1]
     assert all(name.split(" (")[0] in appendix for name in log["sources"]["input_files"])
@@ -119,7 +119,27 @@ def mocked(evaluator_answer=None, mandate_delay=0.0, planner_queries=5):
 
     return Runners(mandate=FakeRunBy(mandate), page=FakeRunBy(page), planner=FakeRunBy(planner),
                    search=FakeRunBy(search), analyst=FakeRunBy(analyst_answer),
-                   evaluator=FakeRunBy(lambda p: evaluator_answer or {"pass": True, "issues": []}), http_get=http_get)
+                   evaluator=FakeRunBy(lambda p: evaluator_answer or {"pass": True, "issues": []}), http_get=http_get,
+                   task_planner=FakeRunBy(lambda p: TASK_PLAN), reporter=FakeRunBy(reporter_answer),
+                   judge=FakeRunBy(judge_answer))
+
+
+TASK_PLAN = {"report_type": "quarterly_review", "focus": ["Performance", "Fees"], "market_context": True,
+             "manager_questions": True, "angles": ["board", "analyst"], "reason": "A full quarterly review."}
+
+
+def reporter_answer(prompt):
+    """ A draft that passes code's checks: plain words and code's verdict sentence at the end """
+    ending = re.search(r"Verdict sentence to end with: (.*)", prompt).group(1)
+    who = "the board" if "For the board" in prompt else "the analyst"
+    return {"text": f"For {who}: the evidence suggests the fund tracked its index closely. {ending}"}
+
+
+def judge_answer(prompt):
+    drafts = json.loads(prompt.split("Drafts:\n", 1)[1])
+    return {"drafts": [{"draft": d["draft"], "key_points_covered": True, "conclusion_clear": True,
+                        "plain_english": True, "no_rating_change": True, "supported_by_facts": True, "issues": []}
+                       for d in drafts], "preferred": len(drafts)}
 
 
 @requires_test1
@@ -128,7 +148,8 @@ def test_test1_full_run_mocked(tmp_path):
     result = asyncio.run(run_review(TEST1, out_root=tmp_path, runners=runners))
     log = json.loads((result.run_dir / "log.json").read_text())
     status = {s["step"]: s["status"] for s in log["steps"]}
-    assert status == {"read_files": "ok", "extractor": "skipped", "peers": "skipped", "data_checks": "ok", "mandate": "ok",
+    assert status == {"read_files": "ok", "plan": "ok", "drafts": "ok", "extractor": "skipped", "peers": "skipped",
+                      "data_checks": "ok", "mandate": "ok",
                       "calculator": "ok", "scorecard": "ok", "research": "ok", "narrative": "ok",
                       "report": "ok", "email": "skipped"}
     research = next(s for s in log["steps"] if s["step"] == "research")
@@ -205,3 +226,44 @@ def test_email_when_switched_on_goes_through_resend_and_is_logged(tmp_path, monk
     email = result.log.step("email")
     assert email.status == "ok" and email.notes == ["Email: sent to 1 recipient(s) from EMAIL_TO"]
     assert post.calls[0]["json"]["attachments"][0]["filename"] == "report.pdf"
+
+
+# Task Planner, Reporting Agents and the Judge in the run
+@requires_test1
+def test_the_judged_ai_draft_becomes_the_suggested_conclusion(tmp_path):
+    result = asyncio.run(run_review(TEST1, out_root=tmp_path, runners=mocked()))
+    concl = result.facts["suggested_conclusion"]
+    assert concl["source"] == "ai" and concl["angle"] == "analyst"            # tie: the Judge's preferred draft
+    assert concl["text"].startswith("For the analyst:") and concl["code_text"] != concl["text"]
+    assert [(d["angle"], d["score"], d["chosen"]) for d in result.facts["drafts"]] == [
+        ("board", 6, False), ("analyst", 6, True)]
+    assert result.facts["plan"]["source"] == "planner" and result.facts["plan"]["focus"][:2] == ["Performance", "Fees"]
+    p1 = " ".join(page_texts(result.pdf)[0].split())
+    assert "Suggested conclusion (AI draft for the oversight analyst, chosen by the Judge and code" in p1
+    appendix = " ".join(page_texts(result.pdf)[-1].split())
+    assert "Plan (Task Planner Agent): quarterly oversight review; focus Performance, Fees" in appendix
+    assert "Draft for the oversight analyst: 6 of 6 checks; chosen." in appendix
+
+
+@requires_test1
+def test_a_fee_question_plan_skips_the_market_research(tmp_path):
+    runners = mocked()
+    runners.task_planner = FakeRunBy(lambda p: TASK_PLAN | {"report_type": "fee_question", "focus": ["Fees"],
+                                                            "market_context": False, "manager_questions": False,
+                                                            "angles": ["board"]})
+    result = asyncio.run(run_review(TEST1, out_root=tmp_path, runners=runners))
+    log = json.loads((result.run_dir / "log.json").read_text())
+    research = next(s for s in log["steps"] if s["step"] == "research")
+    assert research["status"] == "skipped" and research["notes"] == ["the plan needs no market context"]
+    assert result.facts["manager_questions"] == [] and [d["angle"] for d in result.facts["drafts"]] == ["board"]
+    assert {p["name"] for p in result.facts["scorecard"]["pillars"]} == {"Mandate", "Performance",
+                                                                         "Value for investors", "Fees"}
+
+
+@requires_test1
+def test_without_the_new_agents_the_run_uses_the_default_plan_and_code_conclusion(tmp_path):
+    runners = mocked()
+    runners.task_planner = runners.reporter = runners.judge = None             # unit tests: these calls fail
+    result = asyncio.run(run_review(TEST1, out_root=tmp_path, runners=runners))
+    assert result.facts["plan"]["source"] == "default" and result.facts["suggested_conclusion"]["source"] == "code"
+    assert result.facts["drafts"] and not any(d["chosen"] for d in result.facts["drafts"])
