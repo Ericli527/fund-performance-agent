@@ -34,6 +34,9 @@ risk: one entry per basis of the risk table ("nav" or "pnav" as labelled, else n
 All returns and percentages as plain numbers in percent (17.5 for 17.5%).
 profile: the fund facts as printed. Dates as YYYY-MM-DD. ocf_pct as a number (0.06 for 0.06%).
 minimum_investment: the minimum initial investment as printed (e.g. "GBP 10,000,000"), else null.
+performance_fee: false only if the documents say there is none (e.g. "Performance fee: None", "N/A", "Nil",
+"0%"); true only if they say one is charged; else null. "Excludes performance fees (where applicable)" says
+neither.
 transaction_cost_pct only if a transaction cost figure is printed. fund_size_gbp_m only if the size
 is in GBP millions.
 """

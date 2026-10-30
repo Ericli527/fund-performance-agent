@@ -120,7 +120,50 @@ def locate(value, pages: dict[str, list[str]]) -> str:
     return NOT_FOUND
 
 
+# --- Performance fee: read by code from explicit statements, with the words as evidence --------------------------
+
+# "Performance fee N/A" (KID charges table), "Performance fee: None", "0.00%": none. "Performance fee 20% of ...",
+# "Performance fee: Yes", "the fund charges a performance fee": one. Wording such as "excludes performance fees
+# (where applicable)" is not a statement about this fund, so it is not evidence either way
+_FEE_NONE = re.compile(r"performance fees?\s*[:\-–]?\s*(?:none|n/?a|nil|not applicable|no|0(?:\.0+)?\s*%)(?![a-z0-9])")
+_FEE_YES = re.compile(r"performance fees?\s*[:\-–]?\s*(?:yes|applies|(?!0(?:\.0+)?\s*%)\d+(?:\.\d+)?\s*%)(?![a-z])"
+                      r"|(?:charges|pays|may charge|is subject to) a performance fee")
+
+
+def performance_fee_evidence(pages: dict[str, list[str]]) -> tuple[bool | None, str]:
+    """ (True / False / None, evidence): None when the documents say nothing explicit, or contradict each other """
+    found: dict[bool, str] = {}
+    for name, doc_pages in pages.items():
+        for i, text in enumerate(doc_pages, start=1):
+            flat = " ".join(text.split())
+            for value, pattern in ((False, _FEE_NONE), (True, _FEE_YES)):
+                if value not in found and (m := pattern.search(flat.lower())):
+                    where = f"{name}, page {i}" if len(doc_pages) > 1 or name.lower().endswith(".pdf") else name
+                    found[value] = f"{where}: \"{flat[m.start():m.end()]}\""
+    if len(found) == 1:
+        (value, evidence), = found.items()
+        return value, evidence
+    return None, ("the documents state both: " + "; ".join(found.values())) if found else ""
+
+
 # --- Reading the documents (AI) and building the table (code) -------------------------------------------------
+
+def _performance_fee(ai_value: bool | None, docs: dict[str, list[str]], flags: list[dict]):
+    """ (value, status, source) for the performance fee: the documents' explicit words decide, with the quote as
+    evidence; an AI answer without such words is kept but shown as not found (a warning); nothing explicit and no
+    answer stays empty: never taken as no fee """
+    value, evidence = performance_fee_evidence(docs)
+    if value is not None:
+        if ai_value is not None and ai_value != value:
+            flags.append({"check": "self_check", "level": "warning", "message": (
+                f"Performance fee: the Extractor Agent read {'yes' if ai_value else 'no'}, but the documents say "
+                f"{evidence}; the documents' words are used")})
+        return value, CODE, evidence
+    if evidence:                                     # contradictory statements: not established
+        flags.append({"check": "self_check", "level": "warning", "message": f"Performance fee not established: {evidence}"})
+        return None, AI, ""
+    return ai_value, AI, (NOT_FOUND if ai_value is not None else "")
+
 
 def _shown(value) -> str:
     if value is None:
@@ -208,7 +251,7 @@ async def read_documents(factsheet: Path, kid: Path | None = None, peer_factshee
         log.append("Mandate Agent read the objective" if mandate else
                    "Mandate Agent gave no valid answer: " + "; ".join(result.errors))
 
-    rows = []
+    rows, fee_flags = [], []
     objective_source = locate(objective, docs) if objective else ""
     values = draft | {"as_of_date": fs.as_of_date.isoformat() if fs else None}
     if fs and not values.get("currency"):
@@ -230,6 +273,8 @@ async def read_documents(factsheet: Path, kid: Path | None = None, peer_factshee
             value, status, source = _hedged(draft, docs)
         if spec.key == "pricing_point" and value is None and fs:
             value = next((s.pricing for s in fs.series.values() if s.pricing), None)
+        if spec.key == "performance_fee":
+            value, status, source = _performance_fee(value, docs, fee_flags)
         rows.append(_row(spec, value, status, source))
     for spec in RETURN_FIELDS:
         _, name, period = spec.key.split(".")
@@ -237,7 +282,7 @@ async def read_documents(factsheet: Path, kid: Path | None = None, peer_factshee
         value = getattr(series, f"y{period[0]}") if series else None
         rows.append(_row(spec, value, AI, locate(value, docs)))
 
-    flags = [f.model_dump() for f in extracted.flags]
+    flags = [f.model_dump() for f in extracted.flags] + fee_flags
     uploaded = [peer_factsheets] if isinstance(peer_factsheets, Path) else list(peer_factsheets or [])
     peer_docs = [(p, "uploaded", "") for p in uploaded]
     if not peer_docs:
