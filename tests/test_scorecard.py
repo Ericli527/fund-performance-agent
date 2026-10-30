@@ -313,3 +313,35 @@ def test_value_and_fees_pillars_carry_their_values():
         "fund_ocf": 0.06, "peer_ocf": 0.03, "gap_pp": 0.03, "count": 1}
     assert fees.values["limits"][0] | {} == {"metric": "Fee gap", "value": 0.03, "green": 0.05, "amber": 0.2,
                                              "kind": "max", "unit": "pp"}
+
+
+
+# Stage 6C: performance fee not established (null): never treated as none
+@pytest.mark.parametrize("ocf, performance, objective, expected", [
+    (0.03, GREEN, "index_tracker", "CHECK DATA"),     # would be Green: Green cannot be supported
+    (0.10, GREEN, "index_tracker", AMBER),           # Amber stands, with a missing-evidence note
+    (0.50, GREEN, "index_tracker", RED),             # Red stands
+])
+def test_an_unknown_performance_fee_never_gives_an_unsupported_green(ocf, performance, objective, expected):
+    known = sc.fees_rating(profile(ocf_pct=ocf, performance_fee=False, objective_type=objective), T, peer(ocf=0.03),
+                           performance)
+    unknown = sc.fees_rating(profile(ocf_pct=ocf, performance_fee=None, objective_type=objective), T, peer(ocf=0.03),
+                             performance)
+    assert unknown.rating == expected
+    if known.rating == GREEN:
+        assert unknown.reason.startswith(sc.FEE_NOT_ESTABLISHED) and "not available" in unknown.reason
+    else:
+        assert unknown.rating == known.rating and sc.FEE_NOT_ESTABLISHED_NOTE in unknown.notes
+    assert unknown.values == known.values                              # the figures themselves are unchanged
+
+
+def test_unknown_fee_without_a_peer_keeps_add_peer_with_the_note():
+    pillar = sc.fees_rating(profile(performance_fee=None), T, None, GREEN)
+    assert (pillar.rating, pillar.summary) == (AMBER, sc.ADD_PEER) and sc.FEE_NOT_ESTABLISHED_NOTE in pillar.notes
+
+
+def test_check_data_on_fees_keeps_the_existing_verdict_rule():
+    pillars = {"Mandate": sc.Pillar("Mandate", GREEN, "x"), "Performance": sc.Pillar("Performance", GREEN, "x"),
+               "Value for investors": sc.Pillar("Value for investors", GREEN, "x"),
+               "Fees": sc.Pillar("Fees", "CHECK DATA", sc.FEE_NOT_ESTABLISHED)}
+    assert sc.verdict(pillars)[0] == "Monitor (data check needed: Fees)"

@@ -231,3 +231,28 @@ def test_a_review_with_the_pricing_time_not_stated_runs_with_an_info_flag(tmp_pa
     result = asyncio.run(run_review(folder, out_root=tmp_path / "runs", offline=True))
     assert any(f.check == "pricing_point" and "not stated" in f.message for f in result.flags)
     assert result.pdf.is_file() and result.executive_pdf is not None
+
+
+# --- Stage 6C: a review with the performance fee not established, end to end (made-up fund, offline) -----------------
+
+def test_a_review_with_an_unknown_performance_fee_runs_and_never_shows_green_fees(tmp_path):
+    import asyncio
+    from fund_performance.controller import run_review
+    from fund_performance.report import page_texts
+    sample = Path(__file__).resolve().parents[1] / "demo" / "sample_index_fund"
+    known = asyncio.run(run_review(sample, out_root=tmp_path / "known", offline=True))
+    folder = tmp_path / "in"
+    shutil.copytree(sample, folder)
+    profile = json.loads((folder / "fund_profile.json").read_text())
+    (folder / "fund_profile.json").write_text(json.dumps(profile | {"performance_fee": None}))
+    result = asyncio.run(run_review(folder, out_root=tmp_path / "unknown", offline=True))
+    fees = {p["name"]: p for p in result.facts["scorecard"]["pillars"]}["Fees"]
+    known_fees = {p["name"]: p for p in known.facts["scorecard"]["pillars"]}["Fees"]
+    assert known_fees["rating"] == "GREEN" and fees["rating"] == "CHECK DATA"
+    assert result.facts["scorecard"]["verdict"] == "Monitor (data check needed: Fees)"
+    assert result.facts["fund"]["performance_fee"] is None
+    assert {f["name"]: f["value"] for f in result.facts["figures"]} == {f["name"]: f["value"] for f in known.facts["figures"]}
+    text = " ".join(" ".join(page_texts(result.executive_pdf)).split())
+    assert len(page_texts(result.executive_pdf)) == 2
+    assert "Not established in the documents (missing evidence)" in text and "Evidence missing" in text
+    assert "do not say whether the fund charges a performance fee" in text

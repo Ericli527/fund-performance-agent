@@ -29,6 +29,8 @@ MISSING = "⚠ Missing: please fill in"
 OPTIONAL = "Not found (optional)"
 USER = "Entered by user"
 NOT_FOUND = "not found in the documents"
+PERFORMANCE_FEE_MISSING = ("Missing evidence: the documents do not say whether the fund charges a performance fee. "
+                           "It is not assumed to be none: Fees is not rated Green until it is established")
 
 
 @dataclass(frozen=True)
@@ -57,7 +59,7 @@ PROFILE_FIELDS = (
     FieldSpec("distribution", "Distribution", "choice", choices=("accumulation", "income")),
     FieldSpec("hedged", "Currency hedged (yes / no)", "bool"),
     FieldSpec("benchmark_role", "Benchmark role", "choice", choices=("target", "comparator", "constraint", "none")),
-    FieldSpec("performance_fee", "Performance fee (yes / no)", "bool"),
+    FieldSpec("performance_fee", "Performance fee (yes / no)", "bool", False),   # may be not established
     FieldSpec("objective_text", "Objective (as written)", "text"),
 )
 SERIES = (("fund_nav", "Fund (NAV)", True), ("fund_pnav", "Fund (PNAV, market close)", False), ("index", "Index", True))
@@ -352,6 +354,9 @@ def self_check(intake: dict) -> Built:
             built.flags.append({"check": "self_check", "level": "warning", "message": (
                 "Currency hedging: the documents mention hedging but do not state it for this share class; "
                 "taken as not hedged")})
+    fee = next((r for r in intake["rows"] if r["key"] == "performance_fee"), None)
+    if fee is not None and not fee["value"]:
+        built.flags.append({"check": "performance_fee", "level": "warning", "message": PERFORMANCE_FEE_MISSING})
     found = sum(1 for r in intake["rows"] if r["value"] and not r["source"].endswith(NOT_FOUND))
     built.flags.append({"check": "self_check", "level": "info", "message": (
         f"Code checked the values the Extractor Agent read: {found} of "
@@ -425,6 +430,7 @@ def build_inputs(intake: dict, values: list[str]) -> Built:
     profile["field_sources"] = {k: "user" if k in out.user_entered else "code" if status[k] == CODE else "ai_extracted"
                                 for k in list(profile)}
     profile["secondary_objective"] = intake.get("secondary_objective")
+    profile.setdefault("performance_fee", None)          # not established: recorded as null, never as no fee
 
     fs = dict(intake.get("factsheet") or {})
     series = {}

@@ -548,7 +548,8 @@ def _aov_rows(inp: ReportInputs) -> list[tuple[str, str, str]]:
     p, pillars = inp.profile, inp.card.pillars
     tx = ("transaction costs: not disclosed in the documents provided" if p.transaction_cost_pct is None
           else f"transaction costs {p.transaction_cost_pct:.2f}%")
-    fee = "performance fee: yes" if p.performance_fee else "no performance fee"
+    fee = ("performance fee: yes" if p.performance_fee else "no performance fee" if p.performance_fee is False
+           else "performance fee: not established in the documents (missing evidence)")
     size = f"fund size £{p.fund_size_gbp_m:,.0f}m" if p.fund_size_gbp_m else "fund size not given"
     fees = pillars["Fees"]
     return [
@@ -633,7 +634,7 @@ def _page3(inp: ReportInputs) -> str:
             f"<tr><td class='l'>Transaction costs</td><td class='l'>"
             f"{'Not disclosed in the documents provided' if p.transaction_cost_pct is None else f'{p.transaction_cost_pct:.2f}%'}"
             f"</td><td class='l src'>Profile</td></tr>"
-            f"<tr><td class='l'>Performance fee</td><td class='l'>{'Yes' if p.performance_fee else 'None'}</td>"
+            f"<tr><td class='l'>Performance fee</td><td class='l'>{'Yes' if p.performance_fee else 'None' if p.performance_fee is False else 'Not established in the documents'}</td>"
             f"<td class='l src'>KID (profile)</td></tr></table>")
     aov = "".join(f"<tr><td class='l'><b>{a}</b></td><td class='l'>{escape(b)}</td>"
                   f"<td class='chip' style='background-color:{STATUS_COLOURS[c]}'>{c}</td></tr>" for a, b, c in _aov_rows(inp))

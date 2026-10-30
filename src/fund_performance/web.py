@@ -37,7 +37,8 @@ from html import escape
 import gradio as gr
 from fund_performance.config import WebSettings, load_settings
 from fund_performance.dashboard import dashboard_data, dashboard_html, technical_html
-from fund_performance.controller import DEFAULT_QUESTION, RunResult, RunStopped, run_review
+from fund_performance.controller import (DEFAULT_QUESTION, DOCUMENTS_STAGE, RunResult, RunStopped, progress_line,
+                                         run_review)
 from fund_performance.plain import verdict_meaning, verdict_name
 from fund_performance.presentation import MISSING_MEANING, download_copy, missing_evidence
 from fund_performance.demos import Demo, find_demo, matching_demo, return_checks, shown_demos
@@ -457,7 +458,7 @@ async def start_review(question: str, price, factsheet, kid, peer_factsheets, js
     folder = Path(tempfile.mkdtemp(prefix="fund-review-"))
     try:
         if on_step:
-            on_step("Reading the documents…")
+            on_step(progress_line(*DOCUMENTS_STAGE))
         try:
             intake = await reader(Path(factsheet), Path(kid) if kid else None, [Path(p) for p in peers])
         except Exception as e:                   # noqa: BLE001

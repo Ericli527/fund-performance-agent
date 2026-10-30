@@ -34,6 +34,7 @@
   "tests.test_golden_facts::test_facts_and_ratings_match_the_baseline[demo_vanguard_global]": "no baseline for demo_vanguard_global (create it with: PYTHONPATH=src python tests/test_golden_facts.py --update)",
   "tests.test_golden_facts::test_facts_and_ratings_match_the_baseline[test1]": "no baseline for test1 (create it with: PYTHONPATH=src python tests/test_golden_facts.py --update)",
   "tests.test_golden_facts::test_facts_and_ratings_match_the_baseline[test1_with_approved_peers]": "no baseline for test1_with_approved_peers (create it with: PYTHONPATH=src python tests/test_golden_facts.py --update)",
+  "tests.test_intake::test_the_real_fidelity_kid_states_no_performance_fee": "Test 1 files are not in data/test1 (they are kept out of the public repo)",
   "tests.test_io::test_test1_csv": "Test 1 files are not in data/test1 (they are kept out of the public repo)",
   "tests.test_io::test_test1_json_files_are_detected": "Test 1 files are not in data/test1 (they are kept out of the public repo)",
   "tests.test_models::test_test1_extras_match_the_factsheet": "Test 1 files are not in data/test1 (they are kept out of the public repo)",

@@ -15,6 +15,9 @@ _SEVERITY = {GREEN: 0, AMBER: 1, RED: 2}
 NO_PEER = "no comparison available"
 NO_PEER_RETURNS = "no peer with returns comparable with the fund's"
 ADD_PEER = "Add peer"
+FEE_NOT_ESTABLISHED = "performance fee not available from the documents (not established), so the fee cannot be rated Green"
+FEE_NOT_ESTABLISHED_NOTE = ("Performance fee not established in the documents (missing evidence): this rating does "
+                            "not take it into account")
 MANUAL_MANDATE_REASON = "Style and holdings need a reviewer check"
 SHORT_NAMES = {"Value for investors": "Value", "Fees": "Fees", "Mandate": "Mandate", "Performance": "Performance"}
 
@@ -249,7 +252,8 @@ def fees_rating(profile: FundProfile, t: Thresholds, peers, performance: str) ->
     currency, so every peer counts here """
     peers = as_list(peers)
     if not peers:
-        return Pillar("Fees", AMBER, NO_PEER, summary=ADD_PEER)
+        return Pillar("Fees", AMBER, NO_PEER, summary=ADD_PEER,
+                      notes=[FEE_NOT_ESTABLISHED_NOTE] if profile.performance_fee is None else [])
     peer_ocf = two_dp(sum(p.ocf_pct for p in peers) / len(peers))
     gap = two_dp(profile.ocf_pct - peer_ocf)
     notes = [f"{p.name}: {INSTITUTIONAL_NOTE}" for p in peers if p.investor_type == "institutional"]
@@ -274,7 +278,15 @@ def fees_rating(profile: FundProfile, t: Thresholds, peers, performance: str) ->
                 rating = AMBER
     who = peers[0].name if len(peers) == 1 else f"the average of {len(peers)} peers"
     each = "" if len(peers) == 1 else " (" + ", ".join(f"{p.name} {p.ocf_pct:.2f}%" for p in peers) + ")"
-    return Pillar("Fees", rating, f"OCF {profile.ocf_pct:.2f}% vs {who} {peer_ocf:.2f}%{each} (gap {_fmt(gap, ' pp')})",
+    reason = f"OCF {profile.ocf_pct:.2f}% vs {who} {peer_ocf:.2f}%{each} (gap {_fmt(gap, ' pp')})"
+    if profile.performance_fee is None:
+        # Not established: an unrecorded performance fee would cap Fees at Amber, so Green cannot be supported;
+        # Amber and Red stand (an unknown fee cannot improve them) with the missing evidence noted
+        if rating == GREEN:
+            rating, reason = CHECK_DATA, f"{FEE_NOT_ESTABLISHED}; {reason}"
+        else:
+            notes.append(FEE_NOT_ESTABLISHED_NOTE)
+    return Pillar("Fees", rating, reason,
                   notes=notes,
                   values={"peer": who, "peers": [p.name for p in peers], "count": len(peers),
                           "peer_fees": [p.ocf_pct for p in peers], "fund_ocf": profile.ocf_pct, "peer_ocf": peer_ocf,

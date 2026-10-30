@@ -81,8 +81,30 @@ class Runners:
 
 
 ProgressFn = Callable[[str], None]
-PROGRESS = {"extractor": "Reading the documents…", "data_checks": "Checking the data…", "scorecard": "Scoring…",
-            "research": "Researching…", "report": "Writing the report…"}
+# Live progress (Stage 6C): each workflow step, as it actually starts, is shown as "Step X of 5 · who · what".
+# AI steps that are skipped (offline, or already done on the page) are not announced
+STAGES = {
+    "read_files": (1, "Code: input files", "Reading the price file and the inputs"),
+    "self_check": (1, "Code: self-check", "Checking every value the agents read against the documents"),
+    "plan": (1, "Task Planner Agent", "Choosing what the review should focus on"),
+    "extractor": (1, "Extractor Agent", "Reading the factsheet and KID"),
+    "peers": (1, "Extractor Agent", "Reading the approved peers' factsheets"),
+    "data_checks": (2, "Code: data checks", "Checking the prices and the factsheet figures"),
+    "mandate": (2, "Mandate Agent", "Reading the fund's objective and promises"),
+    "calculator": (3, "Code: calculator", "Calculating returns, risk and gaps to the index"),
+    "scorecard": (3, "Code: scorecard", "Rating mandate, performance, value for investors and fees"),
+    "research": (4, "Research Agents", "Checking approved sources and searching for market news"),
+    "narrative": (4, "Oversight Analyst and Evaluator", "Writing and checking the market context"),
+    "drafts": (4, "Reporting Agents and Judge", "Drafting and judging the summary"),
+    "report": (5, "Code: reports", "Building the Executive and Detailed PDF reports"),
+}
+TOTAL_STAGES = 5
+DOCUMENTS_STAGE = (1, "Extractor Agent and Mandate Agent", "Reading the factsheet, KID and peer factsheets")
+
+
+def progress_line(stage: int, who: str, what: str) -> str:
+    """ "Step 2 of 5 · Code: data checks · Checking the prices and the factsheet figures…" """
+    return f"Step {stage} of {TOTAL_STAGES} · {who} · {what}…"
 
 
 @dataclass
@@ -107,9 +129,14 @@ class RunLog:
         self._clock: dict[str, float] = {}
         self.on_step = on_step                   # gets a short progress message as each step starts
 
+    def announce(self, step: str) -> None:
+        """ Tell the page which step is running now (only steps that really run are announced) """
+        if self.on_step and step in STAGES:
+            self.on_step(progress_line(*STAGES[step]))
+
     def start(self, step: str, inputs: list[str] | None = None, announce: bool = True) -> StepRecord:
-        if self.on_step and announce and step in PROGRESS:
-            self.on_step(PROGRESS[step])
+        if announce:
+            self.announce(step)
         record = StepRecord(step, _now(), inputs=list(inputs or []))
         self._clock[step] = time.monotonic()
         self.steps.append(record)
@@ -291,7 +318,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     log.end(step, outputs={"input_files": input_files})
 
     # 1b. Task plan: the Task Planner Agent turns the request into tasks (menu choices only, checked by code)
-    step = log.start("plan", ["question", "fund_profile.json: public details"])
+    step = log.start("plan", ["question", "fund_profile.json: public details"], announce=not offline)
     if offline:
         plan = TaskPlan(reason="Default plan: offline run", source="default (offline)")
         log.end(step, "skipped", outputs=plan.to_dict(), notes=["offline run: default plan"])
@@ -335,7 +362,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
             log.end(step, "ok" if factsheet else "failed", {"figures": "ai_extracted" if factsheet else None})
 
     # 2b. Approved peers (config/peers.yaml), when no peer was given: the Extractor reads their factsheets
-    step = log.start("peers", ["peer.json"] if peers else ["config/peers.yaml"])
+    step = log.start("peers", ["peer.json"] if peers else ["config/peers.yaml"], announce=False)
     if peers:
         log.end(step, "skipped", outputs={"peers": [p.name for p in peers]}, notes=["peer.json supplied"])
     else:
@@ -349,6 +376,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                 "Approved peers not read: offline run (the Extractor Agent reads their factsheets)")))
             log.end(step, "skipped", notes=["offline run"])
         else:
+            log.announce("peers")
             peers, notes = await _read_approved([path for _, path in approved.files], r, s, flags)
             step.inputs = [f"data/peers/{path.name}" for _, path in approved.files]
             log.end(step, outputs={"peers": [p.name for p in peers]}, notes=notes)
@@ -370,7 +398,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                            "blocking": [f.message for f in checked.blocking]})
 
     # 4. Mandate Agent
-    step = log.start("mandate", ["fund_profile.json: objective text"])
+    step = log.start("mandate", ["fund_profile.json: objective text"], announce=not offline and not intake)
     promises: list[str] = []
     if offline:
         flags.append(DataFlag(check="run", level="info", message=OFFLINE_NOTE))
@@ -416,7 +444,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
 
     # 7. Research: approved sources, planner and web searches, then vetting
     vetted: list[dict] = []
-    step = log.start("research")
+    step = log.start("research", announce=not offline and plan.market_context)
     if offline:
         log.end(step, "skipped", notes=["offline run"])
     elif not plan.market_context:
@@ -446,7 +474,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                                    "web_searches": len(found.plan)})
 
     # 8. Analyst, code checks and Evaluator (one rewrite in total)
-    step = log.start("narrative", ["facts JSON"] + [f"source: {v['url']}" for v in vetted])
+    step = log.start("narrative", ["facts JSON"] + [f"source: {v['url']}" for v in vetted], announce=not offline)
     if offline:
         narrative = Narrative(template(facts), "template")
         log.end(step, "skipped", notes=["offline run: template narrative"])
@@ -468,7 +496,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     step.outputs |= {"source": narrative.source, "sources": narrative.sources}
 
     # 8b. Reporting Agents (one draft per angle) and the Judge Agent; code checks, scores and picks
-    step = log.start("drafts", ["facts JSON"] + [f"angle: {a}" for a in plan.angles])
+    step = log.start("drafts", ["facts JSON"] + [f"angle: {a}" for a in plan.angles], announce=not offline)
     if offline:
         log.end(step, "skipped", notes=["offline run: code's conclusion"])
     else:
@@ -521,7 +549,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     log.end(step, outputs={"pdf": str(pdf), "executive_pdf": str(executive_pdf) if executive_pdf else None})
 
     # 10. Email (plain code, off by default; recipients from EMAIL_TO only)
-    step = log.start("email")
+    step = log.start("email", announce=False)
     attach = executive_pdf if s.email.attachment == "executive" and executive_pdf else pdf
     kind = "Executive" if attach == executive_pdf else "Detailed"
     line = send_report(attach, s.email, profile.fund_name, f"{profile.as_of_date:%d %b %Y}",

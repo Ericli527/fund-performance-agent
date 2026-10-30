@@ -165,7 +165,14 @@ def test_the_controller_uses_the_confirmation_and_reports_progress(tmp_path):
     assert steps["mandate"]["notes"] == ["Mandate Agent read the objective before the run"]
     assert steps["extractor"]["status"] == "skipped"
     assert "factsheet.txt (read by the Extractor Agent; values checked by code)" in log["sources"]["input_files"]
-    assert messages == ["Checking the data…", "Scoring…", "Researching…", "Writing the report…"]   # read before
+    # Stage 6C progress: "Step X of 5 · who · what", in workflow order; the agents that read the documents before
+    # the run are not announced again
+    steps_shown = [int(m.split(" of 5")[0].removeprefix("Step ")) for m in messages]
+    assert all(m.startswith("Step ") and " of 5 · " in m and m.endswith("…") for m in messages)
+    assert steps_shown == sorted(steps_shown) and steps_shown[0] == 1 and steps_shown[-1] == 5
+    assert messages[0] == "Step 1 of 5 · Code: self-check · Checking every value the agents read against the documents…"
+    assert not any("Extractor Agent" in m or "Mandate Agent" in m for m in messages)
+    assert any("Step 4 of 5 · Oversight Analyst and Evaluator" in m for m in messages)
 
 
 # The documents route from the command line, and the live check that it matches the JSON route
@@ -293,7 +300,7 @@ def test_documents_that_say_a_performance_fee_is_charged_give_yes_with_the_quote
 ])
 def test_an_unestablished_performance_fee_is_never_taken_as_no(tmp_path, text, ai_value):
     row, intake, built = fee_rows(tmp_path, text, ai_value)
-    assert row["value"] == "" and "Performance fee (yes / no): not found in the documents" in built.problems
+    assert row["value"] == "" and built.profile["performance_fee"] is None
 
 
 def test_an_ai_answer_without_supporting_words_is_flagged(tmp_path):
@@ -313,3 +320,15 @@ def test_the_real_fidelity_kid_states_no_performance_fee():
         False, 'Key_Investor_Info.pdf, page 2: "Performance fee N/A"')
     factsheet = TEST1 / "Monthly_FactSheet.pdf"                     # its only mention is "excludes ... (where applicable)"
     assert performance_fee_evidence({factsheet.name: read_document_pages(factsheet)}) == (None, "")
+
+
+
+# Stage 6C: a performance fee that is not established is missing evidence, not a reason to stop the review
+def test_a_missing_performance_fee_is_flagged_and_the_review_can_go_on(tmp_path):
+    from fund_performance.intake import PERFORMANCE_FEE_MISSING
+    row, intake, built = fee_rows(tmp_path, "Nothing about fees here.", None)
+    assert row["value"] == "" and row["required"] is False
+    assert not built.problems                                        # no longer stops the run
+    assert any(f["check"] == "performance_fee" and f["level"] == "warning" and f["message"] == PERFORMANCE_FEE_MISSING
+               for f in built.flags)
+    assert built.profile["performance_fee"] is None                  # recorded as not established, never as no
