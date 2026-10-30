@@ -107,24 +107,26 @@ def test_offline_controller_material_outcomes(tmp_path, scenario, verdict, perfo
         fs['calendar_years'] = {'index': {'2025': 20.0}}
     path.write_text(json.dumps(fs))
     if scenario == 'currency_mismatch':
-        # Financial checks must pass independently of the known PDF overflow below.
+        # Financial checks pass independently of the reports
         checked, _, _, card = pipeline(folder)
         assert any(f.level == 'blocking' and f.check == 'currency_match' for f in checked.flags)
         assert card.verdict == verdict
         assert card.pillars['Performance'].rating == performance
-        from fund_performance.controller import RunStopped
-        with pytest.raises(RunStopped, match='report does not fit its pages'):
-            asyncio.run(run_review(folder, out_root=tmp_path / 'runs', offline=True))
-        log = json.loads(next((tmp_path / 'runs').glob('*/log.json')).read_text())
-        assert next(s for s in log['steps'] if s['step'] == 'scorecard')['outputs']['verdict'] == verdict
-        return
     result = asyncio.run(run_review(folder, out_root=tmp_path / 'runs', offline=True))
     facts = json.loads((result.run_dir / 'facts.json').read_text())
     assert facts['scorecard']['verdict'] == verdict
     pillars = {p['name']: p for p in facts['scorecard']['pillars']}
     assert pillars['Performance']['rating'] == performance
     if scenario == 'currency_mismatch':
-        assert any(f.level == 'blocking' and f.check == 'currency_match' for f in result.flags)
+        # Stage 3: the long blocking warning used to push the old summary page to six pages and stop the run. Now
+        # the Executive Report keeps exactly two pages and shows the warning in full; the Detailed Report has it too
+        from fund_performance.report import page_texts
+        blocking = next(f for f in result.flags if f.level == 'blocking' and f.check == 'currency_match')
+        executive = page_texts(result.executive_pdf)
+        assert len(executive) == 2
+        assert ' '.join(blocking.message.split()) in ' '.join(executive[1].split())   # never shortened
+        assert 'Pending data check' in executive[0] and 'Data check needed' in executive[0]
+        assert ' '.join(blocking.message.split()) in ' '.join(' '.join(page_texts(result.pdf)).split())
     if scenario == 'underperformance':
         assert 'Action needed' in json.dumps(facts)
     assert result.pdf.is_file()  # real controller/report execution, no mocked financial stages

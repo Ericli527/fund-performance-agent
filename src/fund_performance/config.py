@@ -229,6 +229,7 @@ class EmailSettings(_Section):
     enabled: bool
     sender: str
     subject: str
+    attachment: Literal["executive", "detailed"] = "executive"   # which PDF is attached (stage 3)
 
 
 class WebSettings(_Section):

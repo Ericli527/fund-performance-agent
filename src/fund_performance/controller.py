@@ -48,6 +48,7 @@ from fund_performance.mandate import decision_path
 from fund_performance.models import DataFlag, FactsheetPerformance, FundProfile, Peer
 from fund_performance.peers import approved_peers, compare_peers
 from fund_performance.precedence import apply_precedence
+from fund_performance.executive import build_executive
 from fund_performance.report import ReportInputs, ReportLayoutError, build_report, plain_reason
 from fund_performance.scorecard import score
 
@@ -139,13 +140,14 @@ class RunLog:
 
 @dataclass
 class RunResult:
-    pdf: Path | None
+    pdf: Path | None                           # the Detailed Report, report.pdf (kept for compatibility)
     run_dir: Path
     log: RunLog
     narrative: Narrative | None = None
     facts: dict | None = None
     reasons: dict[str, str] = field(default_factory=dict)    # one-line plain reason per rating, as on report page 1
     flags: list[DataFlag] = field(default_factory=list)       # every flag of the run, as in the report's appendix
+    executive_pdf: Path | None = None          # report_executive.pdf (2 pages), or None if it could not fit
 
 
 def _now() -> str:
@@ -483,19 +485,31 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                           input_files=input_files, web_sources=web_sources,
                           entered_by_user=[r["label"] for r in (intake or {}).get("rows", [])
                                            if r.get("status") == "Entered by user"])
+    # The Executive Report (2 pages) first: if it cannot fit without losing information it is not produced, and a
+    # warning says so in the Detailed Report, which keeps everything
+    executive_pdf = None
+    try:
+        executive_pdf = build_executive(inputs, run_dir)
+    except ReportLayoutError as e:
+        flags.append(DataFlag(check="report_layout", level="warning", message=(
+            f"Executive Report not produced: {e}. Nothing was cut; the Detailed Report has every section.")))
+        inputs.flags = flags
     try:
         pdf = build_report(inputs, run_dir)
     except ReportLayoutError as e:
         _stop(log, step, f"Run stopped: the report does not fit its pages ({e})")
     (run_dir / "facts.json").write_text(json.dumps(facts, indent=1, ensure_ascii=False), encoding="utf-8")
     text_log += [f"[{f.level}] {f.message}" for f in flags]
-    log.end(step, outputs={"pdf": str(pdf)})
+    log.end(step, outputs={"pdf": str(pdf), "executive_pdf": str(executive_pdf) if executive_pdf else None})
 
     # 10. Email (plain code, off by default; recipients from EMAIL_TO only)
     step = log.start("email")
-    line = send_report(pdf, s.email, profile.fund_name, f"{profile.as_of_date:%d %b %Y}",
+    attach = executive_pdf if s.email.attachment == "executive" and executive_pdf else pdf
+    line = send_report(attach, s.email, profile.fund_name, f"{profile.as_of_date:%d %b %Y}",
                        **({"post": r.email_post} if r.email_post else {}))
+    if s.email.attachment == "executive" and executive_pdf is None and s.email.enabled:
+        line += " (Detailed Report attached: the Executive Report was not produced)"
     text_log.append(line)
     log.end(step, "ok" if line.startswith("Email: sent") else "failed" if s.email.enabled else "skipped", notes=[line])
     return RunResult(pdf, run_dir, log, narrative, facts, {name: plain_reason(inputs, name) for name in card.pillars},
-                     list({(f.level, f.message): f for f in flags}.values()))
+                     list({(f.level, f.message): f for f in flags}.values()), executive_pdf)

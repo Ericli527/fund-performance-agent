@@ -24,16 +24,15 @@ from fund_performance.mandate import DecisionPath
 from fund_performance.models import DataFlag, Figure, FundProfile, Peer
 from fund_performance.evidence import Evidence
 from fund_performance.peers import PeerComparison, as_list
-from fund_performance.plain import plain_peer_reason, verdict_meaning, verdict_name
+from fund_performance.plain import plain_peer_reason
 from fund_performance.precedence import ReportedFigures
 from fund_performance.scorecard import AMBER, CHECK_DATA, GREEN, MANUAL_CHECK, RED, Scorecard
 
-MAX_PAGES = 5
-PAGE_TITLES = ("Summary", "Evidence dashboard", "Mandate and performance", "Value, fees and Assessment of Value",
-               "Appendix")
+APPENDIX_TITLES = ("Appendix A: Evidence dashboard", "Appendix B: Mandate and performance",
+                   "Appendix C: Value, fees and Assessment of Value", "Appendix D: Data quality, sources and audit")
+PAGE_TITLES = ("Overview", "Comparisons and decision") + APPENDIX_TITLES
 NAVY = "#1f3a5f"
 RATING_COLOURS = {GREEN: "#2e7d32", AMBER: "#d18f00", RED: "#c62828", CHECK_DATA: "#6d4c9f", MANUAL_CHECK: "#546e7a"}
-VERDICT_COLOURS = {"Retain": GREEN, "Monitor": AMBER, "Review": RED, "Pending": CHECK_DATA}
 RATING_WORDS = {GREEN: "Green", AMBER: "Amber", RED: "Red", CHECK_DATA: "Check data", MANUAL_CHECK: "Manual check"}
 SOURCE_WORDS = {"factsheet": "Factsheet", "calculated": "Calculated", "ai_extracted": "AI-extracted (please verify)",
                 "user": "Entered by user",
@@ -107,16 +106,6 @@ def _f(inp: ReportInputs, name: str) -> Figure | None:
     return inp.reported.figures.get(name)
 
 
-def _chip(rating: str) -> str:
-    colour = RATING_COLOURS.get(rating, "#777777")
-    return f'<td class="chip" style="background-color:{colour}">{RATING_WORDS.get(rating, rating)}</td>'
-
-
-def _verdict_colour(verdict: str) -> str:
-    key = next((k for k in VERDICT_COLOURS if verdict.startswith(k)), "Monitor")
-    return RATING_COLOURS[VERDICT_COLOURS[key]]
-
-
 def _years(inp: ReportInputs) -> int:
     return inp.profile.time_horizon_years
 
@@ -163,65 +152,15 @@ def plain_reason(inp: ReportInputs, name: str) -> str:
 
 # --- Pages ---------------------------------------------------------------------------------------------------------
 
-def _page1(inp: ReportInputs) -> str:
-    p, card, facts = inp.profile, inp.card, inp.facts
-    rows = "".join(
-        f'<tr><td class="q"><b>{escape(name)}</b><br/><span class="small">{QUESTIONS[name]}</span></td>'
-        f'{_chip(pillar.rating)}<td>{escape(plain_reason(inp, name))}</td></tr>'
-        for name, pillar in card.pillars.items())
-    findings = "".join(f"<li>{escape(t)}</li>" for t in inp.narrative.output.key_findings)
-    actions = "".join(f"<li>{escape(t)}</li>" for t in inp.narrative.output.action_texts)
-    concl = facts.get("suggested_conclusion") or {}
-    conclusion = concl.get("text", "")
-    who = (f"AI draft for the {ANGLE_WORDS.get(concl.get('angle'), concl.get('angle'))}, chosen by the Judge and code; "
-           "draft for the analyst" if concl.get("source") == "ai" else "draft for the analyst")
-    points = "".join(f"<li>{escape(x)}</li>" for x in facts.get("judgement_points", []))
-    questions = "".join(f"<li>{escape(x)}</li>" for x in facts.get("manager_questions", []))
-    origin = ("The conclusion is an AI draft checked by code and the Judge (appendix); the points, findings, actions "
-              "and questions are written by code." if concl.get("source") == "ai" else
-              "The conclusion, points, findings, actions and questions are written by code from the scorecard and "
-              "data notes.") + (
-        f" {inp.run_note}." if inp.run_note else
-        " The market context (page 4) is written by AI from the cited sources and checked by code and a separate "
-        "reviewer agent." if inp.narrative.source == "ai" and inp.narrative.output.market_context else
-        " The AI market context did not pass its checks, so it is left out." if inp.narrative.source == "template"
-        else "")
-    manual = "".join(f'<tr><td class="box">&nbsp;</td><td>Manual check done: {escape(m.name)}: {escape(m.reason)}</td></tr>'
-                     for m in card.manual_checks)
-    ticks = "".join(f'<td class="box">&nbsp;</td><td>{name}</td>' for name in ("Satisfied", "Monitor", "Action needed"))
-    return f"""
-<table class="banner"><tr><td>
-  <span class="kicker">FUND PERFORMANCE REVIEW · DRAFT FOR OVERSIGHT</span><br/>
-  <span class="fund">{escape(p.fund_name)}</span><br/>
-  <span class="meta">ISIN {escape(p.isin)} · {escape(p.share_class)} · {escape(p.currency)} · Benchmark: {escape(p.benchmark_name)} · Figures to {p.as_of_date:%d %b %Y} · prepared {inp.prepared:%d %b %Y}</span>
-</td></tr></table>
-<h1>Summary</h1>
-<table class="facts"><tr><td class="label">Question</td><td>{escape(inp.question)}</td></tr></table>
-<table class="verdict"><tr><td class="vlabel" style="background-color:{_verdict_colour(card.verdict)}">Suggested verdict</td>
-<td class="vtext"><b>{escape(verdict_name(card.verdict))}</b>: {escape(verdict_meaning(card.verdict))}<br/><span class="small">From fixed rules on the ratings below. A suggestion: the analyst makes the judgement and signs below.</span></td></tr></table>
-<p class="concl"><b>Suggested conclusion ({escape(who)}).</b> {escape(conclusion)}</p>
-<table class="grid ratings"><tr><th width="27%">Question</th><th width="13%">Rating</th><th>Why</th></tr>{rows}</table>
-<table width="100%"><tr><td width="50%" valign="top"><h3>Points for your judgement</h3><ul class="tight">{points}</ul></td>
-<td width="2%"></td><td valign="top"><h3>Questions to ask the manager</h3><ul class="tight">{questions}</ul></td></tr></table>
-<h3>Key findings</h3><ul class="tight">{findings}</ul>
-<h3>Recommended actions</h3><ul class="tight">{actions}</ul>
-<p class="small">{escape(origin)}</p>
-<h3>Approval</h3>
-<table class="approval">
-<tr><td width="18%">Reviewer name</td><td class="line">&nbsp;</td><td width="10%">Date</td><td class="line" width="22%">&nbsp;</td></tr>
-<tr><td>Decision</td><td colspan="3"><table class="ticks"><tr>{ticks}</tr></table></td></tr>
-<tr><td>Analyst's comments</td><td class="line" colspan="3">&nbsp;</td></tr>
-<tr><td>&nbsp;</td><td class="line" colspan="3">&nbsp;</td></tr>
-<tr><td colspan="4">If you disagree with the suggested verdict, why?</td></tr>
-<tr><td>&nbsp;</td><td class="line" colspan="3">&nbsp;</td></tr>
-<tr><td>Signature</td><td class="line" colspan="3">&nbsp;</td></tr>
-</table>
-{f'<table class="ticks">{manual}</table>' if manual else ''}
-"""
-
-
-QUESTIONS = {"Mandate": "Is the fund doing what it promised?", "Performance": "How did it do against its index?",
-             "Value for investors": "Did investors get a fair outcome?", "Fees": "Is the fee justified?"}
+def _in_full(inp: ReportInputs) -> str:
+    """ Everything the executive pages select from, in full: all findings, points for judgement and questions """
+    facts = inp.facts
+    out = inp.narrative.output if inp.narrative else None
+    parts = [("Key findings", list(out.key_findings) if out else []),
+             ("Points for your judgement", facts.get("judgement_points", [])),
+             ("Questions to ask the manager", facts.get("manager_questions", []))]
+    return "".join(f"<h3>{title}</h3><ul class='tight'>" + "".join(f"<li>{escape(x)}</li>" for x in items) + "</ul>"
+                   for title, items in parts if items)
 
 
 def _returns_table(inp: ReportInputs) -> str:
@@ -553,7 +492,7 @@ def _dashboard(inp: ReportInputs, out_dir: Path) -> str:
     grid = "".join(f"<tr>{''.join(cells[i:i + 2])}</tr>" for i in range(0, len(cells), 2))
     grid += "".join(f"<tr><td colspan='2'><p class='small'>{escape(x)}</p></td></tr>" for x in left_out)
     return f"""
-<h1>Evidence dashboard</h1>
+<h1>Appendix A: Evidence dashboard</h1>
 <p class="small">Charts and statistics are calculated by code from the sources shown under each one. No AI.</p>
 <table width="100%">{grid}</table>
 {_statistics(inp)}
@@ -568,7 +507,8 @@ def _page2(inp: ReportInputs, out_dir: Path) -> str:
                     for n in inp.facts.get("data_notes", []))
     growth, yearly, caption = _chart_images(inp, out_dir)
     return f"""
-<h1>Mandate and performance</h1>
+<h1>Appendix B: Mandate and performance</h1>
+{_in_full(inp)}
 <table class="facts"><tr><td class="label">Objective</td><td>{escape(inp.profile.objective_text)}</td></tr></table>
 <table width="100%"><tr><td width="50%" valign="top"><h3>What the fund promises</h3><ul class="tight">{promises}</ul></td>
 <td valign="top"><h3>How it was judged (decision path)</h3><ol class="tight small">{path}</ol></td></tr></table>
@@ -682,7 +622,7 @@ def _page3(inp: ReportInputs) -> str:
                   "the AI text did not pass its checks (see the appendix)." if inp.narrative.source == "template" else
                   "no web source passed the date, relevance and figure checks.") + "</p>")
     return f"""
-<h1>Value, fees and Assessment of Value</h1>
+<h1>Appendix C: Value, fees and Assessment of Value</h1>
 <h3>Comparison with peer funds</h3>{peer}
 <h3>Fees</h3>{fees}
 <h3>Assessment of Value: the 7 FCA factors (COLL 6.6.20R)</h3>
@@ -789,7 +729,7 @@ def _appendix(inp: ReportInputs, compact: bool, main_text: str = "") -> str:
     glossary = "".join(f"<li><b>{escape(term)}</b>: {escape(text)}</li>"
                        for term, text in used_in(main_text + plain_text(rest)).items())
     return f"""
-<h1>Appendix</h1>
+<h1>Appendix D: Data quality, sources and audit</h1>
 <h3>Data checks and flags</h3>{by_level or '<p class="small">No flags.</p>'}
 <h3>Excluded web sources</h3><ul class="tight small">{excl}</ul>
 <h3>Sources</h3><ul class="tight small">{sources}</ul>
@@ -836,13 +776,16 @@ p {{ margin: 0 0 3px 0; }} ul, ol {{ margin: 0 0 3px 0; }} li {{ margin-bottom: 
 """
 
 
-def build_html(inp: ReportInputs, out_dir: Path, compact: bool = False) -> str:
-    footer = (f'<div id="footer">{escape(inp.profile.fund_name)} · Fund performance review (draft) · figures to '
+def build_html(inp: ReportInputs, out_dir: Path) -> str:
+    """ The Detailed Report: the two Executive Report pages, then Appendices A to D, each from a new page """
+    from fund_performance.executive import EXEC_CSS, executive_html
+    footer = (f'<div id="footer">{escape(inp.profile.fund_name)} · Detailed Report (draft) · figures to '
               f'{inp.profile.as_of_date:%d %b %Y} · Public data only · Page <pdf:pagenumber> of <pdf:pagecount></div>')
-    main = [_page1(inp), _dashboard(inp, out_dir), _page2(inp, out_dir), _page3(inp)]
-    pages = main + [_appendix(inp, compact, plain_text("".join(main)))]
-    body = '<div style="page-break-before: always"></div>'.join(pages)
-    return f"<html><head><meta charset='utf-8'/><style>{CSS}</style></head><body>{footer}{body}</body></html>"
+    p1, p2 = executive_html(inp, out_dir)
+    appendices = [_dashboard(inp, out_dir), _page2(inp, out_dir), _page3(inp)]
+    appendices.append(_appendix(inp, False, plain_text("".join([p1, p2] + appendices))))
+    body = '<div style="page-break-before: always"></div>'.join([p1, p2] + appendices)
+    return f"<html><head><meta charset='utf-8'/><style>{CSS}{EXEC_CSS}</style></head><body>{footer}{body}</body></html>"
 
 
 FONT_FILES = ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf")
@@ -867,25 +810,26 @@ def page_texts(path: Path) -> list[str]:
 
 
 def layout_problems(path: Path) -> list[str]:
-    """ Pages 1-4 must each hold exactly one main section, and the appendix starts on page 5 """
+    """ The Detailed Report: the executive pages first, then each appendix from a new page, in order. Every part may
+    run to any length here (nothing is cut); the two-page limit applies to the Executive Report itself """
     texts = page_texts(path)
-    problems = []
-    for i, title in enumerate(PAGE_TITLES):
-        if i >= len(texts) or title not in texts[i]:
-            problems.append(f"'{title}' is not at the top of page {i + 1}: the page before it ran over")
-    if len(texts) > MAX_PAGES:
-        problems.append(f"{len(texts)} pages; at most {MAX_PAGES}")
+    problems = [] if texts and PAGE_TITLES[0] in texts[0] else ["the overview is not on page 1"]
+    start = 1
+    for title in PAGE_TITLES[1:]:
+        page = next((i for i in range(start, len(texts)) if title in texts[i]), None)
+        if page is None:
+            problems.append(f"'{title}' is missing or out of order")
+            continue
+        start = page + 1
     return problems
 
 
 def build_report(inp: ReportInputs, out_dir: Path, name: str = "report.pdf") -> Path:
-    """ Build the PDF; if it runs over 5 pages, shorten the appendix first """
+    """ The Detailed Report (report.pdf). Nothing is shortened; a layout problem is an error """
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / name
     _render(build_html(inp, out_dir), path)
-    if len(page_texts(path)) > MAX_PAGES:
-        _render(build_html(inp, out_dir, compact=True), path)
     problems = layout_problems(path)
     if problems:
-        raise ReportLayoutError("; ".join(problems))
+        raise ReportLayoutError("Detailed Report: " + "; ".join(problems))
     return path

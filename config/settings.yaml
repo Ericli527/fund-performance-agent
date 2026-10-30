@@ -33,5 +33,6 @@ statistics:
 
 email:
   enabled: false
+  attachment: executive  # executive (report_executive.pdf, 2 pages) or detailed (report.pdf with the appendices)
   sender: ""           # e.g. "Fund Report <reports@yourdomain.com>" (a domain verified in Resend)
   subject: "Fund performance review (draft): {fund_name}, figures to {as_of_date}"
