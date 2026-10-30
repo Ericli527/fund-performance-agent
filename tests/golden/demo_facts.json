@@ -1,0 +1,1120 @@
+{
+ "fund": {
+  "fund_name": "Sample World Index Fund A Acc",
+  "isin": "XX0000000001",
+  "share_class": "A Acc",
+  "currency": "GBP",
+  "benchmark_name": "Sample World Index",
+  "objective_text": "Made-up test fund. Aims to track the Sample World Index over 5 years or more.",
+  "objective_type": "index_tracker",
+  "time_horizon_years": 5,
+  "ocf_pct": 0.1,
+  "performance_fee": false,
+  "transaction_cost_pct": null,
+  "as_of_date": "2026-09-30",
+  "promises": []
+ },
+ "scorecard": {
+  "verdict": "Retain",
+  "verdict_reason": "All four questions Green",
+  "pillars": [
+   {
+    "name": "Mandate",
+    "rating": "GREEN",
+    "reason": "R² 1.00 and beta 1.00, 5y (calculated)",
+    "summary": null,
+    "sub_ratings": [],
+    "notes": [],
+    "values": {
+     "limits": [
+      {
+       "metric": "R²",
+       "value": 1.0,
+       "green": 0.98,
+       "amber": 0.95,
+       "kind": "min",
+       "unit": ""
+      },
+      {
+       "metric": "Beta",
+       "value": 1.0,
+       "green": [
+        0.95,
+        1.05
+       ],
+       "amber": [
+        0.9,
+        1.1
+       ],
+       "kind": "range",
+       "unit": ""
+      }
+     ]
+    }
+   },
+   {
+    "name": "Performance",
+    "rating": "GREEN",
+    "reason": "Tracking difference GREEN: TD -0.11 pp a year (5y, fund_nav vs index); Green within 0.20, Amber within 0.40; Tracking error GREEN: TE 0.10%, 5y (calculated); Green up to 0.30, Amber up to 1.00",
+    "summary": null,
+    "sub_ratings": [
+     {
+      "name": "Tracking difference",
+      "rating": "GREEN",
+      "reason": "TD -0.11 pp a year (5y, fund_nav vs index); Green within 0.20, Amber within 0.40"
+     },
+     {
+      "name": "Tracking error",
+      "rating": "GREEN",
+      "reason": "TE 0.10%, 5y (calculated); Green up to 0.30, Amber up to 1.00"
+     }
+    ],
+    "notes": [],
+    "values": {
+     "limits": [
+      {
+       "metric": "Tracking difference (size)",
+       "value": 0.11,
+       "green": 0.2,
+       "amber": 0.4,
+       "kind": "max",
+       "unit": "pp"
+      },
+      {
+       "metric": "Tracking error",
+       "value": 0.1,
+       "green": 0.3,
+       "amber": 1.0,
+       "kind": "max",
+       "unit": "%"
+      }
+     ]
+    }
+   },
+   {
+    "name": "Value for investors",
+    "rating": "GREEN",
+    "reason": "Sample World Index Tracker B returned -1.17 pp a year vs the fund (5y, annualised, both net of fees; fund market close NAV; peer pricing time not stated)",
+    "summary": null,
+    "sub_ratings": [],
+    "notes": [
+     "Sample World Index Tracker B: pricing time not stated, so the timing may differ"
+    ],
+    "values": {
+     "peer": "Sample World Index Tracker B",
+     "peers": [
+      "Sample World Index Tracker B"
+     ],
+     "count": 1,
+     "years": 5,
+     "peer_ann": 8.6,
+     "fund_ann": 9.77,
+     "gap_pp": -1.17,
+     "basis": [
+      "fund market close NAV; peer pricing time not stated"
+     ],
+     "limits": [
+      {
+       "metric": "Peer return gap",
+       "value": -1.17,
+       "green": 0.1,
+       "amber": 0.5,
+       "kind": "max",
+       "unit": "pp"
+      }
+     ]
+    }
+   },
+   {
+    "name": "Fees",
+    "rating": "GREEN",
+    "reason": "OCF 0.10% vs Sample World Index Tracker B 0.05% (gap +0.05 pp)",
+    "summary": null,
+    "sub_ratings": [],
+    "notes": [],
+    "values": {
+     "peer": "Sample World Index Tracker B",
+     "peers": [
+      "Sample World Index Tracker B"
+     ],
+     "count": 1,
+     "peer_fees": [
+      0.05
+     ],
+     "fund_ocf": 0.1,
+     "peer_ocf": 0.05,
+     "gap_pp": 0.05,
+     "limits": [
+      {
+       "metric": "Fee gap",
+       "value": 0.05,
+       "green": 0.05,
+       "amber": 0.2,
+       "kind": "max",
+       "unit": "pp"
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "decision_path": [
+  "1. Objective type: index_tracker, so judge tracking (TD, TD_ex_cost, TE, R2) vs benchmark",
+  "2. Dual objective: no",
+  "3. Short history: no",
+  "4. Main test period: 5 years; 1y and 3y shown as trend context",
+  "5. Data checks: no blocking flag"
+ ],
+ "data_notes": [
+  {
+   "kind": "fee",
+   "explains": "the yearly tracking difference (-0.11 pp a year over 5 years). It does not explain the noon-price gap",
+   "note": "Most of the yearly gap to the index is the fee. Adding the ongoing charge back leaves the cost-adjusted gap.",
+   "figures": [
+    {
+     "label": "Tracking difference, a year, 5y",
+     "value": -0.11,
+     "unit": "pp",
+     "display": "-0.11 pp"
+    },
+    {
+     "label": "Fund behind its index, in plain terms (% a year), 5y",
+     "value": -0.11,
+     "unit": "%",
+     "display": "-0.11%"
+    },
+    {
+     "label": "Ongoing charge (OCF), a year",
+     "value": 0.1,
+     "unit": "%",
+     "display": "0.10%",
+     "key": true
+    },
+    {
+     "label": "Cost-adjusted tracking difference, a year, 5y",
+     "value": -0.01,
+     "unit": "pp",
+     "display": "-0.01 pp"
+    },
+    {
+     "label": "Cost-adjusted gap, in plain terms (% a year), 5y",
+     "value": -0.01,
+     "unit": "%",
+     "display": "-0.01%"
+    }
+   ]
+  }
+ ],
+ "data_flags": [],
+ "figures": [
+  {
+   "name": "fund_nav.cum.1y",
+   "label": "Fund NAV cumulative return, 1y",
+   "value": 1.1,
+   "unit": "%",
+   "display": "1.1%",
+   "source": "factsheet",
+   "period": "1y",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.ann.1y",
+   "label": "Fund NAV annualised return, 1y",
+   "value": 1.1,
+   "unit": "%",
+   "display": "1.1%",
+   "source": "calculated",
+   "period": "1y",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.cum.3y",
+   "label": "Fund NAV cumulative return, 3y",
+   "value": 15.7,
+   "unit": "%",
+   "display": "15.7%",
+   "source": "factsheet",
+   "period": "3y",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.ann.3y",
+   "label": "Fund NAV annualised return, 3y",
+   "value": 4.98,
+   "unit": "%",
+   "display": "5.0%",
+   "source": "calculated",
+   "period": "3y",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.cum.5y",
+   "label": "Fund NAV cumulative return, 5y",
+   "value": 59.4,
+   "unit": "%",
+   "display": "59.4%",
+   "source": "factsheet",
+   "period": "5y",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.ann.5y",
+   "label": "Fund NAV annualised return, 5y",
+   "value": 9.77,
+   "unit": "%",
+   "display": "9.8%",
+   "source": "calculated",
+   "period": "5y",
+   "basis": null
+  },
+  {
+   "name": "index.cum.1y",
+   "label": "Index cumulative return, 1y",
+   "value": 1.0,
+   "unit": "%",
+   "display": "1.0%",
+   "source": "factsheet",
+   "period": "1y",
+   "basis": null
+  },
+  {
+   "name": "index.ann.1y",
+   "label": "Index annualised return, 1y",
+   "value": 1.0,
+   "unit": "%",
+   "display": "1.0%",
+   "source": "calculated",
+   "period": "1y",
+   "basis": null
+  },
+  {
+   "name": "index.cum.3y",
+   "label": "Index cumulative return, 3y",
+   "value": 15.8,
+   "unit": "%",
+   "display": "15.8%",
+   "source": "factsheet",
+   "period": "3y",
+   "basis": null
+  },
+  {
+   "name": "index.ann.3y",
+   "label": "Index annualised return, 3y",
+   "value": 5.01,
+   "unit": "%",
+   "display": "5.0%",
+   "source": "calculated",
+   "period": "3y",
+   "basis": null
+  },
+  {
+   "name": "index.cum.5y",
+   "label": "Index cumulative return, 5y",
+   "value": 60.2,
+   "unit": "%",
+   "display": "60.2%",
+   "source": "factsheet",
+   "period": "5y",
+   "basis": null
+  },
+  {
+   "name": "index.ann.5y",
+   "label": "Index annualised return, 5y",
+   "value": 9.88,
+   "unit": "%",
+   "display": "9.9%",
+   "source": "calculated",
+   "period": "5y",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.discrete_12m.2022-09-30",
+   "label": "Fund NAV 12-month return, 2022-09-30",
+   "value": 20.34,
+   "unit": "%",
+   "display": "20.3%",
+   "source": "calculated",
+   "period": "12m to 2022-09-30",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.discrete_12m.2023-09-30",
+   "label": "Fund NAV 12-month return, 2023-09-30",
+   "value": 14.48,
+   "unit": "%",
+   "display": "14.5%",
+   "source": "calculated",
+   "period": "12m to 2023-09-30",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.discrete_12m.2024-09-30",
+   "label": "Fund NAV 12-month return, 2024-09-30",
+   "value": 3.55,
+   "unit": "%",
+   "display": "3.5%",
+   "source": "calculated",
+   "period": "12m to 2024-09-30",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.discrete_12m.2025-09-30",
+   "label": "Fund NAV 12-month return, 2025-09-30",
+   "value": 10.54,
+   "unit": "%",
+   "display": "10.5%",
+   "source": "calculated",
+   "period": "12m to 2025-09-30",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.discrete_12m.2026-09-30",
+   "label": "Fund NAV 12-month return, 2026-09-30",
+   "value": 1.07,
+   "unit": "%",
+   "display": "1.1%",
+   "source": "calculated",
+   "period": "12m to 2026-09-30",
+   "basis": null
+  },
+  {
+   "name": "index.discrete_12m.2022-09-30",
+   "label": "Index 12-month return, 2022-09-30",
+   "value": 20.63,
+   "unit": "%",
+   "display": "20.6%",
+   "source": "calculated",
+   "period": "12m to 2022-09-30",
+   "basis": null
+  },
+  {
+   "name": "index.discrete_12m.2023-09-30",
+   "label": "Index 12-month return, 2023-09-30",
+   "value": 14.67,
+   "unit": "%",
+   "display": "14.7%",
+   "source": "calculated",
+   "period": "12m to 2023-09-30",
+   "basis": null
+  },
+  {
+   "name": "index.discrete_12m.2024-09-30",
+   "label": "Index 12-month return, 2024-09-30",
+   "value": 3.71,
+   "unit": "%",
+   "display": "3.7%",
+   "source": "calculated",
+   "period": "12m to 2024-09-30",
+   "basis": null
+  },
+  {
+   "name": "index.discrete_12m.2025-09-30",
+   "label": "Index 12-month return, 2025-09-30",
+   "value": 10.51,
+   "unit": "%",
+   "display": "10.5%",
+   "source": "calculated",
+   "period": "12m to 2025-09-30",
+   "basis": null
+  },
+  {
+   "name": "index.discrete_12m.2026-09-30",
+   "label": "Index 12-month return, 2026-09-30",
+   "value": 1.03,
+   "unit": "%",
+   "display": "1.0%",
+   "source": "calculated",
+   "period": "12m to 2026-09-30",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.calendar.2019",
+   "label": "Fund NAV calendar-year return, 2019",
+   "value": -17.96,
+   "unit": "%",
+   "display": "-18.0%",
+   "source": "calculated",
+   "period": "2019",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.calendar.2020",
+   "label": "Fund NAV calendar-year return, 2020",
+   "value": -9.85,
+   "unit": "%",
+   "display": "-9.9%",
+   "source": "calculated",
+   "period": "2020",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.calendar.2021",
+   "label": "Fund NAV calendar-year return, 2021",
+   "value": 5.77,
+   "unit": "%",
+   "display": "5.8%",
+   "source": "calculated",
+   "period": "2021",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.calendar.2022",
+   "label": "Fund NAV calendar-year return, 2022",
+   "value": 26.45,
+   "unit": "%",
+   "display": "26.5%",
+   "source": "calculated",
+   "period": "2022",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.calendar.2023",
+   "label": "Fund NAV calendar-year return, 2023",
+   "value": 1.23,
+   "unit": "%",
+   "display": "1.2%",
+   "source": "calculated",
+   "period": "2023",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.calendar.2024",
+   "label": "Fund NAV calendar-year return, 2024",
+   "value": 7.85,
+   "unit": "%",
+   "display": "7.8%",
+   "source": "calculated",
+   "period": "2024",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.calendar.2025",
+   "label": "Fund NAV calendar-year return, 2025",
+   "value": 14.73,
+   "unit": "%",
+   "display": "14.7%",
+   "source": "calculated",
+   "period": "2025",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.calendar.YTD",
+   "label": "Fund NAV calendar-year return, YTD",
+   "value": -3.67,
+   "unit": "%",
+   "display": "-3.7%",
+   "source": "calculated",
+   "period": "YTD",
+   "basis": null
+  },
+  {
+   "name": "index.calendar.2019",
+   "label": "Index calendar-year return, 2019",
+   "value": -17.77,
+   "unit": "%",
+   "display": "-17.8%",
+   "source": "calculated",
+   "period": "2019",
+   "basis": null
+  },
+  {
+   "name": "index.calendar.2020",
+   "label": "Index calendar-year return, 2020",
+   "value": -9.73,
+   "unit": "%",
+   "display": "-9.7%",
+   "source": "calculated",
+   "period": "2020",
+   "basis": null
+  },
+  {
+   "name": "index.calendar.2021",
+   "label": "Index calendar-year return, 2021",
+   "value": 5.91,
+   "unit": "%",
+   "display": "5.9%",
+   "source": "calculated",
+   "period": "2021",
+   "basis": null
+  },
+  {
+   "name": "index.calendar.2022",
+   "label": "Index calendar-year return, 2022",
+   "value": 26.69,
+   "unit": "%",
+   "display": "26.7%",
+   "source": "calculated",
+   "period": "2022",
+   "basis": null
+  },
+  {
+   "name": "index.calendar.2023",
+   "label": "Index calendar-year return, 2023",
+   "value": 1.49,
+   "unit": "%",
+   "display": "1.5%",
+   "source": "calculated",
+   "period": "2023",
+   "basis": null
+  },
+  {
+   "name": "index.calendar.2024",
+   "label": "Index calendar-year return, 2024",
+   "value": 7.88,
+   "unit": "%",
+   "display": "7.9%",
+   "source": "calculated",
+   "period": "2024",
+   "basis": null
+  },
+  {
+   "name": "index.calendar.2025",
+   "label": "Index calendar-year return, 2025",
+   "value": 14.71,
+   "unit": "%",
+   "display": "14.7%",
+   "source": "calculated",
+   "period": "2025",
+   "basis": null
+  },
+  {
+   "name": "index.calendar.YTD",
+   "label": "Index calendar-year return, YTD",
+   "value": -3.68,
+   "unit": "%",
+   "display": "-3.7%",
+   "source": "calculated",
+   "period": "YTD",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.since_launch.cum",
+   "label": "Fund NAV since launch, cum",
+   "value": 23.02,
+   "unit": "%",
+   "display": "23.0%",
+   "source": "calculated",
+   "period": "since 2018-01-31",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.since_launch.ann",
+   "label": "Fund NAV since launch, ann",
+   "value": 2.42,
+   "unit": "%",
+   "display": "2.4%",
+   "source": "calculated",
+   "period": "since 2018-01-31",
+   "basis": null
+  },
+  {
+   "name": "index.since_launch.cum",
+   "label": "Index since launch, cum",
+   "value": 24.34,
+   "unit": "%",
+   "display": "24.3%",
+   "source": "calculated",
+   "period": "since 2018-01-31",
+   "basis": null
+  },
+  {
+   "name": "index.since_launch.ann",
+   "label": "Index since launch, ann",
+   "value": 2.55,
+   "unit": "%",
+   "display": "2.5%",
+   "source": "calculated",
+   "period": "since 2018-01-31",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.vol.3y",
+   "label": "Fund NAV volatility, 3y",
+   "value": 11.53,
+   "unit": "%",
+   "display": "11.5%",
+   "source": "calculated",
+   "period": "3y",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.mdd.3y",
+   "label": "Fund NAV maximum drawdown, 3y",
+   "value": -14.89,
+   "unit": "%",
+   "display": "-14.9%",
+   "source": "calculated",
+   "period": "3y",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.sharpe.3y",
+   "label": "Fund NAV Sharpe ratio, 3y",
+   "value": 0.43,
+   "unit": "ratio",
+   "display": "0.43",
+   "source": "calculated",
+   "period": "3y",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.vol.5y",
+   "label": "Fund NAV volatility, 5y",
+   "value": 11.32,
+   "unit": "%",
+   "display": "11.3%",
+   "source": "calculated",
+   "period": "5y",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.mdd.5y",
+   "label": "Fund NAV maximum drawdown, 5y",
+   "value": -14.89,
+   "unit": "%",
+   "display": "-14.9%",
+   "source": "calculated",
+   "period": "5y",
+   "basis": null
+  },
+  {
+   "name": "fund_nav.sharpe.5y",
+   "label": "Fund NAV Sharpe ratio, 5y",
+   "value": 0.86,
+   "unit": "ratio",
+   "display": "0.86",
+   "source": "calculated",
+   "period": "5y",
+   "basis": null
+  },
+  {
+   "name": "index.vol.3y",
+   "label": "Index volatility, 3y",
+   "value": 11.55,
+   "unit": "%",
+   "display": "11.6%",
+   "source": "calculated",
+   "period": "3y",
+   "basis": null
+  },
+  {
+   "name": "index.mdd.3y",
+   "label": "Index maximum drawdown, 3y",
+   "value": -14.97,
+   "unit": "%",
+   "display": "-15.0%",
+   "source": "calculated",
+   "period": "3y",
+   "basis": null
+  },
+  {
+   "name": "index.sharpe.3y",
+   "label": "Index Sharpe ratio, 3y",
+   "value": 0.43,
+   "unit": "ratio",
+   "display": "0.43",
+   "source": "calculated",
+   "period": "3y",
+   "basis": null
+  },
+  {
+   "name": "index.vol.5y",
+   "label": "Index volatility, 5y",
+   "value": 11.33,
+   "unit": "%",
+   "display": "11.3%",
+   "source": "calculated",
+   "period": "5y",
+   "basis": null
+  },
+  {
+   "name": "index.mdd.5y",
+   "label": "Index maximum drawdown, 5y",
+   "value": -14.97,
+   "unit": "%",
+   "display": "-15.0%",
+   "source": "calculated",
+   "period": "5y",
+   "basis": null
+  },
+  {
+   "name": "index.sharpe.5y",
+   "label": "Index Sharpe ratio, 5y",
+   "value": 0.87,
+   "unit": "ratio",
+   "display": "0.87",
+   "source": "calculated",
+   "period": "5y",
+   "basis": null
+  },
+  {
+   "name": "relative.excess_cum.1y",
+   "label": "Fund vs index (calculated) cumulative excess return, 1y",
+   "value": 0.04,
+   "unit": "pp",
+   "display": "0.0 pp",
+   "source": "calculated",
+   "period": "1y",
+   "basis": null
+  },
+  {
+   "name": "relative.td.1y",
+   "label": "Fund vs index (calculated) tracking difference, 1y",
+   "value": 0.04,
+   "unit": "pp",
+   "display": "0.04 pp",
+   "source": "calculated",
+   "period": "1y",
+   "basis": null
+  },
+  {
+   "name": "relative.td_ex_cost.1y",
+   "label": "Fund vs index (calculated) tracking difference after adding back the fee, 1y",
+   "value": 0.14,
+   "unit": "pp",
+   "display": "0.14 pp",
+   "source": "calculated",
+   "period": "1y",
+   "basis": null
+  },
+  {
+   "name": "relative.excess_cum.3y",
+   "label": "Fund vs index (calculated) cumulative excess return, 3y",
+   "value": -0.11,
+   "unit": "pp",
+   "display": "-0.1 pp",
+   "source": "calculated",
+   "period": "3y",
+   "basis": null
+  },
+  {
+   "name": "relative.td.3y",
+   "label": "Fund vs index (calculated) tracking difference, 3y",
+   "value": -0.03,
+   "unit": "pp",
+   "display": "-0.03 pp",
+   "source": "calculated",
+   "period": "3y",
+   "basis": null
+  },
+  {
+   "name": "relative.td_ex_cost.3y",
+   "label": "Fund vs index (calculated) tracking difference after adding back the fee, 3y",
+   "value": 0.07,
+   "unit": "pp",
+   "display": "0.07 pp",
+   "source": "calculated",
+   "period": "3y",
+   "basis": null
+  },
+  {
+   "name": "relative.excess_cum.5y",
+   "label": "Fund vs index (calculated) cumulative excess return, 5y",
+   "value": -0.8,
+   "unit": "pp",
+   "display": "-0.8 pp",
+   "source": "calculated",
+   "period": "5y",
+   "basis": null
+  },
+  {
+   "name": "relative.td.5y",
+   "label": "Fund vs index (calculated) tracking difference, 5y",
+   "value": -0.11,
+   "unit": "pp",
+   "display": "-0.11 pp",
+   "source": "calculated",
+   "period": "5y",
+   "basis": null
+  },
+  {
+   "name": "relative.td_ex_cost.5y",
+   "label": "Fund vs index (calculated) tracking difference after adding back the fee, 5y",
+   "value": -0.01,
+   "unit": "pp",
+   "display": "-0.01 pp",
+   "source": "calculated",
+   "period": "5y",
+   "basis": null
+  },
+  {
+   "name": "relative.info_ratio.5y",
+   "label": "Fund vs index (calculated) information ratio, 5y",
+   "value": -1.16,
+   "unit": "ratio",
+   "display": "-1.16",
+   "source": "calculated",
+   "period": "5y",
+   "basis": null
+  },
+  {
+   "name": "relative.tracking_error.5y",
+   "label": "Fund vs index (calculated) tracking error, 5y",
+   "value": 0.1,
+   "unit": "%",
+   "display": "0.10%",
+   "source": "calculated",
+   "period": "5y",
+   "basis": null
+  },
+  {
+   "name": "relative.beta.5y",
+   "label": "Fund vs index (calculated) beta, 5y",
+   "value": 1.0,
+   "unit": "ratio",
+   "display": "1.00",
+   "source": "calculated",
+   "period": "5y",
+   "basis": null
+  },
+  {
+   "name": "relative.r2.5y",
+   "label": "Fund vs index (calculated) R², 5y",
+   "value": 1.0,
+   "unit": "ratio",
+   "display": "1.00",
+   "source": "calculated",
+   "period": "5y",
+   "basis": null
+  },
+  {
+   "name": "relative.alpha.5y",
+   "label": "Fund vs index (calculated) alpha, 5y",
+   "value": -0.1,
+   "unit": "%",
+   "display": "-0.10%",
+   "source": "calculated",
+   "period": "5y",
+   "basis": null
+  },
+  {
+   "name": "relative.relative_vol.5y",
+   "label": "Fund vs index (calculated) relative volatility, 5y",
+   "value": 1.0,
+   "unit": "ratio",
+   "display": "1.00",
+   "source": "calculated",
+   "period": "5y",
+   "basis": null
+  },
+  {
+   "name": "comparison.excess_cum.1y",
+   "label": "Fund vs index cumulative excess return, 1y",
+   "value": 0.1,
+   "unit": "pp",
+   "display": "0.1 pp",
+   "source": "calculated",
+   "period": "1y",
+   "basis": "fund_nav"
+  },
+  {
+   "name": "comparison.td.1y",
+   "label": "Fund vs index tracking difference, 1y",
+   "value": 0.1,
+   "unit": "pp",
+   "display": "0.10 pp",
+   "source": "calculated",
+   "period": "1y",
+   "basis": "fund_nav"
+  },
+  {
+   "name": "comparison.td_ex_cost.1y",
+   "label": "Fund vs index tracking difference after adding back the fee, 1y",
+   "value": 0.2,
+   "unit": "pp",
+   "display": "0.20 pp",
+   "source": "calculated",
+   "period": "1y",
+   "basis": "fund_nav"
+  },
+  {
+   "name": "comparison.excess_cum.3y",
+   "label": "Fund vs index cumulative excess return, 3y",
+   "value": -0.1,
+   "unit": "pp",
+   "display": "-0.1 pp",
+   "source": "calculated",
+   "period": "3y",
+   "basis": "fund_nav"
+  },
+  {
+   "name": "comparison.td.3y",
+   "label": "Fund vs index tracking difference, 3y",
+   "value": -0.03,
+   "unit": "pp",
+   "display": "-0.03 pp",
+   "source": "calculated",
+   "period": "3y",
+   "basis": "fund_nav"
+  },
+  {
+   "name": "comparison.td_ex_cost.3y",
+   "label": "Fund vs index tracking difference after adding back the fee, 3y",
+   "value": 0.07,
+   "unit": "pp",
+   "display": "0.07 pp",
+   "source": "calculated",
+   "period": "3y",
+   "basis": "fund_nav"
+  },
+  {
+   "name": "comparison.excess_cum.5y",
+   "label": "Fund vs index cumulative excess return, 5y",
+   "value": -0.8,
+   "unit": "pp",
+   "display": "-0.8 pp",
+   "source": "calculated",
+   "period": "5y",
+   "basis": "fund_nav"
+  },
+  {
+   "name": "comparison.td.5y",
+   "label": "Fund vs index tracking difference, 5y",
+   "value": -0.11,
+   "unit": "pp",
+   "display": "-0.11 pp",
+   "source": "calculated",
+   "period": "5y",
+   "basis": "fund_nav"
+  },
+  {
+   "name": "comparison.td_ex_cost.5y",
+   "label": "Fund vs index tracking difference after adding back the fee, 5y",
+   "value": -0.01,
+   "unit": "pp",
+   "display": "-0.01 pp",
+   "source": "calculated",
+   "period": "5y",
+   "basis": "fund_nav"
+  },
+  {
+   "name": "comparison.hit_rate",
+   "label": "Fund vs index hit rate",
+   "value": 4.0,
+   "unit": "of 5",
+   "display": "4 of 5",
+   "source": "calculated",
+   "period": "12-month windows",
+   "basis": "fund_nav"
+  }
+ ],
+ "peers": [
+  {
+   "name": "Sample World Index Tracker B",
+   "isin": null,
+   "share_class": "B Acc",
+   "currency": "GBP",
+   "ocf_pct": 0.05,
+   "investor_type": null,
+   "minimum_investment": null,
+   "distribution": null,
+   "pricing_point": null,
+   "origin": "typed",
+   "basis": "fund market close NAV; peer pricing time not stated",
+   "used_for_returns": true,
+   "excluded": "",
+   "notes": [
+    "pricing time not stated, so the timing may differ"
+   ],
+   "returns_pct_a_year": {
+    "1y": 10.2,
+    "3y": 9.4,
+    "5y": 8.6
+   }
+  }
+ ],
+ "evidence": {
+  "gaps": {
+   "2019": -0.19122700535422155,
+   "2020": -0.12012987823759502,
+   "2021": -0.14006377868216457,
+   "2022": -0.23591104259295292,
+   "2023": -0.2605549576391031,
+   "2024": -0.028799737108453627,
+   "2025": 0.027091063578588148
+  },
+  "series": "fund_nav",
+  "hit_rate": [
+   5,
+   7
+  ],
+  "hit_margin_pp": 0.2,
+  "average": -0.13565647657655752,
+  "best": [
+   "2025",
+   0.027091063578588148
+  ],
+  "worst": [
+   "2023",
+   -0.2605549576391031
+  ],
+  "test": {
+   "what": "fee-adjusted yearly gap (gap + OCF)",
+   "n": 7,
+   "mean": null,
+   "t": null,
+   "p": null,
+   "significant": null,
+   "result": "Not run: 7 yearly values, at least 8 are needed"
+  },
+  "percentile": null
+ },
+ "candidate_actions": [
+  {
+   "id": "record_decision",
+   "action": "Record the decision and its reasons in the approval box at this review.",
+   "when": "at this review",
+   "required": false
+  },
+  {
+   "id": "read_sources",
+   "action": "Read the evidence and its sources on pages 2 to 4 before signing off this review.",
+   "when": "before signing off this review",
+   "required": false
+  }
+ ],
+ "suggested_conclusion": {
+  "heading": "Suggested conclusion (draft for the analyst)",
+  "text": "The evidence suggests the fund has delivered what it promised. It aims to track the Sample World Index, and over 5 years it was 0.11% a year behind its index, mostly explained by its 0.10% yearly fee. Its returns were ahead of a comparable tracker, and its fee is competitive with similar funds. Suggested verdict: Satisfied, no action needed.",
+  "code_text": "The evidence suggests the fund has delivered what it promised. It aims to track the Sample World Index, and over 5 years it was 0.11% a year behind its index, mostly explained by its 0.10% yearly fee. Its returns were ahead of a comparable tracker, and its fee is competitive with similar funds. Suggested verdict: Satisfied, no action needed.",
+  "source": "code",
+  "left_out": []
+ },
+ "judgement_points": [
+  "Fee gap is close to its Green limit, so a small change could move the Fees rating.",
+  "The limits used are illustrative and not yet agreed with the oversight team."
+ ],
+ "manager_questions": [
+  "What were the fund's transaction costs over the last year?",
+  "How are savings from the fund's size passed on to investors?",
+  "Are any changes planned to the fee or to the share classes offered?"
+ ],
+ "plan": {
+  "report_type": "quarterly_review",
+  "focus": [
+   "Mandate",
+   "Performance",
+   "Value for investors",
+   "Fees"
+  ],
+  "market_context": true,
+  "manager_questions": true,
+  "angles": [
+   "board",
+   "analyst",
+   "manager_meeting"
+  ],
+  "reason": "Default plan: offline run",
+  "source": "default (offline)",
+  "tasks": [
+   "Read and check the documents and prices (Extractor Agent and code)",
+   "Measure and rate all four questions (code); focus: Mandate, Performance",
+   "Compare with approved peers (code)",
+   "Research the market context (approved pages and up to 3 web searches)",
+   "Draft the summary for: board, oversight analyst, meeting with the manager (Reporting Agents)",
+   "Judge the drafts against the checklist and pick the best (Judge Agent and code)",
+   "Write the questions to ask the manager (code)",
+   "Build the report for the analyst to judge and sign (code, then a person)"
+  ]
+ }
+}
