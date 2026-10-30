@@ -9,7 +9,7 @@ import gradio as gr
 import pytest
 from fund_performance.config import WebSettings
 from fund_performance.controller import RunStopped
-from fund_performance.web import (AI_OFF, BUSY, FILES_TABLE, HOW_END, INSTRUCTIONS, LIMIT_REACHED, NEED_FILES, NEEDS_AI,
+from fund_performance.web import (FACTSHEET_LABEL, AI_OFF, BUSY, FILES_TABLE, HOW_END, INSTRUCTIONS, LIMIT_REACHED, NEED_FILES, NEEDS_AI,
                                   PUBLIC_DATA_HTML, AUDIENCE_HELP, REVIEW_TYPES, UI_QUESTION, AiLimits,
                                   build_ui, demo_files, example_zip, file_status, question_for, run_offline,
                                   prepare_inputs, start_review, summary_markdown, with_progress)
@@ -233,7 +233,7 @@ def test_the_page_follows_the_new_layout():
     buttons = {c.value: c.variant for c in _blocks(gr.Button) if not isinstance(c, gr.DownloadButton)}
     assert buttons == {"Run Fund Review": "primary"}           # Stage 4B: demos are picked from cards
     files = [c.label for c in _blocks(gr.File)]
-    for label in ("Fund price data · CSV or Excel · Required", "Fund factsheet · PDF or Word · Required"):
+    for label in ("Fund price data · CSV or Excel · Required", FACTSHEET_LABEL):
         assert label in files
     assert any(label.startswith("KID or prospectus") for label in files)
     assert any(label.startswith("Peer fund factsheets") for label in files)
@@ -379,3 +379,67 @@ def test_when_the_extractor_cannot_read_the_documents_the_page_says_so(tmp_path,
     outcome = asyncio.run(start_review("q", price, factsheet, None, None, [], False, limits, reader=failing_reader))
     assert outcome.message.startswith("**The review could not run")
     assert "The Extractor Agent could not read the documents" in outcome.message and "- ISIN: not found" in outcome.message
+
+
+
+# Stage 6C fix: the factsheet document is needed only when the agents read the documents
+SAMPLE = Path(__file__).resolve().parents[1] / "demo" / "sample_index_fund"
+SAMPLE_JSON = [str(SAMPLE / n) for n in ("fund_profile.json", "factsheet_performance.json", "peer.json")]
+
+
+def test_the_factsheet_label_says_when_it_is_needed():
+    from fund_performance.web import FACTSHEET_LABEL
+    assert "Required for AI reading" in FACTSHEET_LABEL and "not needed with complete JSON or a Quick Demo" in FACTSHEET_LABEL
+    assert any(c.label == FACTSHEET_LABEL for c in _blocks(gr.File))
+
+
+def test_quick_demo_runs_without_a_factsheet_and_says_it_is_not_needed(tmp_path, limits):
+    from fund_performance.web import factsheet_status
+    assert "Not needed" in factsheet_status(None, SAMPLE_JSON)
+    out = asyncio.run(start_review("q", str(SAMPLE / "prices.csv"), None, None, [], SAMPLE_JSON,
+                                   run_offline(str(SAMPLE / "prices.csv"), SAMPLE_JSON), limits, out_root=tmp_path))
+    assert out.data is not None and out.pdf and out.executive
+
+
+def test_complete_json_replaces_the_factsheet_in_a_manual_review(tmp_path, limits):
+    """ Not the demo files byte for byte (an edited profile): a normal review, still without a factsheet """
+    import json as _json
+    from fund_performance.web import factsheet_status, missing_json
+    edited = tmp_path / "fund_profile.json"
+    edited.write_text(_json.dumps(_json.loads((SAMPLE / "fund_profile.json").read_text()) | {"fund_name": "My Fund"}))
+    files = [str(edited), SAMPLE_JSON[1]]                            # peer.json is optional
+    assert missing_json(files) == [] and "Not needed" in factsheet_status(None, files)
+    seen = []
+
+    async def runner(folder, question, out_root, offline, **kwargs):
+        seen.append(sorted(p.name for p in Path(folder).iterdir()))
+        raise RunStopped("stopped in the test after the inputs were accepted")
+    out = asyncio.run(start_review("q", str(SAMPLE / "prices.csv"), None, None, [], files, False, limits,
+                                   out_root=tmp_path, runner=runner))
+    assert seen == [["factsheet_performance.json", "fund_profile.json", "prices.csv"]]
+    assert "stopped in the test" in out.message
+
+
+@pytest.mark.parametrize("names, missing", [
+    (["fund_profile.json"], "factsheet_performance.json"),
+    (["factsheet_performance.json", "peer.json"], "fund_profile.json"),
+])
+def test_incomplete_json_without_a_factsheet_is_refused_with_what_is_missing(tmp_path, limits, names, missing):
+    from fund_performance.web import factsheet_status
+    files = [str(SAMPLE / n) for n in names]
+    assert missing in factsheet_status(None, files) and "incomplete" in factsheet_status(None, files)
+    out = asyncio.run(start_review("q", str(SAMPLE / "prices.csv"), None, None, [], files, False, limits,
+                                   out_root=tmp_path))
+    assert out.data is None and "The JSON inputs are incomplete" in out.message and missing in out.message
+    assert limits.used_today() == 0                                  # refused before any AI run is counted
+
+
+def test_reading_documents_with_ai_still_needs_the_factsheet(tmp_path, limits):
+    read = []
+
+    async def reader(*args, **kwargs):
+        read.append(args)
+        raise AssertionError("the documents must not be read without a factsheet")
+    out = asyncio.run(start_review("q", str(SAMPLE / "prices.csv"), None, str(SAMPLE / "factsheet.pdf"), [],
+                                   None, False, limits, out_root=tmp_path, reader=reader))   # a KID only
+    assert out.message == NEED_FILES and not read and limits.used_today() == 0

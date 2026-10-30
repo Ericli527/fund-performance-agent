@@ -57,9 +57,12 @@ LIMIT_REACHED = "Today’s AI run limit is reached. You can still run the offlin
 BUSY = "A review is already running, please try again in 2 minutes."
 AI_OFF = ("AI runs are switched off here (AI_RUNS_ENABLED, and on a server the login APP_USERNAME and APP_PASSWORD). "
           "You can still run the Quick Demo and other reviews that need no AI.")
-NEEDS_AI = ("Reading the documents uses AI, which is switched off in this setup. Click **Use Demo Files**, or add "
-            "JSON files under **Additional options**.")
-NEED_FILES = "Please add the fund price data and the fund factsheet (both required), or pick a demo under **Try a demo**."
+NEEDS_AI = ("Reading the documents uses AI, which is switched off in this setup. Pick a Quick Demo under **Try a "
+            "demo**, or add complete JSON inputs under **Additional options**.")
+NEED_FILES = ("Please add the fund price data and the fund factsheet (the agents read it), or add complete JSON inputs "
+              "under **Additional options**, or pick a demo under **Try a demo**.")
+FACTSHEET_LABEL = "Fund factsheet · PDF or Word · Required for AI reading (not needed with complete JSON or a Quick Demo)"
+JSON_NEEDED = {"fund_profile": "fund_profile.json", "factsheet_performance": "factsheet_performance.json"}
 OFFLINE_ENV = "FUND_REVIEW_OFFLINE"         # development and testing only: every review runs without AI
 
 PUBLIC_DATA = ("**Public data only.** Files and figures may be sent to OpenAI, which has data sharing on for this "
@@ -162,6 +165,34 @@ def run_offline(price, json_files) -> bool:
 def _size(path: Path) -> str:
     n = path.stat().st_size
     return f"{n / 1024:.1f} KB" if n < 1024 * 1024 else f"{n / 1024 / 1024:.1f} MB"
+
+
+def missing_json(json_files) -> list[str]:
+    """ What complete JSON inputs still lack (a fund profile and the factsheet figures; peer.json is optional), so
+    they can replace the factsheet document. An unreadable file counts as missing """
+    from fund_performance.io import detect_file_type
+    kinds = set()
+    for p in [p for p in (json_files or []) if p]:
+        try:
+            kinds.add(detect_file_type(p))
+        except (OSError, ValueError):
+            continue
+    return [name for kind, name in JSON_NEEDED.items() if kind not in kinds]
+
+
+def factsheet_status(factsheet, json_files) -> str:
+    """ The line under the factsheet field: the file, or whether it is needed given the JSON inputs """
+    if _one(factsheet):
+        return file_status(factsheet, DOC_TYPES, "PDF or Word")
+    json_files = [p for p in (json_files or []) if p]
+    if not json_files:
+        return ""
+    missing = missing_json(json_files)
+    if not missing:
+        return ("<span class='fp-ok'>✓ Not needed: the JSON inputs already hold the fund profile and the factsheet "
+                "figures (no AI reading).</span>")
+    return (f"<span class='fp-bad'>✗ The JSON inputs are incomplete (missing {', '.join(missing)}): add them, or "
+            "remove the JSON files and add the factsheet.</span>")
 
 
 def file_status(value, allowed: list[str], kinds: str) -> str:
@@ -400,6 +431,9 @@ async def start_review(question: str, price, factsheet, kid, peer_factsheets, js
     if json_files:                                         # Advanced route: pre-typed data, no reading step
         if not price:
             return Outcome("Please add the price file as well as the JSON files.")
+        if (missing := missing_json(json_files)):           # complete JSON replaces the factsheet; partial does not
+            return Outcome(f"**The JSON inputs are incomplete:** missing {', '.join(missing)}. Add them, or remove "
+                           "the JSON files and add the fund factsheet so the agents can read it.")
         folder = Path(tempfile.mkdtemp(prefix="fund-review-"))
         try:
             prepare_inputs([price] + json_files, folder)
@@ -737,9 +771,9 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                                 type="filepath", height=150)
                 price_status = gr.HTML()
             with gr.Column(min_width=280):
-                factsheet = gr.File(label="Fund factsheet · PDF or Word · Required", file_types=DOC_TYPES,
+                factsheet = gr.File(label=FACTSHEET_LABEL, file_types=DOC_TYPES,
                                     type="filepath", height=150)
-                factsheet_status = gr.HTML()
+                factsheet_status_line = gr.HTML()
 
         # D. Report audience (recorded only in this version)
         audience = gr.Radio([(label, value) for value, label in AUDIENCES.items()], value="analyst",
@@ -831,10 +865,11 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
         private = {"api_visibility": "private"}         # the page is the only way in, with its limits
         review_type.change(question_for, inputs=[review_type, question], outputs=question, **private)
         for box, status_box, allowed, kinds in ((price, price_status, PRICE_TYPES, "CSV or Excel"),
-                                                (factsheet, factsheet_status, DOC_TYPES, "PDF or Word"),
                                                 (kid, kid_status, DOC_TYPES, "PDF or Word"),
                                                 (peer, peer_status, DOC_TYPES, "PDF or Word")):
             box.change(lambda v, a=allowed, k=kinds: file_status(v, a, k), inputs=box, outputs=status_box, **private)
+        for box in (factsheet, json_files):         # the factsheet's line depends on the JSON inputs too
+            box.change(factsheet_status, inputs=[factsheet, json_files], outputs=factsheet_status_line, **private)
         for trigger in (demo_choice.change, demo_mode.change):
             trigger(on_demo, inputs=[demo_choice, demo_mode],
                     outputs=[price, factsheet, kid, peer, json_files, options, demo_info], **private)
