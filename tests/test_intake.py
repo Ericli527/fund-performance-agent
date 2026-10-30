@@ -167,12 +167,13 @@ def test_the_controller_uses_the_confirmation_and_reports_progress(tmp_path):
     assert "factsheet.txt (read by the Extractor Agent; values checked by code)" in log["sources"]["input_files"]
     # Stage 6C progress: "Step X of 5 · who · what", in workflow order; the agents that read the documents before
     # the run are not announced again
-    steps_shown = [int(m.split(" of 5")[0].removeprefix("Step ")) for m in messages]
-    assert all(m.startswith("Step ") and " of 5 · " in m and m.endswith("…") for m in messages)
+    started = [m for m in messages if m.startswith("▶")]
+    steps_shown = [int(m.lstrip("▶ ").split(" of 5")[0].removeprefix("Step ")) for m in started]
+    assert all(" of 5 · " in m and m.endswith("…") for m in started)
     assert steps_shown == sorted(steps_shown) and steps_shown[0] == 1 and steps_shown[-1] == 5
-    assert messages[0] == "Step 1 of 5 · Code: self-check · Checking every value the agents read against the documents…"
-    assert not any("Extractor Agent" in m or "Mandate Agent" in m for m in messages)
-    assert any("Step 4 of 5 · Oversight Analyst and Evaluator" in m for m in messages)
+    assert started[0] == "▶ Step 1 of 5 · Code: self-check · Checking every value the agents read against the documents…"
+    assert not any("Extractor Agent" in m or "Mandate Agent" in m for m in started)   # read on the page, not again
+    assert any(m.startswith("▶ Step 4 of 5 · Reporting Agents and Judge") for m in started)
 
 
 # The documents route from the command line, and the live check that it matches the JSON route

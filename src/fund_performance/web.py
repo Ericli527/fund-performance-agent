@@ -31,6 +31,7 @@ import re
 import shutil
 import tempfile
 import traceback
+import uuid
 from typing import Awaitable, Callable
 import zipfile
 from html import escape
@@ -40,6 +41,8 @@ from fund_performance.dashboard import dashboard_data, dashboard_html, technical
 from fund_performance.controller import (DEFAULT_QUESTION, DOCUMENTS_STAGE, RunResult, RunStopped, progress_line,
                                          run_review)
 from fund_performance.plain import verdict_meaning, verdict_name
+from agents import trace
+from fund_performance.agents.base import AI_CALLS, api_key_present
 from fund_performance.presentation import MISSING_MEANING, download_copy, missing_evidence
 from fund_performance.demos import Demo, find_demo, matching_demo, return_checks, shown_demos
 from fund_performance.report import ANGLE_WORDS, REPORT_TYPE_WORDS
@@ -336,6 +339,7 @@ class Outcome:
     log: str | None = None
     data: dict | None = None                 # the finished run, for the dashboard (dashboard.dashboard_data)
     executive: str | None = None             # report_executive.pdf (stage 3); None if it could not fit
+    run_info: str = ""                       # run ID, trace ID and AI calls, for the progress area
 
 
 def summary_markdown(result: RunResult) -> str:
@@ -398,11 +402,23 @@ async def _run_controller(folder: Path, question: str, offline: bool, on_step: P
         return Outcome(f"**{e}**")
     except Exception as e:                       # noqa: BLE001 - shown on the page, details in the server log
         traceback.print_exc()
-        return Outcome(f"**Something went wrong** ({type(e).__name__}). Please try again, or run it offline.")
+        return Outcome(f"**Something went wrong outside the review steps** ({type(e).__name__}). Please try again; "
+                       "the server log has the details.")
     log = result.run_dir / "log.json"
     executive = getattr(result, "executive_pdf", None)
     return Outcome(summary_markdown(result), _download(result, result.pdf), str(log) if log.exists() else None,
-                   dashboard_data(result), _download(result, executive) if executive else None)
+                   dashboard_data(result), _download(result, executive) if executive else None,
+                   run_info(result.log.run) if getattr(result, "log", None) else "")
+
+
+def run_info(run: dict) -> str:
+    """ "Run 20261030-…-ab12cd34 · 5 AI calls (Extractor Agent 1, …) · trace trace_…" for the progress area """
+    calls = run.get("ai_calls") or {}
+    by_agent = ", ".join(f"{k} {v}" for k, v in (calls.get("by_agent") or {}).items())
+    parts = [f"Run {run.get('run_id', '–')}", f"{calls.get('total', 0)} AI call(s)" + (f" ({by_agent})" if by_agent else "")]
+    if run.get("trace_id"):
+        parts.append(f"OpenAI trace {run['trace_id']}")
+    return " · ".join(parts)
 
 
 def _download(result: RunResult, pdf: Path | None) -> str | None:
@@ -456,33 +472,59 @@ async def start_review(question: str, price, factsheet, kid, peer_factsheets, js
         return Outcome(NEEDS_AI)
     if (refused := limits.start()):
         return Outcome(refused)
-    folder = Path(tempfile.mkdtemp(prefix="fund-review-"))
-    try:
-        if on_step:
-            on_step(progress_line(*DOCUMENTS_STAGE))
+    # One OpenAI trace for the whole review: the reading agents here and every agent the controller runs
+    review_id = f"review-{uuid.uuid4().hex[:12]}"
+    with trace("Fund performance review", group_id=review_id, metadata={"review": review_id},
+               disabled=not api_key_present()):
+        folder = Path(tempfile.mkdtemp(prefix="fund-review-"))
         try:
-            intake = await reader(Path(factsheet), Path(kid) if kid else None, [Path(p) for p in peers])
-        except Exception as e:                   # noqa: BLE001
-            traceback.print_exc()
-            return Outcome(f"**The documents could not be read** ({type(e).__name__}). Check they are PDF or Word files.")
-        # No person checks the values: code checks each one against the documents and flags what it cannot confirm
-        built = self_check(intake)
-        if built.problems:
-            failed = [f["message"] for f in intake.get("flags", []) if f.get("level") == "blocking"]
-            why = (" The Extractor Agent could not read the documents (" + "; ".join(failed)[:300] + ")."
-                   if failed else "")
-            return Outcome("**The review could not run: these values were not found in the documents.**" + why
-                           + "\n" + "\n".join(f"- {x}" for x in built.problems)
-                           + "\n\nUpload the fund's factsheet (and its KID for the objective), or use the JSON files "
-                             "under Advanced.")
-        write_inputs(built, folder)
-        prepare_inputs([price], folder)
-        return await _run_controller(folder, question, False, on_step, out_root, runner,
-                                     intake=intake | {"rows": built.rows,
-                                                      "flags": intake.get("flags", []) + built.flags})
-    finally:
-        limits.finish()
-        shutil.rmtree(folder, ignore_errors=True)
+            if on_step:
+                on_step(progress_line(*DOCUMENTS_STAGE))
+            calls: list[dict] = []
+            token = AI_CALLS.set(calls)             # the reading agents' calls count towards this review
+            try:
+                intake = await reader(Path(factsheet), Path(kid) if kid else None, [Path(p) for p in peers])
+            except Exception as e:                   # noqa: BLE001
+                traceback.print_exc()
+                return Outcome(f"**Step 1 of 5 failed: the documents could not be read** ({type(e).__name__}). Check "
+                               "they are PDF or Word files.")
+            finally:
+                AI_CALLS.reset(token)
+            if on_step:
+                on_step(f"✓ Step 1 of 5 · {DOCUMENTS_STAGE[1]} · done ({len(calls)} AI call(s))")
+            intake = intake | {"ai_calls": calls}
+            # No person checks the values: code checks each one against the documents and flags what it cannot confirm
+            built = self_check(intake)
+            if built.problems:
+                failed = [f["message"] for f in intake.get("flags", []) if f.get("level") == "blocking"]
+                why = (" The Extractor Agent could not read the documents (" + "; ".join(failed)[:300] + ")."
+                       if failed else "")
+                return Outcome("**The review could not run: these values were not found in the documents.**" + why
+                               + "\n" + "\n".join(f"- {x}" for x in built.problems)
+                               + "\n\nUpload the fund's factsheet (and its KID for the objective), or use the JSON files "
+                                 "under Advanced.")
+            write_inputs(built, folder)
+            prepare_inputs([price], folder)
+            return await _run_controller(folder, question, False, on_step, out_root, runner,
+                                         intake=intake | {"rows": built.rows,
+                                                          "flags": intake.get("flags", []) + built.flags})
+        finally:
+            limits.finish()
+            shutil.rmtree(folder, ignore_errors=True)
+
+
+def progress_history(history: list[str], line: str) -> list[str]:
+    """ The steps so far: a step's outcome (✓ done, ↷ skipped, ✗ failed) replaces its "▶ running" line """
+    key = line.lstrip("▶✓↷✗• ").split(" · ")[:2]
+    if history and history[-1].startswith("▶") and history[-1].lstrip("▶ ").split(" · ")[:2] == key:
+        return history[:-1] + [line]
+    return history + [line]
+
+
+def progress_markdown(history: list[str], run_info: str = "") -> str:
+    """ The progress area: every step so far, one per line, and the run ID, trace and AI calls when it ends """
+    lines = [f"- {x}" for x in history]
+    return "\n".join(lines + ([f"\n{run_info}"] if run_info else []))
 
 
 async def with_progress(work: Callable[[Progress], Awaitable[Outcome]]):
@@ -838,15 +880,19 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             offline = run_offline(p, j)
             banner = demo_banner(p, j, picked, mode)
             tag = demo_tag(p, j, picked, mode)
+            history: list[str] = []
             async for kind, item in with_progress(lambda say: start_review(q, p, f, k, pr, j, offline, limits, say)):
                 if kind == "progress":
-                    yield (item,) + (gr.update(),) * 9
+                    history = progress_history(history, item)
+                    yield (progress_markdown(history),) + (gr.update(),) * 9
                 else:
                     if tag:
                         item.message = f"{tag}\n\n{item.message}"
                     if banner and item.data is not None:
                         item.data = item.data | {"demo": banner}
-                    yield ("", ) + show(item, audience_value)
+                    shown = show(item, audience_value)
+                    done = progress_markdown(history, item.run_info) if history else ""
+                    yield (done,) + shown
 
         def on_audience(data, audience_value):
             """ A new view and a new primary download from the saved results: the review is not run again """

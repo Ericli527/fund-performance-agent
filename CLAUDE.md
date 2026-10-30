@@ -181,5 +181,13 @@ Instructions for Claude Code in this project. The build specification is
   "Monitor (data check needed: Fees)"); Amber/Red stand with a missing-evidence note. The review is not stopped.
 - Live progress (Stage 6C): "Step X of 5 · agent or component · status", sent by the controller as each step really
   starts (`controller.STAGES`); skipped AI steps are not announced.
+- Version 1 pilot workflow (hotfix): one Reporting Agent draft (`drafting.max_drafts: 1`), one Judge pass, at most
+  one targeted rewrite accepted on code's checks (`rejudge_after_rewrite: false`); web research off
+  (`research.enabled: false`), so no Research, Analyst or Evaluator calls; email off. The code for all of them stays
+  (tests switch them on). Optional AI steps (Task Planner, Mandate, Extractor in the controller, research, AI text,
+  drafts) never destroy a review: an unexpected error or timeout gives the step's fallback and a flag with the reason;
+  a critical step's error stops the run naming "Step X of 5 (component)". One OpenAI trace per review (the page's
+  reading agents included); log.json records run_id, trace_id and every AI call (agent, attempt, seconds, outcome).
+  Progress shows "▶" when a step starts and its outcome (✓ done, ↷ skipped, ✗ failed) when it ends.
 - Executive summary: AI drafts over `drafting.max_summary_chars` (700) fail code's checks; if page 1 still overflows
   with an AI summary, the Executive Report uses code's summary (info flag) and the Detailed Report keeps the AI text.

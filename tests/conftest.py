@@ -97,3 +97,9 @@ def _ai_switch_on(monkeypatch):
     """ Stage 6B: AI runs are off unless AI_RUNS_ENABLED is true. Tests of the AI paths (mocked) run with it on, and
     no server login (PORT unset); tests of the switch itself turn it off """
     monkeypatch.setenv("AI_RUNS_ENABLED", "true")
+
+
+@pytest.fixture(autouse=True)
+def _no_trace_upload(monkeypatch):
+    """ Unit tests never send OpenAI traces (some set a fake key); live tests keep tracing """
+    monkeypatch.setenv("OPENAI_AGENTS_DISABLE_TRACING", "1")

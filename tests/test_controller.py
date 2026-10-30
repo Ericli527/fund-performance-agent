@@ -21,6 +21,15 @@ def settings(**timeouts):
     return s
 
 
+def full_settings(**timeouts):
+    """ The features the Version 1 pilot switches off in settings.yaml, switched on: web research (and so the
+    Analyst and Evaluator), one draft per angle, and the Judge after the rewrite. Their code is kept and tested """
+    s = settings(**timeouts)
+    s.research.enabled = True
+    s.drafting.max_drafts, s.drafting.rejudge_after_rewrite = 3, True
+    return s
+
+
 def log_of(run_dir_parent):
     run_dir = next(run_dir_parent.iterdir())
     return json.loads((run_dir / "log.json").read_text())
@@ -66,7 +75,7 @@ def test_test1_offline_run_logs_every_step(tmp_path):
     result = asyncio.run(run_review(TEST1, out_root=tmp_path, offline=True))
     log = json.loads((result.run_dir / "log.json").read_text())
     assert [(s["step"], s["status"]) for s in log["steps"]] == [
-        ("read_files", "ok"), ("plan", "skipped"), ("extractor", "skipped"), ("peers", "skipped"), ("data_checks", "ok"),
+        ("read_files", "ok"), ("extractor", "skipped"), ("peers", "skipped"), ("plan", "skipped"), ("data_checks", "ok"),
         ("mandate", "skipped"),
         ("calculator", "ok"), ("scorecard", "ok"), ("research", "skipped"), ("narrative", "skipped"),
         ("drafts", "skipped"), ("report", "ok"), ("email", "skipped")]
@@ -147,7 +156,7 @@ def judge_answer(prompt):
 @requires_test1
 def test_test1_full_run_mocked(tmp_path):
     runners = mocked()
-    result = asyncio.run(run_review(TEST1, out_root=tmp_path, runners=runners))
+    result = asyncio.run(run_review(TEST1, out_root=tmp_path, runners=runners, settings=full_settings()))
     log = json.loads((result.run_dir / "log.json").read_text())
     status = {s["step"]: s["status"] for s in log["steps"]}
     assert status == {"read_files": "ok", "plan": "ok", "drafts": "ok", "extractor": "skipped", "peers": "skipped",
@@ -168,7 +177,8 @@ def test_test1_full_run_mocked(tmp_path):
 @requires_test1
 def test_test1_evaluator_failing_twice_gives_the_template_and_a_flag(tmp_path):
     fail = {"pass": False, "issues": [{"check": "plain_english", "detail": "sentence too long"}]}
-    result = asyncio.run(run_review(TEST1, out_root=tmp_path, runners=mocked(evaluator_answer=fail)))
+    result = asyncio.run(run_review(TEST1, out_root=tmp_path, runners=mocked(evaluator_answer=fail),
+                                    settings=full_settings()))
     assert result.narrative.source == "template"
     assert ("AI text failed quality check: the Evaluator rejected the draft (plain_english)"
             in (result.run_dir / "run_log.txt").read_text())
@@ -182,7 +192,7 @@ def test_a_slow_ai_step_times_out_and_is_flagged(tmp_path):
     assert next(s for s in log["steps"] if s["step"] == "mandate")["status"] == "timeout"
     # A blocking flag does not stop the run: the verdict waits for a data check, and the report says why
     assert result.facts["scorecard"]["verdict"] == "Pending data check" and result.pdf.exists()
-    assert "Mandate Agent did not answer within 0.05 seconds" in (result.run_dir / "run_log.txt").read_text()
+    assert "Mandate Agent did not finish within 0.05 seconds" in (result.run_dir / "run_log.txt").read_text()
 
 
 # The Extractor runs only when there is no factsheet_performance.json
@@ -240,7 +250,7 @@ def test_email_when_switched_on_goes_through_resend_and_is_logged(tmp_path, monk
 # Task Planner, Reporting Agents and the Judge in the run
 @requires_test1
 def test_the_judged_ai_draft_becomes_the_suggested_conclusion(tmp_path):
-    result = asyncio.run(run_review(TEST1, out_root=tmp_path, runners=mocked()))
+    result = asyncio.run(run_review(TEST1, out_root=tmp_path, runners=mocked(), settings=full_settings()))
     concl = result.facts["suggested_conclusion"]
     assert concl["source"] == "ai" and concl["angle"] == "analyst"            # tie: the Judge's preferred draft
     assert concl["text"].startswith("For the analyst:") and concl["code_text"] != concl["text"]
@@ -262,7 +272,7 @@ def test_a_fee_question_plan_skips_the_market_research(tmp_path):
     runners.task_planner = FakeRunBy(lambda p: TASK_PLAN | {"report_type": "fee_question", "focus": ["Fees"],
                                                             "market_context": False, "manager_questions": False,
                                                             "angles": ["board"]})
-    result = asyncio.run(run_review(TEST1, out_root=tmp_path, runners=runners))
+    result = asyncio.run(run_review(TEST1, out_root=tmp_path, runners=runners, settings=full_settings()))
     log = json.loads((result.run_dir / "log.json").read_text())
     research = next(s for s in log["steps"] if s["step"] == "research")
     assert research["status"] == "skipped" and research["notes"] == ["the plan needs no market context"]
@@ -280,22 +290,31 @@ def test_without_the_new_agents_the_run_uses_the_default_plan_and_code_conclusio
     assert result.facts["drafts"] and not any(d["chosen"] for d in result.facts["drafts"])
 
 
-# Stage 6C: live progress, from the steps that actually run
-def test_progress_shows_the_step_of_5_and_the_agent_as_each_step_runs(tmp_path):
+# Live progress, from the steps that actually run: "▶" when a step starts, then its outcome
+def _stage(line: str) -> int:
+    return int(line.lstrip("▶✓↷✗• ").split(" of 5")[0].removeprefix("Step "))
+
+
+def test_progress_runs_through_the_five_steps_in_order_with_the_agents(tmp_path):
     from fund_performance.controller import STAGES, progress_line
+    sample = Path(__file__).resolve().parents[1] / "demo" / "sample_index_fund"
     messages = []
-    result = asyncio.run(run_review(Path(__file__).resolve().parents[1] / 'demo' / 'sample_index_fund', out_root=tmp_path, runners=mocked(), on_step=messages.append))
+    result = asyncio.run(run_review(sample, out_root=tmp_path, runners=mocked(), on_step=messages.append))
     assert result.pdf.is_file()
-    stages = [int(m.split(" of 5")[0].removeprefix("Step ")) for m in messages]
-    assert stages == sorted(stages) and set(stages) == {1, 2, 3, 4, 5}
-    for step in ("read_files", "plan", "data_checks", "mandate", "calculator", "scorecard", "narrative", "drafts",
-                 "report"):
+    started = [m for m in messages if m.startswith("▶")]
+    assert [_stage(m) for m in started] == sorted(_stage(m) for m in started)     # 1 -> 5, never back
+    assert {_stage(m) for m in started} == {1, 2, 3, 4, 5}
+    for step in ("read_files", "plan", "data_checks", "mandate", "calculator", "scorecard", "drafts", "report"):
         assert progress_line(*STAGES[step]) in messages, step
-    assert "Step 2 of 5 · Mandate Agent · Reading the fund's objective and promises…" in messages
-    assert "Step 4 of 5 · Reporting Agents and Judge · Drafting and judging the summary…" in messages
+    assert "▶ Step 2 of 5 · Task Planner Agent · Choosing what the review should focus on…" in messages
+    assert "▶ Step 4 of 5 · Reporting Agents and Judge · Drafting and judging the summary…" in messages
+    assert any(m.startswith("↷ Step 3 of 5 · Research Agents · skipped: web research is off") for m in messages)
+    assert any(m.startswith("✓ Step 5 of 5 · Code: reports · done (") for m in messages)
 
 
-def test_an_offline_run_announces_no_agent(tmp_path):
+def test_an_offline_run_starts_no_agent_and_says_which_steps_it_skipped(tmp_path):
+    sample = Path(__file__).resolve().parents[1] / "demo" / "sample_index_fund"
     messages = []
-    asyncio.run(run_review(Path(__file__).resolve().parents[1] / 'demo' / 'sample_index_fund', out_root=tmp_path, offline=True, on_step=messages.append))
-    assert messages and all(" · Code: " in m for m in messages) and not any("Step 4 of 5" in m for m in messages)
+    asyncio.run(run_review(sample, out_root=tmp_path, offline=True, on_step=messages.append))
+    assert all(" · Code: " in m for m in messages if m.startswith("▶"))
+    assert "↷ Step 2 of 5 · Task Planner Agent · skipped: offline run: default plan" in messages

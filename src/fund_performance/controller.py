@@ -24,14 +24,19 @@ from typing import Callable
 from datetime import datetime
 from functools import partial
 import json
+import re
 from pathlib import Path
 import time
+import traceback
+from contextlib import nullcontext
+from contextvars import ContextVar
 import uuid
 from fund_performance.agents.analyst import AI_TEXT_UNAVAILABLE, Narrative, template, write_narrative
-from fund_performance.agents.base import RunFn
+from agents import get_current_trace, trace
+from fund_performance.agents.base import AI_CALLS, RunFn, api_key_present
 from fund_performance.agents.evaluator import review
 from fund_performance.agents.extractor import extract
-from fund_performance.agents.judge import draft_and_judge
+from fund_performance.agents.judge import draft_and_judge, REVISED
 from fund_performance.agents.task_planner import TaskPlan, plan_tasks
 from fund_performance.agents.mandate import read_mandate
 from fund_performance.agents.research import market_name, research, vet_summaries
@@ -81,30 +86,33 @@ class Runners:
 
 
 ProgressFn = Callable[[str], None]
-# Live progress (Stage 6C): each workflow step, as it actually starts, is shown as "Step X of 5 · who · what".
-# AI steps that are skipped (offline, or already done on the page) are not announced
+# Live progress: each workflow step is shown as "Step X of 5 · who · what" when it actually starts, and again with
+# its outcome when it ends (done, skipped, failed). The five stages: 1 documents (Extractor), 2 planning and mandate
+# (Task Planner, Mandate, data checks), 3 analysis and research (code, Research Agents), 4 reporting and evaluation
+# (Reporting Agent, Judge; Analyst and Evaluator when there are web sources), 5 the reports
 STAGES = {
     "read_files": (1, "Code: input files", "Reading the price file and the inputs"),
     "self_check": (1, "Code: self-check", "Checking every value the agents read against the documents"),
-    "plan": (1, "Task Planner Agent", "Choosing what the review should focus on"),
+    "plan": (2, "Task Planner Agent", "Choosing what the review should focus on"),
     "extractor": (1, "Extractor Agent", "Reading the factsheet and KID"),
     "peers": (1, "Extractor Agent", "Reading the approved peers' factsheets"),
     "data_checks": (2, "Code: data checks", "Checking the prices and the factsheet figures"),
     "mandate": (2, "Mandate Agent", "Reading the fund's objective and promises"),
     "calculator": (3, "Code: calculator", "Calculating returns, risk and gaps to the index"),
     "scorecard": (3, "Code: scorecard", "Rating mandate, performance, value for investors and fees"),
-    "research": (4, "Research Agents", "Checking approved sources and searching for market news"),
+    "research": (3, "Research Agents", "Checking approved sources and searching for market news"),
     "narrative": (4, "Oversight Analyst and Evaluator", "Writing and checking the market context"),
     "drafts": (4, "Reporting Agents and Judge", "Drafting and judging the summary"),
     "report": (5, "Code: reports", "Building the Executive and Detailed PDF reports"),
 }
 TOTAL_STAGES = 5
+OUTCOME_ICON = {"ok": "✓", "skipped": "↷", "failed": "✗", "timeout": "✗", "stopped": "✗"}
 DOCUMENTS_STAGE = (1, "Extractor Agent and Mandate Agent", "Reading the factsheet, KID and peer factsheets")
 
 
 def progress_line(stage: int, who: str, what: str) -> str:
-    """ "Step 2 of 5 · Code: data checks · Checking the prices and the factsheet figures…" """
-    return f"Step {stage} of {TOTAL_STAGES} · {who} · {what}…"
+    """ "▶ Step 2 of 5 · Code: data checks · Checking the prices and the factsheet figures…" """
+    return f"▶ Step {stage} of {TOTAL_STAGES} · {who} · {what}…"
 
 
 @dataclass
@@ -148,6 +156,11 @@ class RunLog:
         record.seconds = round(time.monotonic() - self._clock.get(record.step, time.monotonic()), 2)
         record.outputs |= outputs or {}
         record.notes += notes or []
+        if self.on_step and record.step in STAGES:
+            stage, who, _ = STAGES[record.step]
+            word = {"ok": f"done ({record.seconds:.1f} s)", "skipped": "skipped"}.get(status, status)
+            why = f": {record.notes[0]}" if status != "ok" and record.notes else ""
+            self.on_step(f"{OUTCOME_ICON.get(status, '•')} Step {stage} of {TOTAL_STAGES} · {who} · {word}{why}")
 
     def finish(self, status: str, message: str | None = None) -> None:
         self.run |= {"ended": _now(), "status": status, "message": message}
@@ -192,6 +205,13 @@ def new_run_dir(root: Path) -> Path:
             continue
 
 
+def _count(calls: list[dict]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for c in calls:
+        out[c["agent"]] = out.get(c["agent"], 0) + 1
+    return out
+
+
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
@@ -210,12 +230,39 @@ def find_inputs(folder: Path) -> dict:
     return found
 
 
+_FAILURE: ContextVar[str | None] = ContextVar("_FAILURE", default=None)
+
+
 async def _timed(coro, seconds: float):
-    """ Run one AI step with its timeout; None if it ran over """
+    """ Run one optional AI step with its timeout; None if it ran over or failed unexpectedly. An optional step
+    never destroys the review: the caller uses its fallback, and _why() says what happened (the traceback goes to
+    the server log) """
+    _FAILURE.set(None)
     try:
         return await asyncio.wait_for(coro, timeout=seconds)
     except asyncio.TimeoutError:
+        _FAILURE.set(f"did not finish within {seconds:g} seconds")
         return None
+    except Exception as e:                       # noqa: BLE001 - any unexpected error in an optional AI step
+        traceback.print_exc()
+        _FAILURE.set(f"failed ({type(e).__name__}: {_short(str(e))})")
+        return None
+
+
+def _why(seconds: float) -> str:
+    """ "did not finish within 60 seconds" or "failed (ValueError: ...)" for the last _timed step """
+    return _FAILURE.get() or f"did not finish within {seconds:g} seconds"
+
+
+def _status() -> str:
+    return "failed" if (_FAILURE.get() or "").startswith("failed") else "timeout"
+
+
+def _short(text: str, limit: int = 160) -> str:
+    """ An error message for the page and log.json: one line, no file paths, no key-like strings, short """
+    text = re.sub(r"(/[\w.\-]+)+", "<path>", " ".join(text.split()))
+    text = re.sub(r"\b(sk|re)[-_][A-Za-z0-9_\-]{8,}", "<redacted>", text)
+    return text[:limit] + ("…" if len(text) > limit else "")
 
 
 async def run_review(folder: Path, question: str = DEFAULT_QUESTION, out_root: Path | None = None,
@@ -231,15 +278,38 @@ async def run_review(folder: Path, question: str = DEFAULT_QUESTION, out_root: P
     folder = Path(folder)
     run_dir = new_run_dir(Path(out_root or Path(__file__).resolve().parents[2] / "runs"))
     log = RunLog(folder, question, offline, on_step)
+    log.run["run_id"] = run_dir.name
     text_log: list[str] = []
+    calls: list[dict] = list((intake or {}).get("ai_calls", []))       # the page's reading step, if any
+    token = AI_CALLS.set(calls)
+    current = get_current_trace()
+    review_trace = nullcontext(current) if current else trace(
+        "Fund performance review", group_id=run_dir.name, metadata={"run_id": run_dir.name},
+        disabled=offline or not api_key_present())
     try:
-        result = await _run(folder, question, run_dir, offline, t, s, r, log, text_log, intake)
+        with review_trace as tr:
+            trace_id = getattr(tr, "trace_id", None)
+            log.run["trace_id"] = trace_id if trace_id and trace_id != "no-op" else None
+            result = await _run(folder, question, run_dir, offline, t, s, r, log, text_log, intake)
         log.finish("ok")
         return result
     except RunStopped as e:
         log.finish("stopped", str(e))
         raise
+    except Exception as e:                       # noqa: BLE001 - a critical step failed: stop, naming the stage
+        traceback.print_exc()
+        running = next((x for x in reversed(log.steps) if x.status == "running"), None)
+        where = (f"Step {STAGES[running.step][0]} of {TOTAL_STAGES} ({STAGES[running.step][1]})"
+                 if running and running.step in STAGES else f"step '{running.step}'" if running else "the start")
+        if running:
+            log.end(running, "failed", notes=[f"{type(e).__name__}: {_short(str(e))}"])
+        message = (f"Run stopped at {where}: {type(e).__name__}: {_short(str(e))}. Calculations and reports were not "
+                   f"completed; run ID {run_dir.name} (details in its log.json and the server log)")
+        log.finish("stopped", message)
+        raise RunStopped(message) from e
     finally:
+        log.run["ai_calls"] = {"total": len(calls), "by_agent": _count(calls), "calls": calls}
+        AI_CALLS.reset(token)
         (run_dir / "log.json").write_text(json.dumps(log.to_json(), indent=1, ensure_ascii=False), encoding="utf-8")
         if text_log:
             (run_dir / "run_log.txt").write_text("\n".join(text_log), encoding="utf-8")
@@ -256,7 +326,8 @@ async def _read_approved(paths: list[Path], r: Runners, s: RunSettings,
     for path, result in zip(paths, results):
         if result is None:
             flags.append(DataFlag(check="peers", level="warning", message=(
-                f"Approved peer factsheet {path.name}: the Extractor Agent did not finish in time, so it is left out")))
+                f"Approved peer factsheet {path.name}: the Extractor Agent did not finish in time or failed, so it is left "
+                "out")))
             continue
         values, extracted, _ = result
         flags += [DataFlag(check="peers", level="warning" if f.level == "blocking" else f.level,
@@ -317,24 +388,6 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
             f"{name} (read by the Extractor Agent; values checked by code)" for name in intake.get("documents", [])]
     log.end(step, outputs={"input_files": input_files})
 
-    # 1b. Task plan: the Task Planner Agent turns the request into tasks (menu choices only, checked by code)
-    step = log.start("plan", ["question", "fund_profile.json: public details"], announce=not offline)
-    if offline:
-        plan = TaskPlan(reason="Default plan: offline run", source="default (offline)")
-        log.end(step, "skipped", outputs=plan.to_dict(), notes=["offline run: default plan"])
-    else:
-        planned = await _timed(plan_tasks(question, profile, r.task_planner), s.timeouts_seconds.task_planner)
-        if planned is None:
-            plan = TaskPlan(reason="Default plan: the Task Planner did not answer in time")
-            flags.append(DataFlag(check="task_planner", level="info", message=(
-                f"The Task Planner Agent did not answer within {s.timeouts_seconds.task_planner:g} seconds; default plan used")))
-            log.end(step, "timeout", outputs=plan.to_dict())
-        else:
-            plan, plan_flags = planned
-            flags += plan_flags
-            log.end(step, "ok" if plan.source == "planner" else "failed", outputs=plan.to_dict())
-    text_log.append(f"Plan ({plan.source}): {plan.report_type}; focus {', '.join(plan.focus)}; " + " -> ".join(plan.tasks))
-
     # 2. Extractor (only when no factsheet_performance.json was supplied)
     step = log.start("extractor", [p.name for p in files["documents"]],
                      announce=not intake and factsheet is None and not offline and bool(files["documents"]))
@@ -353,9 +406,9 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         extracted = await _timed(extract(text, r.extractor), s.timeouts_seconds.extractor)
         if extracted is None:
             flags.append(DataFlag(check="extractor_agent", level="warning", message=(
-                f"No factsheet figures: the Extractor Agent did not finish within {s.timeouts_seconds.extractor:g} "
-                "seconds. Calculated figures only")))
-            log.end(step, "timeout")
+                f"No factsheet figures: the Extractor Agent {_why(s.timeouts_seconds.extractor)}. Calculated figures "
+                "only")))
+            log.end(step, _status(), notes=[_why(s.timeouts_seconds.extractor)])
         else:
             factsheet = extracted.factsheet
             flags += extracted.flags
@@ -384,6 +437,24 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                             if any(n.endswith(path.name) for n in notes)]
             log.step("read_files").outputs["input_files"] = input_files
 
+    # 2a. Task plan (Step 2 of 5): the Task Planner Agent turns the request into tasks (menu choices only, checked by code)
+    step = log.start("plan", ["question", "fund_profile.json: public details"], announce=not offline)
+    if offline:
+        plan = TaskPlan(reason="Default plan: offline run", source="default (offline)")
+        log.end(step, "skipped", outputs=plan.to_dict(), notes=["offline run: default plan"])
+    else:
+        planned = await _timed(plan_tasks(question, profile, r.task_planner), s.timeouts_seconds.task_planner)
+        if planned is None:
+            plan = TaskPlan(reason="Default plan: the Task Planner did not answer in time")
+            flags.append(DataFlag(check="task_planner", level="info", message=(
+                f"The Task Planner Agent {_why(s.timeouts_seconds.task_planner)}; default plan used")))
+            log.end(step, _status(), outputs=plan.to_dict(), notes=[_why(s.timeouts_seconds.task_planner)])
+        else:
+            plan, plan_flags = planned
+            flags += plan_flags
+            log.end(step, "ok" if plan.source == "planner" else "failed", outputs=plan.to_dict())
+    text_log.append(f"Plan ({plan.source}): {plan.report_type}; focus {', '.join(plan.focus)}; " + " -> ".join(plan.tasks))
+
     # 3. Data checks
     step = log.start("data_checks", [files["prices"].name] + (["factsheet figures"] if factsheet else []))
     try:
@@ -411,8 +482,8 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         mandate = await _timed(read_mandate(profile, r.mandate), s.timeouts_seconds.mandate)
         if mandate is None:
             flags.append(DataFlag(check="mandate_agent", level="blocking", message=(
-                f"CHECK DATA: Mandate Agent did not answer within {s.timeouts_seconds.mandate:g} seconds")))
-            log.end(step, "timeout")
+                f"CHECK DATA: Mandate Agent {_why(s.timeouts_seconds.mandate)}")))
+            log.end(step, _status(), notes=[_why(s.timeouts_seconds.mandate)])
         else:
             profile, promises = mandate.profile, mandate.promises
             flags += mandate.flags
@@ -444,9 +515,11 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
 
     # 7. Research: approved sources, planner and web searches, then vetting
     vetted: list[dict] = []
-    step = log.start("research", announce=not offline and plan.market_context)
+    step = log.start("research", announce=not offline and plan.market_context and s.research.enabled)
     if offline:
         log.end(step, "skipped", notes=["offline run"])
+    elif not s.research.enabled:
+        log.end(step, "skipped", notes=["web research is off (config/settings.yaml research.enabled)"])
     elif not plan.market_context:
         log.end(step, "skipped", notes=["the plan needs no market context"])
     else:
@@ -462,9 +535,8 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         done = await _timed(do_research(), s.timeouts_seconds.research)
         if done is None:
             flags.append(DataFlag(check="research", level="warning", message=(
-                f"Web research did not finish within {s.timeouts_seconds.research:g} seconds, so there is no "
-                "market context")))
-            log.end(step, "timeout")
+                f"Web research {_why(s.timeouts_seconds.research)}, so there is no market context")))
+            log.end(step, _status(), notes=[_why(s.timeouts_seconds.research)])
         else:
             found, (vetted, vet_flags, vet_log) = done
             flags += found.flags + vet_flags
@@ -474,10 +546,15 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                                    "web_searches": len(found.plan)})
 
     # 8. Analyst, code checks and Evaluator (one rewrite in total)
-    step = log.start("narrative", ["facts JSON"] + [f"source: {v['url']}" for v in vetted], announce=not offline)
+    step = log.start("narrative", ["facts JSON"] + [f"source: {v['url']}" for v in vetted],
+                     announce=not offline and bool(vetted))
     if offline:
         narrative = Narrative(template(facts), "template")
         log.end(step, "skipped", notes=["offline run: template narrative"])
+    elif not vetted:
+        # The Analyst writes only the market context, from sources: with none, code's findings stand alone
+        narrative = Narrative(template(facts), "template")
+        log.end(step, "skipped", notes=["no web sources (research off or none kept): findings written by code"])
     else:
         narrative = await _timed(write_narrative(facts, vetted, max_rewrites=t.limits.max_analyst_rewrites,
                                                  run=r.analyst, quality_check=partial(review, run=r.evaluator),
@@ -486,9 +563,9 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         if narrative is None:
             narrative = Narrative(template(facts), "template", [DataFlag(
                 check="analyst", level="warning", message=(
-                    f"{AI_TEXT_UNAVAILABLE}: the Analyst did not finish within {s.timeouts_seconds.narrative:g} "
-                    "seconds; template narrative used"))])
-            log.end(step, "timeout")
+                    f"{AI_TEXT_UNAVAILABLE}: the Analyst {_why(s.timeouts_seconds.narrative)}; template narrative "
+                    "used"))])
+            log.end(step, _status(), notes=[_why(s.timeouts_seconds.narrative)])
         else:
             log.end(step, "ok" if narrative.source == "ai" else "failed", notes=narrative.log)
         flags += narrative.flags
@@ -501,17 +578,20 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         log.end(step, "skipped", notes=["offline run: code's conclusion"])
     else:
         drafted = await _timed(draft_and_judge(facts, plan.angles, plan.focus, r.reporter, r.judge,
-                                               s.drafting.max_rewrites, s.drafting.max_summary_chars),
+                                               s.drafting.max_rewrites, s.drafting.max_summary_chars,
+                                               s.drafting.max_drafts, s.drafting.rejudge_after_rewrite),
                                s.timeouts_seconds.drafting)
         if drafted is None:
             flags.append(DataFlag(check="judge", level="warning", message=(
-                f"AI drafts not finished within {s.timeouts_seconds.drafting:g} seconds; code's conclusion used")))
-            log.end(step, "timeout")
+                f"AI drafts: the Reporting Agent or Judge {_why(s.timeouts_seconds.drafting)}; code's conclusion "
+                "used (labelled as written by code)")))
+            log.end(step, _status(), notes=[_why(s.timeouts_seconds.drafting)])
         else:
             chosen = drafted.chosen
             facts["drafts"] = [x.to_dict(x is chosen) for x in drafted.scored]
             if chosen:
-                facts["suggested_conclusion"] |= {"text": chosen.draft.text, "source": "ai", "angle": chosen.draft.angle}
+                facts["suggested_conclusion"] |= {"text": chosen.draft.text, "source": "ai", "angle": chosen.draft.angle,
+                                                  "revised": REVISED in chosen.issues}
             flags += drafted.flags
             text_log += drafted.log
             log.end(step, "ok" if chosen else "failed", outputs={

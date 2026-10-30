@@ -221,8 +221,18 @@ class Timeouts(_Section):
 class DraftingSettings(_Section):
     """ Reporting Agents and the Judge: how many times the drafts may be sent back """
     max_rewrites: int = Field(default=1, ge=0)
+    # Version 1 pilot: one draft (the plan's first angle), one Judge pass, at most one targeted rewrite that is
+    # accepted on code's checks without a second Judge pass (rejudge_after_rewrite: true restores it)
+    max_drafts: int = Field(default=1, ge=1)
+    rejudge_after_rewrite: bool = False
     # The longest summary a draft may have: it is Executive page 1's summary (measured to fit with room to spare)
     max_summary_chars: int = Field(default=700, ge=200)
+
+
+class ResearchSettings(_Section):
+    """ Web research for the market context (Research Agents, then the Oversight Analyst and the Evaluator). Off for
+    the Version 1 pilot: the review is then the documents, code's calculations and the drafting agents """
+    enabled: bool = False
 
 
 class EmailSettings(_Section):
@@ -253,6 +263,7 @@ class RunSettings(_Section):
     web: WebSettings
     statistics: StatisticsSettings
     drafting: DraftingSettings = Field(default_factory=DraftingSettings)
+    research: ResearchSettings = Field(default_factory=ResearchSettings)
     email: EmailSettings
 
 
