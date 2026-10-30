@@ -570,50 +570,52 @@ analyst signs off. Code keeps every number, rating and the final pick.
   code" or code). The appendix lists the plan and each draft's score, failed items and which was chosen; facts.json
   keeps the plan, every draft and code's own text (`code_text`).
 
-## 9. Report (Step 7): 4 main pages plus an appendix
+## 9. Report (Step 7): Executive Report (2 pages) and Detailed Report (UX redesign, stage 3)
 
-Length: 5 pages (4 main pages + 1 appendix page), 5 at most. Each main section starts on its own page.
-If the content runs over 5 pages, the appendix is shortened first (info flags cut to the first 6 with
-"... and N more (full list in run_log.txt)", thresholds cut to the main lines). A main page that runs
-over is an error (`ReportLayoutError`), never a silent overflow. Code checks this after every render.
+Two PDFs from the same facts, built with the shared presentation helpers (`presentation.py`) that the web
+dashboard also uses, so all three show the same verdict, ratings and headline figures (tested).
 
-1. **Summary** (must stand on its own): fund, question, review date; suggested verdict (Satisfied / Monitor /
-   Action needed / Pending data check, with its meaning); **suggested conclusion (draft for the analyst)**: 3 to
-   4 plain sentences in Assessment of Value style, written by code from templates (`conclusion.py`): what the fund
-   aims to do, whether it did it (main figure and period), how it compares with peers, whether the fee is
-   competitive, ending "Suggested verdict: …"; it goes through the number, label and rating checks, and a
-   sentence that fails is left out (logged); the 4 ratings with one-line plain-English reasons and
-   Green/Amber/Red colours; **points for your judgement** (at most 4, code-built from the flags, the limits a
-   rating is close to, the peer notes and the statistics); **questions to ask the manager** (2 to 4, code-built
-   from the findings; v1 has no AI rewording); key findings and actions; approval box (reviewer name, date,
-   Satisfied / Monitor / Action needed, "Analyst's comments", "If you disagree with the suggested verdict, why?",
-   signature) with a tick box for each Manual check item.
-2. **Evidence dashboard** (code only, no AI): yearly tracking difference bars (fund PNAV, else NAV, minus index,
-   each calendar year on the factsheet) with the OCF as a line and the Green/Amber limits as bands; distance to
-   each limit (one bar per rated figure: TD, TE, R², beta, peer return gap, fee gap, against its Green and Amber
-   zones); fund vs peers vs index (1/3/5 years a year; only peers with returns in the fund's currency); return vs
-   volatility (3 years: fund, index, peers where given); statistics table and significance test (4.8); peer
-   percentile with 3 or more peers. Every chart lists its source and period; a chart without data is left out
-   with a note.
-3. **Mandate and performance:** objective, promises and the decision-tree path in plain words (no code
-   names); 1/3/5-year table (fund, index, gap; cumulative and annualised) with the note "Cumulative
-   gaps to 1 d.p., yearly gaps to 2 d.p."; calendar years; risk table grouped under small subheadings
-   by source, period and price basis (e.g. "Factsheet · 3 years, market-close price (PNAV)"), so no
-   measure appears without its context; "Below the surface": the data notes' plain sentences, each
-   followed by one short source line in small text with its figures; charts: growth of 100 and yearly
-   returns, fund vs index.
-4. **Value, fees and Assessment of Value:** peers table (each peer: share class, type and minimum, currency and
-   pricing time, OCF, 1/3/5-year returns a year, used for fees and returns or fees only, and why; the peer average
-   with several peers; the sector average OCF as context when configured) and fee comparison ("Add peer" callout
-   when there is no peer); the AoV 7-factor table (Covered / Partly / Not assessed) with its disclaimer; market
-   context with [n] citations ("No market context" when there is none).
-5. **Appendix:** flags by level (blocking, warning, info); excluded web sources with reasons;
-   numbered sources with dates ("published" or "as at") and every input file; the calculated Sharpe
-   ratio (risk-free rate 0), noted as not comparable with the factsheet figure; thresholds
-   ("illustrative, to be agreed with the oversight team"); glossary of the terms the report actually
-   uses (`glossary.py`, each definition under 10 words, including t-statistic, p-value, statistically
-   significant, percentile and drawdown); known
-   limitations (Section 12); the "public data only" note and the disclaimer.
+**Executive Report** (`report_executive.pdf`, `executive.py`): exactly two A4 pages.
+1. **Overview:** fund, ISIN, share class, benchmark and reporting period; the suggested investment assessment and,
+   separately, the evidence quality ("Data check needed", "Warnings to review" or "No data issues raised"; "Not
+   final" next to the assessment while data issues remain); three headline figures with period, unit and source
+   ("Not available", never zero); the suggested conclusion (who wrote it: code, or the AI draft the Judge chose);
+   two or three key findings that add to the ratings (the data-note findings, then points for judgement); one
+   chart chosen by mandate and data: yearly gap to the index with the Green/Amber bands (index funds), yearly
+   return above the benchmark (other funds), 12-month returns fund vs index or benchmark, or none with a note; the
+   four ratings (a rating waiting for a data check says so instead of repeating the data issue).
+2. **Comparisons and decision:** fund vs index vs peers (1, 3, 5 years; fee; what each peer is used for); fees
+   (OCF, transaction costs, performance fee, peers' fees, peer return gap); selected risk measures with sources;
+   material issues: performance concerns, kept apart from "not enough evidence to judge" (data check, no peer),
+   then data issues: every blocking check in full, the first three warnings in full and "… and N more data
+   warnings, listed in full in the Detailed Report (Appendix D)"; recommended actions; up to three questions for
+   the manager; analyst approval (decision tick boxes Satisfied / Monitor / Action needed, comments, "If you
+   disagree with the suggested assessment, why?", name, date, signature, a tick box per Manual check item).
+   Material warnings are never shortened. If the content cannot fit two pages without losing information,
+   `ReportLayoutError` is raised: the controller then adds the warning "Executive Report not produced: …; nothing
+   was cut" and still builds the Detailed Report.
+
+**Detailed Report** (`report.pdf`, unchanged file name): the two executive pages, then each appendix from a new
+page, of any length (nothing is shortened):
+- **Appendix A: Evidence dashboard** — distance to each limit, fund vs peers vs index, return vs volatility, yearly
+  gaps, statistics, significance test and peer percentile (Section 4.8); every chart lists its source and period;
+  a chart without data is left out with a note.
+- **Appendix B: Mandate and performance** — every finding, point for judgement and question in full; objective,
+  promises and the plain decision path; 1/3/5-year table with gaps ("Cumulative gaps to 1 d.p., yearly gaps to
+  2 d.p."); calendar years; risk tables under source, period and price-basis subheadings; "Below the surface"
+  data notes with their source lines; growth of 100 and yearly returns charts.
+- **Appendix C: Value, fees and Assessment of Value** — the full peers table (share class, type and minimum,
+  currency and pricing time, OCF, returns, use and why; peer average; sector average OCF as context), fees, the
+  AoV 7-factor table with its disclaimer, the market context with [n] citations.
+- **Appendix D: Data quality, sources and audit** — every flag by level, excluded web sources, numbered sources
+  and input files, the plan and the drafts with the Judge's checklist, the calculated Sharpe ratio note,
+  thresholds, glossary of the terms used, known limitations, the public-data note and the disclaimer.
+Code checks the order after every render; a missing or misplaced section is a `ReportLayoutError`.
+
+Email (`config/settings.yaml`, `email.attachment`): the Executive Report by default, `detailed` for report.pdf;
+the Detailed Report is attached when the Executive Report could not be produced (said in the run log). The web
+page offers both: the Investment Analyst view makes the Detailed Report the primary download, the Management view
+the Executive Report; switching does not rerun the review.
 
 Display rules:
 - Percentages to 1 d.p.; tracking error, tracking difference, alpha, beta, R² and information ratio
@@ -626,7 +628,8 @@ Display rules:
 - Style: clean, navy headings, Green/Amber/Red rating chips, DejaVu Sans font (shipped with
   matplotlib, so the same on any machine).
 
-Output: `runs/<YYYYMMDD-HHMMSS>/report.pdf`, with `facts.json` and `run_log.txt` beside it.
+Output: `runs/<YYYYMMDD-HHMMSS>/report.pdf` (Detailed) and `report_executive.pdf`, with `facts.json` and
+`run_log.txt` beside them.
 Command: `PYTHONPATH=src python -m fund_performance.run_report --data data/test1` (add `--offline`
 to skip all AI steps; the report then carries an info flag saying so).
 
@@ -678,7 +681,8 @@ Keep the manager's published Value Assessment Report out of the agent's inputs. 
 6. **Extractor and Mandate agents** with Pydantic schemas.
 7. **Oversight Analyst + number-guard validator.**
 8. **Planner + parallel Search agents** (no retries). 9b: approved sources fetched by code + up to 3 web searches.
-9. **PDF report** (4 main pages + appendix, 5 pages at most) with charts and approval box.
+9. **PDF reports**: a two-page Executive Report and a Detailed Report (the executive pages plus Appendices
+   A–D), with charts and the approval box (Section 9; redesigned in UX stage 3).
 10. **Evaluator agent + workflow controller** (Sections 8.4 and 8.5); unit test that a draft with a changed rating or an unsupported claim is rejected.
 11. **Gradio front end** (upload files, ask the question, download the PDF); deploy as with the existing project.
     As built: `src/fund_performance/web.py` (the page) and `app.py` (starts it; Render runs `python app.py`). The

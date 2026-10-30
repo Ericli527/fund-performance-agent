@@ -7,7 +7,7 @@ sdk_version: 6.30.0
 
 # Fund Performance Review
 
-A web app that drafts an **investment oversight review** of a fund as a 5-page PDF: is the fund doing what it
+A web app that drafts an **investment oversight review** of a fund as a two-page Executive Report and a Detailed Report: is the fund doing what it
 promised, how did it do against its index, did investors get a fair outcome, and is its fee justified? It gives
 a **suggested verdict** (Satisfied / Monitor / Action needed) and a suggested conclusion, with an evidence
 dashboard; the analyst makes the judgement and signs.
@@ -38,11 +38,11 @@ Upload: price file (CSV/Excel) + factsheet (PDF/Word) [+ KID, peer factsheets] +
    ├─ Reporting Agents (AI)   draft the conclusion for the board, the analyst and the manager meeting, in parallel
    ├─ Judge (AI) + code       code checks every figure; the Judge marks a checklist; code scores and picks the best,
    │                          or sends the drafts back once; code's own conclusion is the fallback
-   └─ Report (code)           5-page PDF: summary, evidence dashboard, mandate and performance, value and fees,
-                              appendix; optional email (Resend)
+   └─ Reports (code)          report_executive.pdf (2 pages) and report.pdf (Detailed: the executive pages plus
+                              Appendices A–D); optional email (Resend, Executive Report by default)
 ```
 
-Every run is saved in `runs/<timestamp>/`: `report.pdf`, `facts.json`, `run_log.txt` and `log.json` (each step,
+Every run is saved in `runs/<timestamp>/`: `report.pdf` (Detailed), `report_executive.pdf`, `facts.json`, `run_log.txt` and `log.json` (each step,
 its inputs and its outputs).
 
 ## Run it on your computer

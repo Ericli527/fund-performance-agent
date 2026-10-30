@@ -19,7 +19,7 @@ from fund_performance.plain import verdict_meaning, verdict_name
 from fund_performance.presentation import (NAVY, NOT_AVAILABLE, RATING_STYLE, VERDICT_STYLE, _figures, _shown,
                                            _source, assessment_caveat, chart_choice, evidence_quality, flag_dicts,
                                            conclusion_origin, headline_metrics, issue_groups,
-                                           risk_measures)
+                                           point_to_data_issues, risk_measures)
 
 PAGE1, PAGE2 = "Overview", "Comparisons and decision"
 EXEC_TITLES = (PAGE1, PAGE2)
@@ -57,7 +57,7 @@ def _chart(inp, out_dir: Path) -> tuple[Path | None, str]:
     ev = facts.get("evidence") or {}
     if kind in ("yearly_gap", "yearly_excess"):
         years, gaps = list(ev["gaps"]), list(ev["gaps"].values())
-        series = "market-close price (PNAV)" if ev.get("series") == "fund_pnav" else "fund price (NAV)"
+        series = "market-close price (PNAV)" if ev.get("series") == "fund_pnav" else "price (NAV)"
         if kind == "yearly_gap":
             pi, ocf = inp.thresholds.performance_index, inp.profile.ocf_pct
             path = charts.yearly_gap_chart(years, gaps, out_dir / "exec_chart.png",
@@ -135,7 +135,9 @@ def key_findings(data: dict) -> list[str]:
     """ Two or three findings that add to the ratings table rather than repeat it: the data-note findings, then the
     first points for judgement (not the standing note about illustrative limits) """
     found = list(data.get("findings", [])[1:])
-    points = [p for p in data["facts"].get("judgement_points", []) if not p.startswith("The limits used")]
+    # Data issues are shown in full on page 2, so the points that repeat them (shortened) are not findings here
+    points = [p for p in data["facts"].get("judgement_points", [])
+              if not p.startswith(("The limits used", "Resolve this data check first", "Data warning:"))]
     for p in points:
         if len(found) >= MAX_FINDINGS:
             break
@@ -254,6 +256,8 @@ def page2(inp, content: ExecutiveContent) -> str:
     data = content.data
     facts = data["facts"]
     questions = facts.get("manager_questions", [])[:MAX_QUESTIONS]
+    blocking = evidence_quality(data).blocking
+    actions = [point_to_data_issues(a, blocking) for a in data.get("actions", [])]
     ticks = "".join(f"<td class='x-box-tick'>&nbsp;</td><td>{n}</td>" for n in ("Satisfied", "Monitor", "Action needed"))
     manual = "".join(f"<tr><td class='x-box-tick'>&nbsp;</td><td>Manual check done: {escape(m.name)}: "
                      f"{escape(m.reason)}</td></tr>" for m in inp.card.manual_checks)
@@ -262,7 +266,7 @@ def page2(inp, content: ExecutiveContent) -> str:
 <h2>Benchmark and peers</h2>{_comparison(inp, facts)}
 {_fees_and_risk(inp, facts)}
 <h2>Material issues</h2>{material_issues(data)}
-<h2>Recommended actions</h2>{_ul(data.get('actions', [])) or '<p>None.</p>'}
+<h2>Recommended actions</h2>{_ul(actions) or '<p>None.</p>'}
 {'<h2>Questions for the manager</h2>' + _ul(questions) if questions else ''}
 <h2>Analyst approval</h2>
 <table class="x-approval">

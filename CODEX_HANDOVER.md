@@ -43,22 +43,19 @@ Data: `data/` is gitignored (public repo). Test 1 files live in `data/test1/`, a
   decisions). `RunResult` now carries every flag of the run.
 - Tests: 555 passed, 6 skipped (live AI) at the last full run. Docs (spec step 11, CLAUDE.md, README) updated.
 
-## 3. Remaining: Stage 3 PDF redesign (not started)
+## 3. Stage 3 PDF redesign (done, awaiting owner review)
 
-Agreed plan (presentation only; same facts, ratings and figures; golden facts must still pass):
-- Page 1: verdict, conclusion, four ratings, points for judgement, questions for the manager, approval box
-  (must stay on page 1). Owner to confirm: move key findings and actions from page 1 to page 3.
-- Dashboard page: shorter one-line chart captions (source + period); significance test as one plain sentence
-  with numbers in small print; tidy grid when a chart is missing.
-- Mandate and performance page: keep returns and calendar tables; show only the risk group used for the rating,
-  move the others to the appendix; consistent wording ("gap to the index (tracking difference)").
-- Keep: 5 pages maximum (appendix shortened first, a main page overflow is an error), sources on every figure,
-  xhtml2pdf limits (tables for layout, no flexbox), same style as the web page.
-- Update spec Section 9, CLAUDE.md, README; replace brittle page-text tests with meaning checks (see 4).
-
+- `presentation.py`: shared helpers (headline figures, evidence quality, caveat, risk rows, chart choice,
+  insufficient evidence vs performance concerns, who wrote the conclusion) used by the dashboard and both PDFs.
+- `executive.py`: `report_executive.pdf`, exactly two pages (Overview; Comparisons and decision). Material warnings
+  in full; content that cannot fit raises `ReportLayoutError` (the controller warns and keeps the Detailed Report).
+- `report.py`: `report.pdf` is now the Detailed Report (the two executive pages + Appendices A-D, free length).
+- Web: both downloads; Analyst view = Detailed primary, Management = Executive primary (no rerun).
+- Email: `email.attachment` in settings.yaml (default `executive`; `detailed` = report.pdf).
+- The synthetic currency-mismatch case no longer overflows (both PDFs built; tested).
 ## 4. Known issues and test findings
 
-- **No CI** (no `.github/`). 57 test functions need `data/test1/` and **skip silently** without it, including
+- CI added in Stage 2.5 (`.github/workflows/tests.yml`, skip audit). 57 test functions still need `data/test1/` and skip without it, including
   the spec's expected-figure checks in `test_calc`/`test_precedence` and the Test 1 golden cases.
 - Golden facts cover only index-fund verdicts Satisfied and "Monitor until a peer is added". Missing end-to-end:
   Action needed, Pending data check, active fund, short history, dual objective, daily/Excel prices, market-close
@@ -95,8 +92,7 @@ pytest -q -rs
 pytest --run-live -q
 ```
 
-## 6. Git state (at handover)
+## 6. Git state
 
-- Branch: `claude/ux-redesign`, in sync with `origin/claude/ux-redesign` (last commit `d1444f0`, Stage 2),
-  3 commits ahead of `main` (`678e7b2`). No PR open for it yet.
-- Uncommitted: only this file and `AGENTS.md` (new, not committed). Application code has no uncommitted changes.
+- Branch: `claude/ux-redesign` (Stages 0-3 and the Stage 2.5 CI). Not merged to `main`; Render still serves the old
+  page. Run `git status` and `git log` for the current state.

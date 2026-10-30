@@ -145,11 +145,20 @@ def issue_groups(facts: dict, reasons: dict) -> tuple[list[str], list[str]]:
     gaps, concerns = [], []
     for p in facts.get("scorecard", {}).get("pillars", []):
         why = reasons.get(p["name"]) or p["reason"]
-        if p["rating"] == "CHECK DATA" or p.get("summary") == "Add peer":
+        if p["rating"] == "CHECK DATA":
+            gaps.append(f"{p['name']}: not rated until the data check is resolved (see the data issues)")
+        elif p.get("summary") == "Add peer":
             gaps.append(f"{p['name']}: {why}")
         elif p["rating"] in ("RED", "AMBER"):
             concerns.append(f"{p['name']} ({RATING_STYLE[p['rating']][0]}): {why}")
     return gaps, concerns
+
+
+def point_to_data_issues(text: str, blocking: list[str]) -> str:
+    """ An action that repeats a blocking data check in full points to it instead (it is shown in full once) """
+    for message in blocking:
+        text = text.replace(f": {message}", " (see the data issues)")
+    return text
 
 
 def chart_choice(facts: dict) -> str | None:

@@ -99,7 +99,8 @@ def main() -> None:
     except RunStopped as e:
         print(e, file=sys.stderr)
         sys.exit(1)
-    print(f"Report: {result.pdf}\nRun log: {result.run_dir / 'log.json'}")
+    executive = result.executive_pdf or "not produced (see the warning in the Detailed Report)"
+    print(f"Detailed Report: {result.pdf}\nExecutive Report: {executive}\nRun log: {result.run_dir / 'log.json'}")
 
 
 if __name__ == "__main__":

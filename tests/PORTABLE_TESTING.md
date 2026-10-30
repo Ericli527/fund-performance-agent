@@ -36,9 +36,9 @@ all those scenarios or validation of the missing real Tests 2–4.
 
 ## Remaining limitation
 
-The synthetic currency mismatch reaches Pending data check correctly but its long warning causes the current
-PDF summary to overflow to six pages. The new regression verifies scoring and the explicit layout stop. PDF
-changes are deferred to Stage 3: two-page Executive PDF and Detailed PDF with technical appendices.
+The synthetic currency mismatch reaches Pending data check correctly. Its long warning used to push the old
+PDF summary to six pages and stop the run; since Stage 3 both PDFs are built, the Executive Report keeps exactly two
+pages and shows the warning in full, and the Detailed Report has it too (tested).
 Financial calculations, thresholds, model configuration, agent workflows, UI, PDF code, and golden baselines
 are unchanged. Human approval remains required. No live service or deployment is part of CI.
 

@@ -91,8 +91,10 @@ Instructions for Claude Code in this project. The build specification is
   market. v2: MCP Fetch for agent-chosen URLs.
 - Risk-free rate: 0 for v1, with a flag. Prefer the factsheet Sharpe ratios where supplied.
 - Charts are built in step 9 with the report.
-- Report (step 9, updated): 4 main pages plus an appendix, 5 pages at most. Over 5: shorten the appendix first; a main page running over is an
-  error. Saved to `runs/<timestamp>/` with `facts.json` and `run_log.txt`; `--offline` skips AI steps.
+- Reports (step 9, redesigned in UX stage 3): `report_executive.pdf` (exactly 2 pages: Overview; Comparisons and
+  decision) and `report.pdf` (Detailed: the executive pages + Appendices A-D, free length). Material warnings are
+  never shortened; executive content that cannot fit is a layout error (the run warns and keeps the Detailed
+  Report), never a silent cut. Saved to `runs/<timestamp>/` with `facts.json` and `run_log.txt`; `--offline` skips AI steps.
   Plain wording (decision path, fee note) is for the report only; facts.json and the Analyst keep the codes.
 - Emailing the report is a plain code function (`emailer.py`, not an AI agent), off by default
   (`config/settings.yaml`). Resend over HTTPS, as in the old app (RESEND_API_KEY, EMAIL_FROM in .env).
@@ -136,8 +138,11 @@ Instructions for Claude Code in this project. The build specification is
   facts.json and the scorecard). Page 1: suggested conclusion, points for judgement (max 4) and questions for the
   manager (2-4), all code-built (`conclusion.py`); the conclusion passes the number/label/rating checks. Approval
   box has "Analyst's comments" and "If you disagree with the suggested verdict, why?".
-- Report: 5 pages (Summary; Evidence dashboard; Mandate and performance; Value, fees and AoV; Appendix).
-  Dashboard is code only (`evidence.py`, charts): t-test level and min points in `config/settings.yaml`.
+- Shared presentation helpers (`presentation.py`): headline figures, evidence quality, caveat, risk rows, chart
+  choice, insufficient evidence vs performance concerns; used by the dashboard and both PDFs (consistency tested).
+  Email attaches the Executive Report by default (`email.attachment: detailed` for report.pdf). The web page offers
+  both PDFs: Analyst view = Detailed primary, Management view = Executive primary (no rerun). Evidence dashboard
+  (Appendix A) is code only (`evidence.py`, charts): t-test level and min points in `config/settings.yaml`.
 - Agent team (spec 8.6): Task Planner (menu choices only; code keeps all four ratings; default plan offline or on
   failure), Reporting Agents (one draft per angle: board, analyst, manager meeting; facts only; must end with code's
   verdict sentence; code's checks), Judge (5 checklist items true/false + preferred; no text, numbers or ratings).
