@@ -315,3 +315,11 @@ def test_the_executive_pdf_shows_the_formal_commentary_not_the_dashboard_answer(
     page1 = " ".join(page_texts(build_executive(inp, tmp_path))[0].split())
     assert "Oversight commentary" in page1 and commentary[1] in page1
     assert "Yes, it met its objective." not in page1                 # the dashboard answer stays on the dashboard
+
+
+def test_executive_actions_include_both_document_and_historical_price_checks(tmp_path):
+    inp = made_up_inputs()
+    inp.facts["figures"][0]["source"] = "ai_extracted"
+    inp.facts["data_flags"].append({"check": "repeated_prices", "level": "warning", "message": "Repeated prices"})
+    text = " ".join(" ".join(page_texts(build_executive(inp, tmp_path))).split())
+    assert "Verify the AI-extracted figures against the documents and check the flagged historical prices before sign-off." in text

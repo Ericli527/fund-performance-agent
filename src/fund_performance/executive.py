@@ -22,7 +22,7 @@ from fund_performance.presentation import (CHART_LEFT_OUT, UNRELIABLE, compariso
                                            _shown, _source, assessment_caveat, chart_choice, comparison_problems,
                                            evidence_quality, flag_dicts, conclusion_origin, headline_metrics, summary_parts, executive_commentary,
                                            issue_groups, merge_same_ending, missing_evidence, point_to_data_issues,
-                                           report_action, assessment_meaning,
+                                           report_action, assessment_meaning, signoff_checks,
                                            risk_measures)
 
 PAGE1, PAGE2 = "Overview", "Comparisons and decision"
@@ -342,6 +342,8 @@ def page2(inp, content: ExecutiveContent) -> str:
     questions = facts.get("manager_questions", [])[:MAX_QUESTIONS]
     blocking = evidence_quality(data).blocking
     actions = merge_resolve_actions([report_action(point_to_data_issues(a, blocking)) for a in data.get("actions", [])])
+    if checks := signoff_checks(facts):
+        actions.insert(0, checks)
     suggested = verdict_name(facts["scorecard"]["verdict"])
     # Tick boxes as characters in one cell: a nested table of 12px box cells could be squeezed below its padding
     # when the box crosses a page break, and ReportLab then stops the whole report (Stage 6C Live run)
