@@ -54,7 +54,7 @@ def build_agent(name: str, instructions: str, output_type: type[BaseModel], agen
                  **model_kwargs(agent, tool_choice))
 
 
-async def run_with_fresh_client(agent: Agent, prompt: str) -> Any:
+async def run_with_fresh_client(agent: Agent, prompt: str, *, context: Any = None, max_turns: int = 10) -> Any:
     """ Run an agent with a new OpenAI client, closed afterwards.
 
     The SDK otherwise reuses one shared client whose connections belong to the first event loop; once
@@ -62,7 +62,8 @@ async def run_with_fresh_client(agent: Agent, prompt: str) -> Any:
     per run keeps agents independent, so they can run one after another in any loop """
     client = AsyncOpenAI()          # reads OPENAI_API_KEY from the environment
     try:
-        return await Runner.run(agent, prompt, run_config=RunConfig(model_provider=OpenAIProvider(openai_client=client)))
+        return await Runner.run(agent, prompt, context=context, max_turns=max_turns,
+                                run_config=RunConfig(model_provider=OpenAIProvider(openai_client=client)))
     finally:
         await client.close()
 
@@ -96,12 +97,18 @@ def _record(agent: Agent, attempt: int, started: float, outcome: str) -> None:
 
 async def run_structured(agent: Agent, prompt: str, output_model: type[BaseModel],
                          convert: Callable[[Any], T] | None = None, run: RunFn | None = None,
-                         attempts: int = MAX_ATTEMPTS) -> StructuredResult[T]:
+                         attempts: int = MAX_ATTEMPTS, context: Any = None,
+                         max_turns: int | None = None) -> StructuredResult[T]:
     """ Run an agent and validate its output; invalid output is retried once (attempts=1: no retry).
 
     `convert` turns the agent's output into the internal shape (it may raise ValueError, which counts as
     invalid output). `run` replaces the real model call in unit tests """
-    run = run or run_with_fresh_client
+    if run is None:
+        # The real model call. An agent with tools gets its run context (read only, this review's facts) and a bound
+        # on model turns, so its tool calls cannot loop. Looked up at call time, so tests can replace it
+        async def run(agent, prompt):
+            kwargs = {"context": context} if context is not None else {}
+            return await run_with_fresh_client(agent, prompt, max_turns=max_turns or 10, **kwargs)
     errors: list[str] = []
     for attempt in range(1, attempts + 1):
         started = time.monotonic()

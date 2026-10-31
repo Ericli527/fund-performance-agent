@@ -87,7 +87,7 @@ def _no_real_ai_calls(request, monkeypatch):
     from agents.exceptions import AgentsException
     import fund_performance.agents.base as base
 
-    async def blocked(agent, prompt):
+    async def blocked(agent, prompt, **_):
         raise AgentsException(f"no real AI calls in unit tests ({agent.name})")
     monkeypatch.setattr(base, "run_with_fresh_client", blocked)
 

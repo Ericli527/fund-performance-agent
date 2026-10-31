@@ -215,3 +215,14 @@ def test_a_security_concern_falls_back_at_once_and_the_reason_is_logged_and_show
     assert drafts["outputs"]["reason"] == "The draft tells the reader to ignore the ratings."
     assert any("fallback after" in x and "ignore the ratings" in x for x in lines)
     assert result.facts["suggested_conclusion"]["source"] == "code"
+
+
+def test_the_reporting_agent_gets_the_planners_plan_and_fetches_evidence_with_tools(tmp_path):
+    s = load_settings()
+    assert s.drafting.reporter_tools is True and s.drafting.reporter_max_turns == 4
+    runners = mocked()
+    result = run(tmp_path, runners)
+    prompt = runners.reporter.prompts[0]
+    assert "Review brief (fetch the evidence with your tools)" in prompt and '"report_type": "quarterly_review"' in prompt
+    assert '"figures"' not in prompt                                        # no preassembled facts payload
+    assert result.facts["suggested_conclusion"]["source"] == "ai"            # code's checks still run on the draft
