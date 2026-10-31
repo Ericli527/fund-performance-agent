@@ -100,6 +100,18 @@ def shown_demos(demos: list[Demo] | None = None) -> list[Demo]:
     return real or [d for d in demos if d.available and d.fallback]
 
 
+UPLOAD_OWN = "upload_own"           # the fourth test case: the analyst's own documents and data
+
+
+def selectable_cases(demos: list[Demo] | None = None) -> list[Demo]:
+    """ The test cases the page offers (Version 1): the made-up fund first, then every real-fund case in the library,
+    installed or not. A real case whose private files are missing stays listed and says so when picked: it is never
+    replaced by made-up data """
+    demos = load_demos() if demos is None else demos
+    made_up = [d for d in demos if d.fallback and d.available]
+    return made_up + [d for d in demos if not d.fallback]
+
+
 def find_demo(demo_id: str, demos: list[Demo] | None = None) -> Demo | None:
     return next((d for d in (demos if demos is not None else load_demos()) if d.id == demo_id), None)
 

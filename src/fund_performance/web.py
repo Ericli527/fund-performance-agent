@@ -44,7 +44,8 @@ from fund_performance.plain import verdict_meaning, verdict_name
 from agents import trace
 from fund_performance.agents.base import AI_CALLS, api_key_present
 from fund_performance.presentation import MISSING_MEANING, download_copy, missing_evidence
-from fund_performance.demos import Demo, find_demo, matching_demo, return_checks, shown_demos
+from fund_performance.demos import (UPLOAD_OWN, Demo, find_demo, matching_demo, return_checks, selectable_cases,
+                                    shown_demos)
 from fund_performance.report import ANGLE_WORDS, JUDGE_WORDS, REPORT_TYPE_WORDS
 from fund_performance.intake import read_documents, self_check, write_inputs
 
@@ -61,10 +62,10 @@ LIMIT_REACHED = "Today’s AI run limit is reached. You can still run the offlin
 BUSY = "A review is already running, please try again in 2 minutes."
 AI_OFF = ("AI runs are switched off here (AI_RUNS_ENABLED, and on a server the login APP_USERNAME and APP_PASSWORD). "
           "You can still run the Quick Demo and other reviews that need no AI.")
-NEEDS_AI = ("Reading the documents uses AI, which is switched off in this setup. Pick a Quick Demo under **Try a "
-            "demo**, or add complete JSON inputs under **Additional options**.")
+NEEDS_AI = ("Reading the documents uses AI, which is switched off in this setup. Pick the Synthetic Demo or a Quick "
+            "run under **Choose a test case**, or add complete JSON inputs under **Additional options**.")
 NEED_FILES = ("Please add the fund price data and the fund factsheet (the agents read it), or add complete JSON inputs "
-              "under **Additional options**, or pick a demo under **Try a demo**.")
+              "under **Additional options**, or pick a case under **Choose a test case**.")
 FACTSHEET_LABEL = "Fund factsheet · PDF or Word · Required for AI reading (not needed with complete JSON or a Quick Demo)"
 JSON_NEEDED = {"fund_profile": "fund_profile.json", "factsheet_performance": "factsheet_performance.json"}
 OFFLINE_ENV = "FUND_REVIEW_OFFLINE"         # development and testing only: every review runs without AI
@@ -74,7 +75,7 @@ PUBLIC_DATA = ("**Public data only.** Files and figures may be sent to OpenAI, w
                "factsheets, KIDs and price histories only.")
 PUBLIC_DATA_HTML = PUBLIC_DATA.replace("**Public data only.**", "<b>Public data only.</b>")
 INSTRUCTIONS = """### How to use it
-1. **Try a demo:** pick Fidelity or Vanguard under **Try a demo**, then **Run Fund Review**. The Quick Demo is free, takes seconds and uses no AI.
+1. **Choose a test case:** the Synthetic Demo (made-up data, no AI, seconds), Fidelity Index US P Acc GBP or Vanguard FTSE Global All Cap Index Fund GBP Acc (real funds: the full Live AI workflow where AI runs are on, else their prevalidated Quick inputs), or Upload Your Own Fund. Picking a case fills in its files; edit the review question if you like, then **Run Fund Review**.
 2. **Test a real fund:** download the fund's public price history (CSV or Excel), latest factsheet and KID from the provider's website. Upload the prices and the factsheet; add the KID (and any peer factsheets) under **Additional options**. The agents read them in 1–2 minutes and the page shows each step as it runs.
 3. **Let the agent check itself:** code checks every value the AI read against the documents and the prices, and flags anything it cannot confirm. Takes 1–2 minutes.
 4. **Read the evidence:** the suggested verdict, conclusion, ratings and charts; download the PDF.
@@ -554,6 +555,21 @@ EVIDENCE_WORDS = {QUICK: ("Prevalidated inputs: figures typed from the documents
 NO_DEMOS = ("The real-fund demos need their private data files, which are not on this server (they are kept out of "
             "the public repository). You can still download example input files (a made-up fund) under Help & "
             "methodology.")
+UPLOAD_CARD = "Upload Your Own Fund\nYour own price file, factsheet and KID"
+UPLOAD_HELP = ("<div class='fp-card fp-demo-info'><div class='fp-kicker'>Upload your own fund</div><p>Add the fund's "
+               "price history and its factsheet below (a KID and peer factsheets are optional), then <b>Run Fund "
+               "Review</b>. Public documents only. Each review runs in its own folder; your files and reports are not "
+               "shared with other users.</p></div>")
+
+
+def case_missing_html(demo: Demo) -> str:
+    """ A real-fund case whose private files are not on this server: say so, never substitute made-up data """
+    missing = "".join(f"<li>{escape(m)}</li>" for m in demo.missing())
+    return (f"<div class='fp-card fp-demo-info'><div class='fp-kicker'>Not installed on this server</div>"
+            f"<h3>{escape(demo.fund_name)}</h3><p>This test case needs its validated files (price data, factsheet, KID "
+            f"and benchmark evidence), which are kept out of the public repository. Missing:</p><ul>{missing}</ul>"
+            "<p>Nothing has been filled in and no made-up data is used instead. Choose another case, or upload your "
+            "own fund's files.</p></div>")
 
 
 def live_demo_allowed() -> bool:
@@ -588,11 +604,15 @@ def demo_info_html(demo: Demo, mode: str) -> str:
                       f"{escape(x['used'])}</li>" for x in demo.sources)
     notes = "".join(f"<li>{escape(x)}</li>" for x in demo.disclosures)
     ticker = f" · {escape(demo.ticker)}" if demo.ticker else ""
+    files = demo_inputs(demo, mode)
+    documents = [Path(x).name for x in [files["price"], files["factsheet"], files["kid"], *(files["peer"] or []),
+                                        *(files["json"] or [])] if x]
     return f"""<div class='fp-card fp-demo-info'>
 <div class='fp-kicker'>{'Live AI Demo' if mode == LIVE else 'Quick Demo'} · {'made-up data' if demo.fallback else 'historical data'}</div>
 <h3>{escape(demo.fund_name)}</h3>
 <p>{escape(demo.share_class)} · ISIN {escape(demo.isin)}{ticker} · Benchmark: {escape(demo.benchmark)}<br/>
 Peer: {escape(demo.peer)}<br/>Review date: {demo.review_date:%d %b %Y}</p>
+<p><b>Documents loaded:</b> {escape(", ".join(documents))}</p>
 <p class='fp-evidence-type'><b>{'AI-extracted evidence' if mode == LIVE else 'Prevalidated inputs'}.</b>
 {escape(EVIDENCE_WORDS[mode].split(': ', 1)[1][:1].upper() + EVIDENCE_WORDS[mode].split(': ', 1)[1][1:])}</p>
 <details><summary>Return check: fund price returns vs the factsheet ({escape(basis)})</summary>
@@ -618,6 +638,22 @@ def demo_tag(price, json_files, picked: str | None, mode: str) -> str:
     """ The same as one Markdown line, for the plain-text summary """
     b = demo_banner(price, json_files, picked, mode)
     return f"**{b['label']}: {b['fund']}.** {b['evidence']}" if b else ""
+
+
+def on_demo(demo_id, mode):
+    """ Fill the upload boxes with the case's inputs for this mode, and show its card. Your own fund, or a real
+    case whose files are not installed, empties the boxes (nothing is substituted) """
+    if demo_id == UPLOAD_OWN:
+        return (None, None, None, None, None, gr.update(), UPLOAD_HELP)
+    demo = find_demo(demo_id) if demo_id else None
+    if demo is None:
+        return (gr.update(),) * 6 + ("",)
+    if not demo.available:
+        return (None, None, None, None, None, gr.update(), case_missing_html(demo))
+    mode = mode if mode == LIVE and live_demo_allowed() else QUICK
+    d = demo_inputs(demo, mode)
+    return (d["price"], d["factsheet"], d["kid"], d["peer"], d["json"], gr.update(open=bool(d["json"] or d["kid"])),
+            demo_info_html(demo, mode))
 
 
 # --- The page -------------------------------------------------------------------------------------------------------
@@ -798,15 +834,15 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
         question = gr.Textbox(label="Review question", value=UI_QUESTION, lines=2,
                               info="Edit it if you like. The agents use it to decide what to focus on.")
 
-        # C. Try a demo (real funds; the made-up fund stays in the tests and the example files)
-        demos = shown_demos()
-        gr.HTML("<h2>Try a demo</h2>", elem_classes="fp-section-title")
-        demo_choice = gr.Radio([(demo_card(d), d.id) for d in demos], value=None, show_label=False, container=False,
-                               elem_classes=["fp-cards", "fp-demo-cards"], label="Try a demo", visible=bool(demos))
+        # C. Choose a test case: the synthetic demo, the real-fund cases (listed even when not installed) or your own
+        cases = selectable_cases()
+        gr.HTML("<h2>Choose a test case</h2>", elem_classes="fp-section-title")
+        demo_choice = gr.Radio([(demo_card(d), d.id) for d in cases] + [(UPLOAD_CARD, UPLOAD_OWN)], value=None,
+                               show_label=False, container=False, elem_classes=["fp-cards", "fp-demo-cards"],
+                               label="Choose a test case")
         demo_mode = gr.Radio([(label, value) for value, label in DEMO_MODES.items()], value=QUICK,
-                             label="How to run the demo", elem_classes="fp-segmented",
-                             visible=bool(demos) and live_demo_allowed())
-        demo_info = gr.HTML("" if demos else f"<p class='fp-help'>{escape(NO_DEMOS)}</p>")
+                             label="How to run the case", elem_classes="fp-segmented", visible=live_demo_allowed())
+        demo_info = gr.HTML()
 
         # D. Fund documents
         gr.HTML("<h2>Fund documents</h2>", elem_classes="fp-section-title")
@@ -901,16 +937,6 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                 return gr.update(), gr.update(), gr.update()
             return (dashboard_html(data, audience_value),) + download_buttons(data, audience_value)
 
-        def on_demo(demo_id, mode):
-            """ Fill the upload boxes with the demo's inputs for this mode, and show its card """
-            demo = find_demo(demo_id) if demo_id else None
-            if demo is None or not demo.available:
-                return (gr.update(),) * 6 + ("",)
-            mode = mode if mode == LIVE and live_demo_allowed() else QUICK
-            d = demo_inputs(demo, mode)
-            return (d["price"], d["factsheet"], d["kid"], d["peer"], d["json"], gr.update(open=bool(d["json"] or d["kid"])),
-                    demo_info_html(demo, mode))
-
         private = {"api_visibility": "private"}         # the page is the only way in, with its limits
         review_type.change(question_for, inputs=[review_type, question], outputs=question, **private)
         for box, status_box, allowed, kinds in ((price, price_status, PRICE_TYPES, "CSV or Excel"),
@@ -919,9 +945,24 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             box.change(lambda v, a=allowed, k=kinds: file_status(v, a, k), inputs=box, outputs=status_box, **private)
         for box in (factsheet, json_files):         # the factsheet's line depends on the JSON inputs too
             box.change(factsheet_status, inputs=[factsheet, json_files], outputs=factsheet_status_line, **private)
-        for trigger in (demo_choice.change, demo_mode.change):
-            trigger(on_demo, inputs=[demo_choice, demo_mode],
-                    outputs=[price, factsheet, kid, peer, json_files, options, demo_info], **private)
+
+        def on_case(demo_id, mode):
+            """ A real-fund case runs the full Live AI workflow by default where AI runs are on; the synthetic demo
+            runs its prevalidated inputs. The analyst can still switch the mode """
+            demo = find_demo(demo_id) if demo_id and demo_id != UPLOAD_OWN else None
+            mode = LIVE if demo and not demo.fallback and live_demo_allowed() else QUICK
+            return on_demo(demo_id, mode) + (mode,)
+
+        demo_choice.change(on_case, inputs=[demo_choice, demo_mode],
+                           outputs=[price, factsheet, kid, peer, json_files, options, demo_info, demo_mode], **private)
+        def on_mode(demo_id, mode):
+            """ Switching Quick / Live reloads the chosen case; it never touches your own uploaded files """
+            if not demo_id or demo_id == UPLOAD_OWN:
+                return (gr.update(),) * 7
+            return on_demo(demo_id, mode)
+
+        demo_mode.change(on_mode, inputs=[demo_choice, demo_mode],
+                         outputs=[price, factsheet, kid, peer, json_files, options, demo_info], **private)
         run.click(on_run, inputs=[question, price, factsheet, kid, peer, json_files, audience, demo_choice, demo_mode],
                   outputs=[progress, message, results, dashboard, pdf, executive_pdf, technical, log, plain,
                            result_state], **private)

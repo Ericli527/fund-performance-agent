@@ -2,11 +2,11 @@
 # until the real-fund data rights are resolved). Its files are in the repository (demo/sample_index_fund/): every
 # figure is invented, so nothing restricted is published.
 id: sample_index_fund
-order: 99
+order: 0
 fallback: true
 location: demo/sample_index_fund
-title: "Sample World Index Fund (made up)"
-subtitle: "A fictional tracker: try the review in seconds"
+title: "Synthetic Demo"
+subtitle: "Sample World Index Fund (made up): every figure invented"
 fund_name: "Sample World Index Fund A Acc"
 share_class: "A Acc (GBP)"
 isin: XX0000000001
