@@ -271,9 +271,9 @@ def test_codes_checks_cover_the_evidence_and_keep_the_verdict_at_the_end_of_the_
     assert any("99.9%" in p for p in wrong)                                 # a figure not in the facts, in the evidence
     assert any(p.startswith("verdict: end the answer with") for p in
                draft_problems("Yes, it did.", facts(), evidence=[ENDING]))  # the verdict belongs to the answer
-    many = draft_problems(ANSWER, facts(), evidence=["One point."] * 5 + ["Two. Three. Four."])
-    assert any("5 evidence points" in p or "6 evidence points" in p for p in many)
-    assert any("evidence point 6 has 3 sentences" in p for p in many)
+    many = draft_problems(ANSWER, facts(), evidence=["One point."] * 6 + ["Two. Three. Four. Five."])
+    assert any("7 evidence points; use at most 6" in p for p in many)
+    assert any("evidence point 7 has 4 sentences; use at most 3" in p for p in many)
 
 
 def test_the_reporting_and_judge_agents_use_the_chosen_model(monkeypatch):
@@ -282,3 +282,6 @@ def test_the_reporting_and_judge_agents_use_the_chosen_model(monkeypatch):
     for agent in ("REPORTER", "JUDGE"):
         monkeypatch.delenv(f"FUND_MODEL_{agent}", raising=False)
     assert reporter_agent().model == reporter_agent(tools=True).model == judge_agent().model == "gpt-6.1-sol"
+    # the Reporting Agent writes the dashboard answer, so it thinks harder than the Judge on the same model
+    assert reporter_agent().model_settings.reasoning.effort == "medium"
+    assert judge_agent().model_settings.reasoning.effort == "low"

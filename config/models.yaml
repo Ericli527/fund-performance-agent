@@ -31,3 +31,8 @@ models:
   gpt-6.1-sol:
     supports_temperature: false
     reasoning_effort: low
+
+# reasoning: a reasoning effort for one agent instead of its model's. The Reporting Agent writes the answer to the
+#   reviewer's question on the dashboard, so it thinks harder (medium); every other agent keeps its model's setting
+reasoning:
+  reporter: medium

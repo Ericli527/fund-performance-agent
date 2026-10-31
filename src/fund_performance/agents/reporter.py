@@ -15,9 +15,9 @@ from fund_performance.agents.base import RunFn, model_kwargs, run_structured
 from fund_performance.agents.analyst import sentences
 from fund_performance.conclusion import text_problems
 
-MAX_SENTENCES = 4           # the answer: up to three sentences and code's verdict sentence
-MAX_EVIDENCE = 4            # supporting points
-MAX_EVIDENCE_SENTENCES = 2  # per point
+MAX_SENTENCES = 5           # the answer: up to four sentences and code's verdict sentence
+MAX_EVIDENCE = 6            # supporting points
+MAX_EVIDENCE_SENTENCES = 3  # per point
 MAX_SUMMARY_CHARS = 3000    # answer and evidence together: the dashboard Summary (settings.yaml drafting)
 EVIDENCE_HEADING = "Supporting evidence"
 ANGLE_BRIEFS = {
@@ -33,13 +33,16 @@ You are an investment oversight analyst answering the reviewer's question about 
 and decided every rating and the suggested verdict. Your job is to answer the question directly from those verified
 findings, the fund's documents and the vetted research, then show the evidence. Write two parts:
 
-answer: answer the question in the first sentence (for example yes, no, partly, or the key finding), add at most two
-short sentences with the main reasons, then end with the verdict sentence you are given, word for word. If the
-evidence cannot answer part of the question, say so plainly.
+answer: answer the question in the first sentence (for example yes, no, partly, or the key finding). If the question
+has several parts, answer each part, in the order asked. Add at most three short sentences with the main reasons, then
+end with the verdict sentence you are given, word for word. If the evidence cannot answer part of the question, say
+so plainly and name what is missing.
 
-evidence: 1 to 4 short points, one or two sentences each, in order of importance. Each point states one verified fact
-that supports the answer and why it matters: returns against the benchmark, tracking, fees against peers, data checks
-or missing evidence, and research findings cited as [1], [2] where relevant.
+evidence: 2 to 6 points, at most three sentences each, most important first, chosen for this question (leave out
+figures that do not bear on it). Each point states one verified fact with its period and what it is compared with
+(e.g. "over 5 years, against its index", "against the average fee of its peers"), then why it matters for the
+answer. Cover, where relevant: returns against the benchmark, tracking, fees against peers, data checks or missing
+evidence, and research findings cited as [1], [2].
 
 Rules (code checks every draft):
 - Use only the facts JSON. Quote a figure exactly as shown there (same rounding and unit); never calculate one.

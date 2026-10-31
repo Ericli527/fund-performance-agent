@@ -567,9 +567,10 @@ analyst signs off. Code keeps every number, rating and the final pick.
   code's market-context checks and reviewed by the Judge with the numbered sources; the Analyst and Evaluator are not
   called. Research failures or timeouts leave the financial review complete, with an info note.
 - **Answer to the reviewer's question:** the Reporting Agent (gpt-6.1-sol) gets the question typed on the page and
-  returns `answer` (the direct answer first, at most 4 sentences, ending with code's verdict sentence) and `evidence`
-  (1 to 4 supporting points of at most 2 sentences, each one verified fact or cited research finding and why it
-  matters). Code checks both parts (figures, labels, ratings, length). The dashboard, both PDFs and the plain-text
+  returns `answer` (the direct answer first, every part of the question answered, at most 5 sentences, ending with
+  code's verdict sentence) and `evidence` (2 to 6 supporting points of at most 3 sentences, each one verified fact with
+  its period and comparison, or a cited research finding, and why it matters). It runs at medium reasoning effort
+  (`config/models.yaml` `reasoning`); the Judge keeps low. The summary may run to 3,000 characters. Code checks both parts (figures, labels, ratings, length). The dashboard, both PDFs and the plain-text
   summary show "Answer", then "Supporting evidence"; code's own conclusion stays one paragraph.
 - **Reporting Agent tools (V2.1):** with `drafting.reporter_tools` on, the agent receives a brief and fetches the
   evidence with read-only tools: `get_oversight_scorecard()` (ratings, reasons, verdict and its sentence, findings,

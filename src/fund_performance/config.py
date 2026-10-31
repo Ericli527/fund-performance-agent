@@ -135,6 +135,9 @@ class ModelSpec(_Section):
 class ModelsConfig(_Section):
     agents: dict[AgentName, str]
     models: dict[str, ModelSpec]
+    # Optional: a reasoning effort for one agent instead of its model's (e.g. the Reporting Agent thinks harder than
+    # the Judge, which uses the same model)
+    reasoning: dict[AgentName, Literal["minimal", "low", "medium", "high"]] = {}
 
     @model_validator(mode="after")
     def _every_agent_has_a_known_model(self) -> "ModelsConfig":
@@ -151,7 +154,10 @@ class ModelsConfig(_Section):
         model = os.getenv(f"FUND_MODEL_{agent.upper()}") or self.agents[agent]
         if model not in self.models:
             raise ValueError(f"FUND_MODEL_{agent.upper()}={model} is not listed under 'models' in models.yaml")
-        return model, self.models[model]
+        spec = self.models[model]
+        if agent in self.reasoning and not spec.supports_temperature:
+            spec = spec.model_copy(update={"reasoning_effort": self.reasoning[agent]})
+        return model, spec
 
 
 def load_models(path: str | Path = MODELS_PATH) -> ModelsConfig:
