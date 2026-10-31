@@ -332,6 +332,7 @@ async def read_documents(factsheet: Path, kid: Path | None = None, peer_factshee
         log.append(f"Extractor Agent read the {'approved ' if origin == 'approved' else ''}peer factsheet: {path.name}")
 
     return {"rows": rows, "documents": list(docs) + [p.name for p, _, _ in peer_docs],
+            "text_chars": {name: sum(len(x) for x in pages) for name, pages in docs.items()},
             "factsheet": fs.model_dump(mode="json", by_alias=True) if fs else None,
             "promises": mandate.promises if mandate else [],
             "secondary_objective": mandate.secondary_objective if mandate else None,

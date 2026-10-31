@@ -160,6 +160,7 @@ def test_a_value_nobody_could_read_stops_the_run_with_a_clear_message(tmp_path, 
     outcome = asyncio.run(start_review("q", price, factsheet, None, None, [], False, limits, reader=no_isin))
     assert outcome.message.startswith("**The review could not run: these values were not found in the documents.**")
     assert "- ISIN: not found in the documents" in outcome.message and outcome.pdf is None
+    assert "Documents read: " in outcome.message and " characters of text" in outcome.message   # which file, how much text
 
 
 # The Advanced JSON route and the demo
@@ -443,3 +444,19 @@ def test_reading_documents_with_ai_still_needs_the_factsheet(tmp_path, limits):
     out = asyncio.run(start_review("q", str(SAMPLE / "prices.csv"), None, str(SAMPLE / "factsheet.pdf"), [],
                                    None, False, limits, out_root=tmp_path, reader=reader))   # a KID only
     assert out.message == NEED_FILES and not read and limits.used_today() == 0
+
+
+def test_the_private_case_folder_is_the_only_extra_folder_the_page_may_serve(tmp_path, monkeypatch):
+    """ Render: the case files are on a disk (/var/data/demos), outside the app and temp folders, so Gradio refused
+    to load them into the upload boxes ("Error") until the folder was allowed. Only that folder is allowed """
+    from fund_performance import web
+    disk = tmp_path / "disk" / "demos"
+    disk.mkdir(parents=True)
+    monkeypatch.setenv("FUND_DEMO_DATA", str(disk))
+    assert web.case_paths() == [str(disk.resolve())]
+    seen = {}
+    monkeypatch.setattr(gr.Blocks, "launch", lambda self, **kw: seen.update(kw))
+    web.launch(build_ui())
+    assert seen["allowed_paths"] == [str(disk.resolve())]
+    monkeypatch.setenv("FUND_DEMO_DATA", str(tmp_path / "missing"))
+    assert web.case_paths() == []                                       # no folder: nothing extra is allowed
