@@ -158,6 +158,13 @@ Instructions for Claude Code in this project. The build specification is
   reasoning or not approved -> one targeted rewrite; else pass (clarity alone never rejects). Each agent is a plain
   `Agent(name, instructions, output_type, **model_kwargs(...))`. Unit tests can never reach OpenAI (conftest blocks
   the real client).
+- Agentic Tools V2.1 (`agents/reporting_tools.py`): the Reporting Agent fetches verified evidence with three read-only
+  `@function_tool`s (get_fund_performance(period), get_oversight_scorecard(), get_peer_comparison()) instead of the
+  whole facts payload; it gets a brief (fund, review date, the Planner's task plan, verdict sentence, sources). The
+  tools read only this review's facts through the run context (`ReviewContext`, a private copy; no global state, no
+  files), return code's stored figures as displayed and name what is unavailable (never estimated; an invalid
+  fund-vs-index comparison is "not reliable"). Bounds: `drafting.reporter_max_turns` (4) model turns and 6 tool calls
+  per draft; `drafting.reporter_tools: false` restores the payload. Code's checks and the Judge are unchanged.
 - Value and Fees reasons (findings, report, page) give the peer return gap and the fee gap (`plain.py`,
   from the figures the scorecard keeps in `Pillar.values`).
 - Test cases (Version 1, `docs/TEST_CASES.md`): "Choose a test case" offers Synthetic Demo, Fidelity Index US P Acc GBP,

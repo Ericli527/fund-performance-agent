@@ -130,7 +130,8 @@ class _FakeClient:
 def _fake_runner(outputs):
     """ Stands in for Runner.run: fails like the real client would if it were reused across loops """
     from types import SimpleNamespace
-    async def run(agent, prompt, run_config=None):
+    async def run(agent, prompt, run_config=None, context=None, max_turns=10):
+        assert max_turns == 10 and context is None          # agents without tools: the SDK default, no context
         client = run_config.model_provider._client
         assert client is _FakeClient.instances[-1], "the run must use the client made for it"
         assert client.loop is asyncio.get_running_loop() and not client.loop.is_closed(), "Event loop is closed"

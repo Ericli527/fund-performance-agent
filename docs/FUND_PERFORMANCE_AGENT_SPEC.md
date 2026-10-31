@@ -566,6 +566,13 @@ analyst signs off. Code keeps every number, rating and the final pick.
   The Reporting Agent's optional `market_context` (at most 3 sentences, [n] citations, no figures) is checked by
   code's market-context checks and reviewed by the Judge with the numbered sources; the Analyst and Evaluator are not
   called. Research failures or timeouts leave the financial review complete, with an info note.
+- **Reporting Agent tools (V2.1):** with `drafting.reporter_tools` on, the agent receives a brief and fetches the
+  evidence with read-only tools: `get_oversight_scorecard()` (ratings, reasons, verdict and its sentence, findings,
+  points for judgement, material warnings, missing evidence), `get_fund_performance(period)` (fund and benchmark
+  returns, tracking difference and error for 1y, 3y, 5y or since launch) and `get_peer_comparison()` (peers, fees,
+  returns, comparability checks, Value and Fees ratings, what is missing). They read only the run context (a private
+  copy of this review's facts), calculate nothing and mark unavailable fields with a reason. At most 4 model turns
+  and 6 tool calls per draft; a run that hits the bound counts as no valid draft.
 - **Judge** (`agents/judge.py`): reviews each draft that passed code's checks like a senior analyst reviewing a
   junior's, one call per draft, and returns `ReviewResult` {approved, factual_issue, security_issue,
   conclusion_reasonable, clear_for_analysts, feedback}. Facts and drafts are untrusted data. It writes no text, gives

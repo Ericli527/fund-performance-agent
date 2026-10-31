@@ -227,6 +227,10 @@ class DraftingSettings(_Section):
     rejudge_after_rewrite: bool = False
     # The longest summary a draft may have: it is Executive page 1's summary (measured to fit with room to spare)
     max_summary_chars: int = Field(default=700, ge=200)
+    # Agentic Tools V2.1: the Reporting Agent fetches the evidence with read-only tools (reporting_tools.py) within
+    # reporter_max_turns model turns; false gives it the whole facts payload, as before
+    reporter_tools: bool = False
+    reporter_max_turns: int = Field(default=4, ge=2, le=8)
 
 
 class ResearchSettings(_Section):

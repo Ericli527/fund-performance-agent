@@ -151,7 +151,8 @@ def _summary(scored: list[Scored]) -> str:
 async def draft_and_judge(facts: dict, angles: list[str], focus: list[str], run_reporter: RunFn | None = None,
                           run_judge: RunFn | None = None, max_rewrites: int = 1,
                           max_chars: int = MAX_SUMMARY_CHARS, max_drafts: int | None = None,
-                          rejudge: bool = True, sources: list[dict] | None = None) -> DraftResult:
+                          rejudge: bool = True, sources: list[dict] | None = None, tools: bool = False,
+                          plan: dict | None = None, max_turns: int = 4) -> DraftResult:
     """ Drafts (max_drafts of the plan's angles), one Judge review each, and at most max_rewrites targeted rewrites
     of the drafts marked revise. Code picks the first passing draft in the plan's angle order. With rejudge False
     (the Version 1 pilot), the Judge runs once: a rewrite that passes code's checks is used, marked as revised after
@@ -159,8 +160,10 @@ async def draft_and_judge(facts: dict, angles: list[str], focus: list[str], run_
     angles = list(angles)[:max_drafts] if max_drafts else list(angles)
     out = DraftResult()
     first_round: list[Scored] = []
+    tooling = {"tools": tools, "plan": plan, "max_turns": max_turns}
     drafts = list(await asyncio.gather(*(write_draft(facts, a, focus, run_reporter, max_chars=max_chars,
-                                                     sources=sources) for a in angles)))
+                                                     sources=sources, **tooling) for a in angles)))
+    out.log += [f"Reporting Agent ({d.angle}) used tools: {', '.join(d.tools_used)}" for d in drafts if d.tools_used]
     for attempt in range(max_rewrites + 1):
         reviewed = await asyncio.gather(*(review(facts, d, run_judge, sources) for d in drafts))
         out.scored = [s for s, _ in reviewed]
@@ -183,7 +186,7 @@ async def draft_and_judge(facts: dict, angles: list[str], focus: list[str], run_
         # One targeted rewrite of each draft marked revise, with code's problems and the Judge's feedback
         drafts = list(await asyncio.gather(*(
             write_draft(facts, s.draft.angle, focus, run_reporter, s.issues or [s.reason], s.draft.text, max_chars,
-                        sources, s.draft.market_context) for s in revise)))
+                        sources, s.draft.market_context, **tooling) for s in revise)))
         if not rejudge:
             out.log.append("Rewrite: " + "; ".join(
                 f"{d.angle} {'passes' if d.figures_match else 'fails'} code's checks" for d in drafts))

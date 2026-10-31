@@ -596,7 +596,9 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     else:
         drafted = await _timed(draft_and_judge(facts, plan.angles, plan.focus, r.reporter, r.judge,
                                                s.drafting.max_rewrites, s.drafting.max_summary_chars,
-                                               s.drafting.max_drafts, s.drafting.rejudge_after_rewrite, vetted),
+                                               s.drafting.max_drafts, s.drafting.rejudge_after_rewrite, vetted,
+                                               s.drafting.reporter_tools, plan.to_dict(),
+                                               s.drafting.reporter_max_turns),
                                s.timeouts_seconds.drafting)
         if drafted is None:
             flags.append(DataFlag(check="judge", level="info", message=(
