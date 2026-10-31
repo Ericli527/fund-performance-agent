@@ -168,6 +168,12 @@ Instructions for Claude Code in this project. The build specification is
   improvements are applied in that one rewrite (used if it passes code's checks, else the approved draft stays). Each agent is a plain
   `Agent(name, instructions, output_type, **model_kwargs(...))`. Unit tests can never reach OpenAI (conftest blocks
   the real client).
+- Reporting should emphasise available 1, 3 and 5-year results and the stated assessment horizon. The fund/index
+  comparison uses the recorded comparison basis; peer returns use each peer's own comparison basis. Research may
+  support cited forward-looking oversight questions, never a forecast presented as fact or a change to code's ratings.
+  A code-checked rewrite that was not rejudged is explicitly labelled. No additional AI call is made for that label.
+  Repeated-price warnings retain their level and record the actual five-year price window; impact on longer history
+  and data checks remains open until verified.
 - Agentic Tools V2.1 (`agents/reporting_tools.py`): the Reporting Agent fetches verified evidence with three read-only
   `@function_tool`s (get_fund_performance(period), get_oversight_scorecard(), get_peer_comparison()) instead of the
   whole facts payload; it gets a brief (fund, review date, the Planner's task plan, verdict sentence, sources). The

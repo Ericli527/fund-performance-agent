@@ -414,14 +414,13 @@ def _dashboard_charts(inp: ReportInputs, out_dir: Path) -> list[tuple[Path | Non
     if used:
         first = used[0]
         label = "Fund (PNAV)" if first.fund_series == "fund_pnav" else "Fund (NAV)"
-        series = {label: [first.fund_returns[k] for k in (1, 3, 5)],
-                  "Index": [inp.reported.value("index.cum.1y"), inp.reported.value("index.ann.3y"),
-                            inp.reported.value("index.ann.5y")]}
-        series |= {r.peer.name[:28]: [r.returns[k] for k in (1, 3, 5)] for r in used}
+        series = {label: [first.fund_returns[k] for k in (1, 3, 5)]}
+        matching = [r for r in used if r.basis == first.basis and r.fund_series == first.fund_series]
+        series |= {r.peer.name[:28]: [r.returns[k] for k in (1, 3, 5)] for r in matching}
         out.append((charts.peer_returns_chart(["1 year", "3 years", "5 years"], series, out_dir / "dash_peers.png",
-                                              "Fund vs peers vs index"),
+                                              "Fund vs comparable peers"),
                     f"Returns a year to {p.as_of_date:%d %b %Y} (1 year: the 1-year return). Source: factsheets "
-                    f"(fund, index, peers). Only peers with returns in {p.currency}; basis: {first.basis}."))
+                    f"(fund and peers). Only peers with returns in {p.currency} on the {first.basis} basis are shown."))
     else:
         out.append((None, f"Fund vs peers chart left out: no peer with returns in {p.currency}."))
     series, fund_vol, index_vol = _risk_vol(inp)
@@ -586,7 +585,8 @@ def _peers_table(inp: ReportInputs) -> str:
             "<th class='l'>Used for</th></tr>")
     rows = (f"<tr class='total'><td class='l'>{escape(p.fund_name)}</td><td class='l'>{escape(p.share_class)}, "
             f"{p.distribution}</td><td class='l'>{p.currency}, {PRICING_TIME.get(p.pricing_point, 'pricing time not stated')}</td><td>{p.ocf_pct:.2f}%</td>"
-            + "".join(f"<td>{fmt('x', f, False)}</td>" for f in fund) + "<td class='l'>This fund (NAV)</td></tr>")
+            + "".join(f"<td>{f.display(percent_decimals=2).replace('-', '−') if f else '–'}</td>" for f in fund)
+            + "<td class='l'>This fund (NAV)</td></tr>")
     notes = []
     for r in comp.rows if comp else []:
         peer = r.peer
@@ -596,7 +596,7 @@ def _peers_table(inp: ReportInputs) -> str:
         rows += (f"<tr><td class='l'>{escape(peer.name)}</td><td class='l'>{escape(peer.share_class)}"
                  f"{', ' + kind if kind else ''}{escape(minimum)}</td><td class='l'>{peer.currency}"
                  f"{', ' + PRICING_TIME[peer.pricing_point] if peer.pricing_point else ''}</td><td>{peer.ocf_pct:.2f}%</td>"
-                 + "".join(f"<td>{_pct(r.returns[k])}</td>" for k in (1, 3, 5)) + f"<td class='l'>{escape(used)}</td></tr>")
+                 + "".join(f"<td>{_pct(r.returns[k], 2)}</td>" for k in (1, 3, 5)) + f"<td class='l'>{escape(used)}</td></tr>")
         notes += [f"{peer.name}: {x}." for x in r.notes]
     value, fees = inp.card.pillars["Value for investors"].values, inp.card.pillars["Fees"].values
     if len(inp.peers) > 1:
@@ -607,7 +607,7 @@ def _peers_table(inp: ReportInputs) -> str:
                    for k in (1, 3, 5)]
         rows += (f"<tr class='total'><td class='l'>Peer average</td><td class='l'>{len(inp.peers)} peers (fees), "
                  f"{len(used)} (returns)</td><td></td><td>{fees.get('peer_ocf', 0):.2f}%</td>"
-                 + "".join(f"<td>{_pct(a)}</td>" for a in avg) + "<td class='l'>The ratings</td></tr>")
+                 + "".join(f"<td>{_pct(a, 2)}</td>" for a in avg) + "<td class='l'>The ratings</td></tr>")
     if inp.sector_ocf:
         s = inp.sector_ocf
         rows += (f"<tr><td class='l'>Sector average (context only)</td><td class='l' colspan='2'>{escape(s['source'])}, "

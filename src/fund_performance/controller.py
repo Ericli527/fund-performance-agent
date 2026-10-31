@@ -537,6 +537,8 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     step = log.start("calculator", [files["prices"].name] + (["factsheet figures"] if factsheet else []))
     calculated = await asyncio.to_thread(calculate, checked.prices, profile, t, factsheet)
     reported = apply_precedence(calculated, checked.flags, profile, t, factsheet, checked.comparison)
+    from fund_performance.checks import repeated_price_scope
+    reported.flags = [repeated_price_scope(f, checked.prices) for f in reported.flags]
     text_log += reported.log
     flags = list(reported.flags) + flags
     log.end(step, outputs={"figures": len(reported.figures)})

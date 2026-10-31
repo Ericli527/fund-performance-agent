@@ -176,6 +176,11 @@ GENERIC_ACTIONS = {"record_decision", "read_sources"}
 def next_step(facts: dict) -> str | None:
     """ The recommended next step: the AI's (checked by code), else code's most important candidate action """
     concl = facts.get("suggested_conclusion") or {}
+    ai_read = any(f.get("source") == "ai_extracted" for f in facts.get("figures", []))
+    price_warning = any(f.get("check") == "repeated_prices" and f.get("level") == "warning"
+                        for f in facts.get("data_flags", []))
+    if ai_read and price_warning:
+        return "Verify the AI-extracted figures against the documents and check the flagged historical prices before sign-off."
     if concl.get("source") == "ai" and concl.get("next_step"):
         return concl["next_step"]
     actions = facts.get("candidate_actions") or []
@@ -197,7 +202,7 @@ def conclusion_origin(concl: dict) -> str:
                 "the Detailed Report")
     if concl.get("source") == "ai" and concl.get("revised"):
         return (f"AI draft for the {ANGLE_WORDS.get(concl.get('angle'), concl.get('angle'))}, revised once after the "
-                "Judge's review and checked by code")
+                "Judge's review and checked by code; the revision was not reviewed again by the Judge")
     if concl.get("source") == "ai":
         return (f"AI draft for the {ANGLE_WORDS.get(concl.get('angle'), concl.get('angle'))}, chosen by the Judge and "
                 "checked by code")

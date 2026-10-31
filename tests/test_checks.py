@@ -11,6 +11,19 @@ from conftest import FIXTURES, TEST1_CSV, TEST1_FACTSHEET, TEST1_PROFILE, requir
 T = load_thresholds()
 
 
+def test_repeated_price_scope_uses_actual_five_year_start_and_keeps_warning():
+    from fund_performance.models import DataFlag
+    prices = pd.DataFrame({"date": pd.to_datetime(["2013-06-30", "2013-08-31", "2021-09-30", "2026-09-30"]),
+                           "nav": [1, 1, 2, 3]})
+    flag = DataFlag(check="repeated_prices", level="warning", message="Repeated prices on 2013 dates",
+                    dates=[date(2013, 6, 30), date(2013, 8, 31)])
+    scoped = checks.repeated_price_scope(flag, prices)
+    assert scoped.level == "warning" and "outside the five-year price window 2021-09-30" in scoped.message
+    assert "longer historical calculations and data checks remains to be reviewed" in scoped.message
+    sparse = prices.iloc[[0, 1, 3]]
+    assert "at least one flagged date falls within" in checks.repeated_price_scope(flag, sparse).message
+
+
 def monthly(navs, start="2024-01-31", index=None):
     p = pd.DataFrame({"date": pd.date_range(start, periods=len(navs), freq="ME"), "nav": navs})
     if index is not None:

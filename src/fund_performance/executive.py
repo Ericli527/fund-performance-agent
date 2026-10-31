@@ -220,8 +220,9 @@ def _comparison(inp, facts: dict) -> str:
         cls = " class='x-total'" if bold else ""
         return (f"<tr{cls}><td class='l'>{escape(label)}</td>" + "".join(f"<td>{escape(c)}</td>" for c in cells)
                 + f"<td>{escape(fee)}</td><td class='l x-src'>{escape(used)}</td></tr>")
-    ann = lambda s: [_shown(figs.get(f"{s}.cum.1y")) if figs.get(f"{s}.cum.1y") else "–"] + [  # noqa: E731
-        _shown(figs[f"{s}.ann.{k}y"]) if figs.get(f"{s}.ann.{k}y") else "–" for k in (3, 5)]
+    def ann(s):
+        return [f"{figs[name]['value']:.2f}%".replace("-", "−") if (name := f"{s}.{kind}.{k}y") in figs else "–"
+                for kind, k in (("cum", 1), ("ann", 3), ("ann", 5))]
     rows = row(fund_label, ann(basis), f"{inp.profile.ocf_pct:.2f}%", _source(*(figs.get(f"{basis}.ann.{k}y") for k in (3, 5))), True)
     peer_series = {"fund_pnav" if "PNAV" in p.get("basis", "") else "fund_nav"
                    for p in facts.get("peers", []) if p.get("used_for_returns")}
@@ -234,14 +235,15 @@ def _comparison(inp, facts: dict) -> str:
              row("Index or benchmark", ann("index"), "–", _source(*(figs.get(f"index.ann.{k}y") for k in (3, 5)))))
     for p in facts.get("peers", []):
         r = p.get("returns_pct_a_year", {})
-        cells = ["–" if r.get(k) is None else f"{r[k]:.1f}%".replace("-", "−") for k in ("1y", "3y", "5y")]
+        cells = ["–" if r.get(k) is None else f"{r[k]:.2f}%".replace("-", "−") for k in ("1y", "3y", "5y")]
         used = (f"Peer, fees and returns ({p['basis']})" if p.get("used_for_returns")
                 else f"Peer, fees only: {p.get('excluded')}")
         rows += row(p["name"], cells, f"{p['ocf_pct']:.2f}%", used)
     gap = figs.get(f"comparison.td.{n}y")
     note = (f"Gap to the index over {n} years: {_shown(gap)} a year (tracking difference; calculated from the "
-            "factsheet). Returns a year; 1 year is the 1-year return." if gap else
-            "Returns a year; 1 year is the 1-year return.")
+            "factsheet). Returns a year; 1 year is the 1-year return. Two decimal places aid comparison; source "
+            "figures may be rounded, and differences can vary by 0.01 pp after rounding." if gap else
+            "Returns a year; 1 year is the 1-year return. Source figures may be rounded.")
     if invalid:
         note = ("Index figures and the gap to the index are not reliable until the data check is resolved (see the "
                 "data issues); the Detailed Report keeps them, marked. Returns a year; 1 year is the 1-year return.")
