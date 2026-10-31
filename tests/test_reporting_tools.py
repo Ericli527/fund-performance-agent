@@ -31,6 +31,19 @@ def test_fund_performance_returns_the_stored_figures_for_the_period():
     assert out["unavailable"] == {} and out["as_of_date"] == "2026-09-30"
 
 
+def test_benchmark_comparison_uses_pnav_when_tracking_difference_says_pnav():
+    facts = json.loads(json.dumps(FACTS))
+    td = next(f for f in facts["figures"] if f["name"] == "comparison.td.5y")
+    td["basis"] = "fund_pnav"
+    for kind in ("cum", "ann"):
+        nav = next(f for f in facts["figures"] if f["name"] == f"fund_nav.{kind}.5y")
+        facts["figures"].append(nav | {"name": f"fund_pnav.{kind}.5y", "display": "42.0%"})
+    out = fund_performance(facts, "5y")
+    assert out["fund_benchmark_basis"] == "fund_pnav"
+    assert out["fund_return_a_year"]["display"] == "42.0%"
+    assert out["tracking_difference"]["display"] == td["display"]
+
+
 def test_missing_values_are_named_never_estimated():
     out = fund_performance(FACTS, "1y")
     assert out["tracking_error"] is None and out["unavailable"]["tracking_error"] == NOT_IN_FACTS

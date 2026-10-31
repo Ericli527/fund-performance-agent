@@ -51,6 +51,12 @@ A. The dashboard, for the analyst who asked the question:
   mention a piece of missing evidence once only.
 - next_step: one clear action or priority for the analyst, in one sentence.
 Explain any technical comparison simply (e.g. "tracking difference: how far the fund's return was behind its index").
+Focus on the available one-, three- and five-year evidence, with the fund's stated horizon as the main assessment.
+When making a fund-versus-benchmark comparison use the comparison's stated pricing basis; compare a peer only on the
+peer comparison's stated basis. Never infer that the benchmark comparison and peer comparison use the same basis.
+One institutional peer is limited evidence and does not establish market-wide fee competitiveness. Separate the
+suggested investment assessment from checks needed before sign-off; identify both document verification and unresolved
+price warnings when present.
 
 B. The Executive commentary for the PDF, for an oversight committee:
 - executive: 3 to 6 paragraphs of formal oversight commentary in your own words (do not copy the dashboard text):
@@ -58,6 +64,8 @@ B. The Executive commentary for the PDF, for an oversight committee:
   against peers and the limits of that evidence; relevant market developments, citing sources as [1], [2] where
   given; material risks and oversight priorities. End the last paragraph with the verdict sentence you are given,
   word for word, after the reasoning that supports it.
+- Where the vetted sources support it, suggest specific forward-looking matters to monitor or questions to ask. Cite
+  the evidence, distinguish an oversight suggestion from a forecast, and do not present speculation as fact.
 
 Rules for both (code checks every draft):
 - Use only the facts JSON. Quote a figure exactly as shown there (same rounding and unit); never calculate one.

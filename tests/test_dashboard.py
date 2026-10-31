@@ -189,3 +189,10 @@ def test_code_fallback_shows_codes_conclusion_and_codes_next_step():
     page = text(dashboard_html(d, "analyst"))
     assert "Code's conclusion." in page and "Supporting evidence" not in page
     assert next_step(d["facts"]) == "Add a peer fund factsheet." and "Add a peer fund factsheet." in page
+def test_next_step_covers_both_extraction_and_repeated_price_warnings():
+    from fund_performance.presentation import next_step
+    facts = {"figures": [{"source": "ai_extracted"}], "data_flags": [
+        {"check": "repeated_prices", "level": "warning"}],
+        "suggested_conclusion": {"source": "ai", "next_step": "Check the figures."}}
+    text = next_step(facts)
+    assert "AI-extracted" in text and "flagged historical prices" in text and "before sign-off" in text

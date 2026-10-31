@@ -65,7 +65,9 @@ def fund_performance(facts: dict, period: str) -> dict:
         index_cum, index_ann = _figure(figures, "index.since_launch.cum"), _figure(figures, "index.since_launch.ann")
         td = te = None
     else:
-        fund_cum, fund_ann = _figure(figures, f"fund_nav.cum.{key}"), _figure(figures, f"fund_nav.ann.{key}")
+        comparison = figures.get(f"comparison.td.{key}") or {}
+        basis = comparison.get("basis") or "fund_nav"
+        fund_cum, fund_ann = _figure(figures, f"{basis}.cum.{key}"), _figure(figures, f"{basis}.ann.{key}")
         index_cum, index_ann = _figure(figures, f"index.cum.{key}"), _figure(figures, f"index.ann.{key}")
         td = _figure(figures, f"comparison.td.{key}", f"relative.td.{key}")
         te = _tracking_error(figures, key)
@@ -73,6 +75,8 @@ def fund_performance(facts: dict, period: str) -> dict:
            "fund_return_cumulative": fund_cum, "fund_return_a_year": fund_ann,
            "benchmark_return_cumulative": index_cum, "benchmark_return_a_year": index_ann,
            "tracking_difference": td, "tracking_error": te}
+    if key != "since_launch":
+        out["fund_benchmark_basis"] = basis
     unavailable = {}
     if comparison_invalid(facts):
         for name in ("benchmark_return_cumulative", "benchmark_return_a_year", "tracking_difference", "tracking_error"):

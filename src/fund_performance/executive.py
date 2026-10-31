@@ -22,7 +22,7 @@ from fund_performance.presentation import (CHART_LEFT_OUT, UNRELIABLE, compariso
                                            _shown, _source, assessment_caveat, chart_choice, comparison_problems,
                                            evidence_quality, flag_dicts, conclusion_origin, headline_metrics, summary_parts, executive_commentary,
                                            issue_groups, merge_same_ending, missing_evidence, point_to_data_issues,
-                                           report_action, assessment_meaning,
+                                           report_action, assessment_meaning, signoff_checks,
                                            risk_measures)
 
 PAGE1, PAGE2 = "Overview", "Comparisons and decision"
@@ -183,6 +183,11 @@ def _summary_html(concl: dict) -> str:
             + (f"<p><b>Supporting evidence</b></p>{_ul(evidence)}" if evidence else ""))
 
 
+def long_commentary(facts: dict) -> bool:
+    concl = facts.get("suggested_conclusion") or {}
+    return len(" ".join(executive_commentary(concl)) or concl.get("text", "")) > 700
+
+
 def page1(inp, content: ExecutiveContent) -> str:
     data = content.data
     concl = data["facts"].get("suggested_conclusion") or {}
@@ -196,16 +201,25 @@ def page1(inp, content: ExecutiveContent) -> str:
                  f"</b><br/>{escape(content.chart_caption)}</td></tr></table>")
     else:
         chart = f"<p class='x-src'>{escape(content.chart_caption)}</p>"
+    heading = 'Oversight commentary' if executive_commentary(concl) else 'Summary'
+    summary = (f"<h2>{heading}</h2>{_summary_html(concl)}<p class='x-src'>"
+               f"{escape(conclusion_origin(concl))}; a draft for the analyst.</p>")
+    findings_html = '<h2>Key findings</h2>' + _ul(findings) if findings else ''
+    # xhtml2pdf cannot split a table row. Long commentary in the side-by-side row moves the whole row to
+    # the next page, leaving page one mostly empty. Render long commentary as normal flowing paragraphs.
+    long_summary = long_commentary(data["facts"])
+    if long_summary:
+        chart = chart.replace("width='330'", "width='240'")
+        narrative = summary + findings_html + f"<div align='center'>{chart}</div>"
+    else:
+        narrative = (f"<table width='100%'><tr><td width='52%' valign='top'>{summary}{findings_html}</td>"
+                     f"<td width='3%'></td><td valign='top' align='center'>{chart}</td></tr></table>")
     return f"""
 {_banner(inp)}
 <h1>{PAGE1}</h1>
 {_statuses(data)}
 {_metrics(data['facts'])}
-<table width="100%"><tr><td width="52%" valign="top">
-<h2>{'Oversight commentary' if executive_commentary(concl) else 'Summary'}</h2>{_summary_html(concl)}<p class='x-src'>{escape(conclusion_origin(concl))}; a draft for
-the analyst.</p>
-{'<h2>Key findings</h2>' + _ul(findings) if findings else ''}
-</td><td width="3%"></td><td valign="top" align="center">{chart}</td></tr></table>
+{narrative}
 <h2>The four ratings</h2>{_scorecard(data)}
 """
 
@@ -220,8 +234,9 @@ def _comparison(inp, facts: dict) -> str:
         cls = " class='x-total'" if bold else ""
         return (f"<tr{cls}><td class='l'>{escape(label)}</td>" + "".join(f"<td>{escape(c)}</td>" for c in cells)
                 + f"<td>{escape(fee)}</td><td class='l x-src'>{escape(used)}</td></tr>")
-    ann = lambda s: [_shown(figs.get(f"{s}.cum.1y")) if figs.get(f"{s}.cum.1y") else "–"] + [  # noqa: E731
-        _shown(figs[f"{s}.ann.{k}y"]) if figs.get(f"{s}.ann.{k}y") else "–" for k in (3, 5)]
+    def ann(s):
+        return [f"{figs[name]['value']:.2f}%".replace("-", "−") if (name := f"{s}.{kind}.{k}y") in figs else "–"
+                for kind, k in (("cum", 1), ("ann", 3), ("ann", 5))]
     rows = row(fund_label, ann(basis), f"{inp.profile.ocf_pct:.2f}%", _source(*(figs.get(f"{basis}.ann.{k}y") for k in (3, 5))), True)
     peer_series = {"fund_pnav" if "PNAV" in p.get("basis", "") else "fund_nav"
                    for p in facts.get("peers", []) if p.get("used_for_returns")}
@@ -234,14 +249,15 @@ def _comparison(inp, facts: dict) -> str:
              row("Index or benchmark", ann("index"), "–", _source(*(figs.get(f"index.ann.{k}y") for k in (3, 5)))))
     for p in facts.get("peers", []):
         r = p.get("returns_pct_a_year", {})
-        cells = ["–" if r.get(k) is None else f"{r[k]:.1f}%".replace("-", "−") for k in ("1y", "3y", "5y")]
+        cells = ["–" if r.get(k) is None else f"{r[k]:.2f}%".replace("-", "−") for k in ("1y", "3y", "5y")]
         used = (f"Peer, fees and returns ({p['basis']})" if p.get("used_for_returns")
                 else f"Peer, fees only: {p.get('excluded')}")
         rows += row(p["name"], cells, f"{p['ocf_pct']:.2f}%", used)
     gap = figs.get(f"comparison.td.{n}y")
     note = (f"Gap to the index over {n} years: {_shown(gap)} a year (tracking difference; calculated from the "
-            "factsheet). Returns a year; 1 year is the 1-year return." if gap else
-            "Returns a year; 1 year is the 1-year return.")
+            "factsheet). Returns a year; 1 year is the 1-year return. Two decimal places aid comparison; source "
+            "figures may be rounded, and differences can vary by 0.01 pp after rounding." if gap else
+            "Returns a year; 1 year is the 1-year return. Source figures may be rounded.")
     if invalid:
         note = ("Index figures and the gap to the index are not reliable until the data check is resolved (see the "
                 "data issues); the Detailed Report keeps them, marked. Returns a year; 1 year is the 1-year return.")
@@ -340,6 +356,8 @@ def page2(inp, content: ExecutiveContent) -> str:
     questions = facts.get("manager_questions", [])[:MAX_QUESTIONS]
     blocking = evidence_quality(data).blocking
     actions = merge_resolve_actions([report_action(point_to_data_issues(a, blocking)) for a in data.get("actions", [])])
+    if checks := signoff_checks(facts):
+        actions.insert(0, checks)
     suggested = verdict_name(facts["scorecard"]["verdict"])
     # Tick boxes as characters in one cell: a nested table of 12px box cells could be squeezed below its padding
     # when the box crosses a page break, and ReportLab then stops the whole report (Stage 6C Live run)
@@ -423,8 +441,9 @@ def build_executive(inp, out_dir: Path, name: str = "report_executive.pdf") -> P
     p1, p2 = executive_html(inp, out_dir)
     footer = (f'<div id="footer">{escape(inp.profile.fund_name)} · Executive Report (draft) · figures to '
               f'{inp.profile.as_of_date:%d %b %Y} · Public data only · Page <pdf:pagenumber> of <pdf:pagecount></div>')
+    separator = "" if long_commentary(inp.facts) else "<div style='page-break-before: always'></div>"
     html = (f"<html><head><meta charset='utf-8'/><style>{CSS}{EXEC_CSS}</style></head><body>{footer}{p1}"
-            f"<div style='page-break-before: always'></div>{p2}</body></html>")
+            f"{separator}{p2}</body></html>")
     path = out_dir / name
     _render(html, path)
     problems = executive_structure_problems(page_texts(path))
@@ -451,10 +470,10 @@ def build_executive_reliably(inp, out_dir: Path, name: str = "report_executive.p
 
 
 def executive_structure_problems(texts: list[str]) -> list[str]:
-    """ Page 1 holds "Overview" and a later page starts the "Comparisons and decision" section """
+    """ The overview comes first, followed by the comparisons and decision section. """
     if not texts or PAGE1 not in texts[0]:
         return ["page 1 is missing"]
-    if not any(PAGE2 in t for t in texts[1:]):
+    if not any(PAGE2 in t for t in texts) or (PAGE2 in texts[0] and texts[0].index(PAGE2) < texts[0].index(PAGE1)):
         return ["the 'Comparisons and decision' page is missing"]
     return []
 

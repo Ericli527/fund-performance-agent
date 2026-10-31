@@ -209,7 +209,9 @@ def _returns_table(facts: dict) -> str:
         rows += ("<tr class='fp-total'><td class='l'>Gap to the index</td>" + f"<td>{UNRELIABLE}</td>" * len(cols)
                  + f"<td class='l src'>{UNRELIABLE_SOURCE}</td></tr>")
     elif any(gaps):
-        rows += ("<tr class='fp-total'><td class='l'>Gap to the index</td>" + "".join(
+        basis = next((g.get("basis") for g in gaps if g and g.get("basis")), None)
+        basis_label = "market-close PNAV vs index" if basis == "fund_pnav" else "NAV vs index"
+        rows += (f"<tr class='fp-total'><td class='l'>Gap to the index ({basis_label})</td>" + "".join(
             f"<td>{_shown(g) if g else '–'}</td>" for g in gaps) + "<td class='l src'>Calculated from the factsheet</td></tr>")
     if not rows:
         return ""
@@ -252,7 +254,7 @@ def _peers(facts: dict) -> str:
         used = f"Fees and returns ({p['basis']})" if p.get("used_for_returns") else f"Fees only: {p.get('excluded')}"
         rows += (f"<tr><td class='l'>{escape(p['name'])}</td><td class='l'>{escape(p.get('currency') or '')}</td>"
                  f"<td>{p['ocf_pct']:.2f}%</td>" + "".join(
-                     f"<td>{'–' if r.get(k) is None else f'{r[k]:.1f}%'.replace('-', '−')}</td>" for k in ("1y", "3y", "5y"))
+                     f"<td>{'–' if r.get(k) is None else f'{r[k]:.2f}%'.replace('-', '−')}</td>" for k in ("1y", "3y", "5y"))
                  + f"<td class='l'>{escape(used)}</td></tr>")
     if not rows:
         return ""
@@ -316,8 +318,8 @@ def dashboard_html(data: dict, audience: str = "analyst") -> str:
     analyst = audience != "management"
     facts = data["facts"]
     quality = evidence_quality(data)
-    detail = _returns_table(facts) + _risk_rows(facts) + _statistics(facts) + _peers(facts) + _findings(data)
-    parts = [_header(data, quality), _summary(data, quality)]
+    detail = _risk_rows(facts) + _statistics(facts) + _peers(facts) + _findings(data)
+    parts = [_header(data, quality), _summary(data, quality), "<div class='fp-card'>" + _returns_table(facts) + "</div>"]
     if not analyst:
         parts.append(_decisions(data, quality))
     parts += [_metrics(facts), _attention(data, quality, analyst), _ratings(data, analyst)]

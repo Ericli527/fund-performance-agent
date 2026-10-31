@@ -207,6 +207,27 @@ def repeated_prices(prices: pd.DataFrame, window: int, asset_class: str = "equit
     return flags
 
 
+def repeated_price_scope(flag: DataFlag, prices: pd.DataFrame) -> DataFlag:
+    """ Describe the flagged dates against the actual five-year price window; retain the warning. """
+    if flag.check != "repeated_prices" or flag.level != "warning" or not flag.dates:
+        return flag
+    from fund_performance.calc import start_price
+    levels = prices.set_index("date")["nav"].dropna()
+    if levels.empty:
+        return flag
+    end = levels.index[-1]
+    start = start_price(levels, 5, end)
+    if start is None:
+        return flag.model_copy(update={"message": flag.message + "; impact on five-year inputs cannot be established"})
+    if all(pd.Timestamp(d) < start[0] or pd.Timestamp(d) > end for d in flag.dates):
+        note = (f"flagged dates are outside the five-year price window {start[0]:%Y-%m-%d} to {end:%Y-%m-%d}; "
+                "their effect on longer historical calculations and data checks remains to be reviewed")
+    else:
+        note = (f"at least one flagged date falls within the five-year price window {start[0]:%Y-%m-%d} to "
+                f"{end:%Y-%m-%d}; its effect on calculations and data checks requires review")
+    return flag.model_copy(update={"message": f"{flag.message}; {note}"})
+
+
 # --- History length -----------------------------------------------------------------------------------------
 
 def history_length(prices: pd.DataFrame, time_horizon_years: int,
