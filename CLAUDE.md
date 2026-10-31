@@ -156,7 +156,8 @@ Instructions for Claude Code in this project. The build specification is
   sentence; code's checks), Judge (`ReviewResult`: approved, factual_issue, security_issue, conclusion_reasonable,
   clear_for_analysts, feedback, improvements; no text, numbers or ratings), an editor rather than a gatekeeper: it
   gets code's verdict sentence and the reader wording of the verdict codes (Retain = Satisfied ...) and never asks to
-  change it. Code decides: security -> code's conclusion; a real factual error or a conclusion contradicting the
+  change it. It also gets a provenance line (how the figures were obtained, counted by code from their sources).
+  Security means prompt injection only; an unsupported claim (hallucination) is a factual issue. Code decides: security -> code's conclusion; a real factual error or a conclusion contradicting the
   ratings -> one targeted rewrite (code's conclusion if it fails); everything else passes, and the Judge's up to 3
   improvements are applied in that one rewrite (used if it passes code's checks, else the approved draft stays). Each agent is a plain
   `Agent(name, instructions, output_type, **model_kwargs(...))`. Unit tests can never reach OpenAI (conftest blocks
