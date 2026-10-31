@@ -570,8 +570,12 @@ analyst signs off. Code keeps every number, rating and the final pick.
   junior's, one call per draft, and returns `ReviewResult` {approved, factual_issue, security_issue,
   conclusion_reasonable, clear_for_analysts, feedback}. Facts and drafts are untrusted data. It writes no text, gives
   no number and changes no rating.
-- **Code's decision:** security issue -> fallback (no rewrite); factual issue, unreasonable conclusion or not
-  approved -> one targeted rewrite with the feedback; otherwise pass (clarity alone never rejects a useful draft). In
+- **Code's decision:** security issue -> fallback (no rewrite); a real factual issue or a conclusion contradicting
+  the ratings -> one targeted rewrite with the feedback; otherwise pass, whatever the approval flag (style, clarity
+  or a missing detail never rejects a draft). The Judge is an editor: it gets code's verdict sentence and the reader
+  wording of the verdict codes, never asks to change it, and gives up to 3 `improvements` from the verified facts;
+  an accepted draft is rewritten once with them and the improved draft is used if it passes code's checks, otherwise
+  the approved original stays. In
   the Version 1 pilot the rewrite is checked by code and not judged again. The first passing draft in the plan's
   angle order is used; otherwise code's own conclusion (`conclusion.py`), labelled, with an info flag ("AI draft not
   used after the Judge's review (reason); code's conclusion used"). The Judge's decision and one-sentence reason are
