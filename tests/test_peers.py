@@ -212,3 +212,29 @@ def test_a_peer_benchmark_variant_is_disclosed_for_information_only():
     assert (disclosed.average_gap, disclosed.average_ocf, disclosed.rows[0].used_for_returns) == \
         (base.average_gap, base.average_ocf, base.rows[0].used_for_returns)
     assert "benchmark_name" not in peer_rows(base)[0] and peer_rows(disclosed)[0]["benchmark_name"] == "S&P 500 Index (GBP)"
+
+
+# A peer whose figures are dated differently from the fund's (e.g. the latest verified report is months older): its
+# returns cover different periods and are left out; its fee is still compared. A made-up peer
+def test_a_peer_dated_differently_from_the_fund_gives_fees_only():
+    from datetime import date
+    prof = profile(currency="GBP", pricing_point="midday", ocf_pct=0.20, objective_type="index_tracker")
+    older = Peer(**HSBC_ACC_C | {"name": "Made-up Peer Acc C", "ocf_pct": 0.10, "as_of_date": "2026-05-31"})
+    comp = compare_peers([older], prof, reported())
+    row = comp.rows[0]
+    assert not row.used_for_returns and row.excluded == "returns as at 31 May 2026, not 30 Sep 2026"
+    assert "different periods" in comp.flags[0].message and "(0.10%) is still used for fees" in comp.flags[0].message
+    value = sc.value_rating(reported(), prof, T, [older])
+    assert "returns as at 31 May 2026" in value.reason and "gap_pp" not in (value.values or {})
+    fees = sc.fees_rating(prof, T, [older], value.rating)
+    assert fees.values["peer_ocf"] == 0.10 and fees.values["gap_pp"] == 0.10      # the fee is compared
+    same_day = Peer(**HSBC_ACC_C | {"as_of_date": date(2026, 9, 30)})
+    assert compare_peers([same_day], prof, reported()).rows[0].used_for_returns    # same date: returns used
+    assert compare_peers([Peer(**HSBC_ACC_C)], prof, reported()).rows[0].used_for_returns   # no date given: as before
+
+
+def test_an_uploaded_peer_factsheet_carries_its_date_into_the_peer():
+    from fund_performance.intake import peer_record
+    record = peer_record({"name": "P", "ocf_pct": 0.1, "currency": "GBP", "share_class": "C",
+                          "as_of_date": "2026-05-31", "1y": 1.0}, "uploaded")
+    assert str(Peer.model_validate(record).as_of_date) == "2026-05-31"

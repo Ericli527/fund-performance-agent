@@ -79,6 +79,7 @@ PEER_FIELDS = (                # one set per peer; the key "peer.<field>" become
     FieldSpec("peer.3y", "3-year return, % a year", "number", False),
     FieldSpec("peer.5y", "5-year return, % a year", "number", False),
     FieldSpec("peer.vol_3y", "3-year volatility, %", "number", False),
+    FieldSpec("peer.as_of_date", "figures as at (YYYY-MM-DD)", "date", False),
 )
 COLUMNS = ["Field", "Value", "Status", "Source"]
 
@@ -209,7 +210,8 @@ def peer_values(extracted: ExtractionResult) -> dict:
     values: dict = {"name": draft.get("fund_name"), "isin": draft.get("isin"), "share_class": draft.get("share_class"),
                     "currency": draft.get("currency") or (fs.currency if fs else None), "ocf_pct": draft.get("ocf_pct"),
                     "pricing_point": draft.get("pricing_point"), "distribution": draft.get("distribution"),
-                    "minimum_investment": draft.get("minimum_investment"), "_derived": {}}
+                    "minimum_investment": draft.get("minimum_investment"),
+                    "as_of_date": fs.as_of_date.isoformat() if fs and fs.as_of_date else None, "_derived": {}}
     if fs and values["pricing_point"] is None:
         values["pricing_point"] = next((s.pricing for s in fs.series.values() if s.pricing), None)
     annual = fs.series_annualised.get("fund_nav") if fs else None
@@ -236,7 +238,7 @@ def peer_record(values: dict, origin: str) -> dict:
             "currency": values.get("currency"), "share_class": values.get("share_class"),
             "pricing_point": values.get("pricing_point"), "distribution": values.get("distribution"),
             "investor_type": values.get("investor_type"), "minimum_investment": values.get("minimum_investment"),
-            "vol_3y": values.get("vol_3y"), "origin": origin,
+            "vol_3y": values.get("vol_3y"), "as_of_date": values.get("as_of_date"), "origin": origin,
             "returns": {"1y": values.get("1y"), "3y": None, "5y": None, "basis": "cumulative"},
             "returns_annualised": {"1y": values.get("1y"), "3y": values.get("3y"), "5y": values.get("5y"),
                                    "basis": "annualised"}}
