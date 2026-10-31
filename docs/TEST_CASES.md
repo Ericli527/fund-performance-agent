@@ -19,11 +19,16 @@ The page offers four test cases under **Choose a test case**:
 |---|---|---|---|---|---|---|---|
 | Synthetic | ✓ | ✓ | (none; made up) | ✓ made-up peer | made-up index returns | ✓ | ✓ 1/3/5 years |
 | Fidelity | ✓ monthly NAV CSV | ✓ Monthly factsheet (30 Sep 2026) | ✓ | ✓ HSBC American Index Acc C factsheet | Index returns and PNAV risk figures from the factsheet; **no index price series** | ✓ profile, factsheet, peer | ✓ 1/3/5 years |
-| Vanguard | ✓ daily NAV Excel (later prices left out) | ✓ factsheet (30 Sep 2026) | ✓ KIID | **none verified** (Value and Fees not compared, disclosed) | GBP benchmark returns from the factsheet; **no tracking error, beta or R² published and no GBP index price series** (missing evidence, disclosed) | ✓ profile, factsheet | ✓ 1/3/5 years |
+| Vanguard | ✓ daily NAV Excel (later prices left out) | ✓ factsheet (30 Sep 2026) | ✓ KIID | ✓ HSBC FTSE All-World Index Fund Acc C (GB00BMJJJF91), monthly report **31 May 2026**: fee compared, returns not (different periods) | GBP benchmark returns from the factsheet; **no tracking error, beta or R² published and no GBP index price series** (missing evidence, disclosed) | ✓ profile, factsheet, peer | ✓ 1/3/5 years |
 
 Missing evidence that cannot be completed without new sources:
 - **Index price series.** There is none for the S&P 500 (NUK) or the FTSE Global All Cap in GBP, so tracking error, beta and R² are not calculated from prices. Fidelity uses the factsheet's figures. Vanguard shows them as missing evidence.
-- **Vanguard peer.** No verified peer fund factsheet exists for Vanguard.
+- **Vanguard peer at the review date.** The peer, HSBC FTSE All-World Index Fund Acc C, is verified from its official monthly report dated 31 May 2026.
+  - That report confirms GBP, Acc C, accumulating, ISIN GB00BMJJJF91, OCF 0.130%, valuation at 12:00 UK and a GBP 1,000,000 minimum.
+  - No official report dated 30 Sep 2026 could be obtained: the latest HSBC report a web search found is 31 Aug 2026, and HSBC's site is not reachable from the build session.
+  - So code compares the peer's fee, but leaves its returns out of the value comparison, because they cover different periods.
+  - Value for investors waits for a peer report dated 30 Sep 2026.
+- **Benchmark difference.** The peer tracks the FTSE All-World Index (large and mid caps, about 4,200 stocks). The fund tracks the FTSE Global All Cap Index, which also includes small caps (about 10,200 stocks). The case discloses this; the peer is a close comparison, not an identical benchmark.
 
 No figure was invented for any case. The manifests in `demo/library/` hold metadata only.
 
@@ -45,8 +50,8 @@ A Render web service's own file system is reset on every deploy and restart. To 
    ```
    /var/data/demos/fidelity_us/quick/{Fidelity_Index_US_P_Acc.csv, fund_profile.json, factsheet_performance.json, peer.json}
    /var/data/demos/fidelity_us/documents/{Monthly_FactSheet.pdf, Key_Investor_Info.pdf, HSBC_American_Index_Fund_Acc_C.pdf}
-   /var/data/demos/vanguard_global/quick/{Historical_Prices_Vanguard_FTSE_Global_All_Cap_GBP_Acc.xlsx, fund_profile.json, factsheet_performance.json}
-   /var/data/demos/vanguard_global/documents/{Vanguard_FTSE_Global_All_Cap_GBP_Acc_factsheet.pdf, Vanguard_FTSE_Global_All_Cap_GBP_Acc_KIID.pdf}
+   /var/data/demos/vanguard_global/quick/{Historical_Prices_Vanguard_FTSE_Global_All_Cap_GBP_Acc.xlsx, fund_profile.json, factsheet_performance.json, peer.json}
+   /var/data/demos/vanguard_global/documents/{Vanguard_FTSE_Global_All_Cap_GBP_Acc_factsheet.pdf, Vanguard_FTSE_Global_All_Cap_GBP_Acc_KIID.pdf, HSBC_FTSE_All-World_Index_Fund_Acc_C_2026-05.pdf}
    ```
    Use the service's shell or SSH, for example `scp`.
 4. **Check the installation.** Run `python scripts/check_test_cases.py /var/data/demos` on the server. Every case should say `ready`, with its return checks `ok`.

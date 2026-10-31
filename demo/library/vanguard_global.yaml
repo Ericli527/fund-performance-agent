@@ -4,31 +4,34 @@
 id: vanguard_global
 order: 2
 title: "Vanguard FTSE Global All Cap Index Fund GBP Acc"
-subtitle: "Real global equity tracker, with missing evidence handled honestly"
+subtitle: "Real global equity tracker with an HSBC peer, and missing evidence handled honestly"
 fund_name: "Vanguard FTSE Global All Cap Index Fund GBP Acc"
 share_class: "A GBP Accumulation"
 isin: GB00BD3RZ582
 ticker: VAFTGAG
 benchmark: "FTSE Global All Cap Index"
-peer: "None: no verified peer, so value and fees are not compared"
+peer: "HSBC FTSE All-World Index Fund Acc C (GB00BMJJJF91): fees compared; returns not (dated 31 May 2026)"
 review_date: 2026-09-30
 quick:
   prices: quick/Historical_Prices_Vanguard_FTSE_Global_All_Cap_GBP_Acc.xlsx
-  json: [quick/fund_profile.json, quick/factsheet_performance.json]
+  json: [quick/fund_profile.json, quick/factsheet_performance.json, quick/peer.json]
 live:
   prices: quick/Historical_Prices_Vanguard_FTSE_Global_All_Cap_GBP_Acc.xlsx
   factsheet: documents/Vanguard_FTSE_Global_All_Cap_GBP_Acc_factsheet.pdf
   kid: documents/Vanguard_FTSE_Global_All_Cap_GBP_Acc_KIID.pdf
-  peers: []
+  peers: [documents/HSBC_FTSE_All-World_Index_Fund_Acc_C_2026-05.pdf]
 return_check_tolerance_pp: 0.05
 sources:
   - {publisher: "Vanguard Asset Management", title: "Vanguard FTSE Global All Cap Index Fund GBP Acc factsheet", date: "30 Sep 2026", used: "returns in GBP (fund and benchmark), fees, fund size"}
   - {publisher: "Vanguard Investments UK", title: "Key Investor Information (A GBP Accumulation)", date: "17 Feb 2026", used: "objective, risk indicator, calendar-year returns in GBP"}
   - {publisher: "Vanguard", title: "Historical prices, GBP Acc (Excel download)", date: "downloaded 30 Oct 2026", used: "daily NAV to 30 Sep 2026: risk and cross-checks (later prices left out)"}
   - {publisher: "FTSE Russell", title: "FTSE Global All Cap Index factsheet", date: "30 Sep 2026", used: "context only: its returns are in USD, so they are not compared with the GBP fund"}
+  - {publisher: "HSBC Asset Management", title: "HSBC FTSE All-World Index Fund Acc C monthly report", date: "31 May 2026", used: "peer: ongoing charge, share class, currency, accumulation, pricing time (its returns are not compared: different dates)"}
 disclosures:
   - "Benchmark returns are the GBP figures printed in Vanguard's factsheet. The FTSE Russell factsheet gives USD returns, which are not used."
   - "Tracking error, beta and R² are not published in the documents provided, and there is no GBP benchmark price series to calculate them, so Mandate and Performance cannot be fully rated: the verdict waits for that evidence."
-  - "No verified peer fund is available, so value for investors and fees are not compared."
+  - "Peer: HSBC FTSE All-World Index Fund Acc C (GB00BMJJJF91), a GBP accumulation share class, priced at 12:00 UK time. Its latest verified official report is dated 31 May 2026, not 30 Sep 2026, so its returns cover different periods and are left out of the value comparison; its ongoing charge is used for fees. Value for investors waits for a peer report dated 30 Sep 2026."
+  - "Benchmark difference: the peer tracks the FTSE All-World Index (large and mid caps, about 4,200 stocks), while the fund tracks the FTSE Global All Cap Index, which also includes small caps (about 10,200 stocks). The peer is a close comparison, not an identical benchmark."
+  - "Peer share class: HSBC Acc C has a minimum initial investment of GBP 1,000,000 (an institutional class), so its fee may be lower than retail investors can get."
   - "Pricing time not stated: the factsheet gives a 12:00 London dealing cut-off and says performance is calculated on the closing NAV, but not the valuation time, so the profile records it as not stated and the reports say a timing difference cannot be ruled out."
   - "The price download runs to 29 Oct 2026; prices after 30 Sep 2026 are left out of the September review."

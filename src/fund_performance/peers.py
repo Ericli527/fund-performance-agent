@@ -2,6 +2,8 @@
 
 - Approved peers: config/peers.yaml lists peers per benchmark; their factsheets are in data/peers/ (gitignored).
   They are used when the user gives no peer. The fund itself is never its own peer.
+- Date: a peer's returns are used only if they are as at the fund's date (when the peer's date is known); a fee is
+  still used.
 - Currency: a peer's returns are used only if they are in the fund's currency. Its ongoing charge is always used,
   since a fee is a percentage and does not depend on the currency.
 - Pricing time: noon prices are compared with the fund's noon NAV, market-close prices with the fund's PNAV
@@ -204,6 +206,13 @@ def compare_peers(peers: list[Peer], profile: FundProfile, reported: ReportedFig
                 f"Peer {peer.name}: its returns are in {peer.currency.upper()} and the fund's in "
                 f"{profile.currency.upper()}, so they are left out of the value comparison; its ongoing charge "
                 f"({peer.ocf_pct:.2f}%) is still used for fees")))
+        elif peer.as_of_date is not None and peer.as_of_date != profile.as_of_date:
+            row.used_for_returns = False
+            row.excluded = f"returns as at {peer.as_of_date:%d %b %Y}, not {profile.as_of_date:%d %b %Y}"
+            out.flags.append(DataFlag(check="peers", level="info", message=(
+                f"Peer {peer.name}: its returns are as at {peer.as_of_date:%d %b %Y} and the fund's as at "
+                f"{profile.as_of_date:%d %b %Y} (different periods), so they are left out of the value comparison; "
+                f"its ongoing charge ({peer.ocf_pct:.2f}%) is still used for fees")))
         elif row.returns.get(years) is None or row.fund_returns.get(years) is None:
             row.used_for_returns = False
             row.excluded = f"no {years}-year return for the {'peer' if row.returns.get(years) is None else 'fund'}"

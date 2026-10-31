@@ -143,6 +143,9 @@ class Peer(_Strict):
     # The index the peer follows, as its factsheet names it (e.g. "S&P 500 Index (GBP)"): disclosed when it is a
     # different variant from the fund's benchmark; information only, it never changes a comparison or a rating
     benchmark_name: str | None = None
+    # The date the peer's figures are as at (its factsheet date). Returns as at another date than the fund's cover
+    # different periods, so they are left out of the value comparison; the ongoing charge is still used for fees
+    as_of_date: date | None = None
     origin: Literal["typed", "uploaded", "approved"] = "typed"   # peer.json, an uploaded factsheet, config/peers.yaml
 
 

@@ -174,6 +174,9 @@ Instructions for Claude Code in this project. The build specification is
 - Return basis: a `series` declared `annualised` stays annualised (its cumulative return derived by code; an
   annualised since-launch figure is never read as cumulative); the cross-check compares like with like.
 - Peer `benchmark_name` (optional): a different variant from the fund's gets an information note only.
+- Peer `as_of_date` (optional; read from an uploaded peer factsheet): a peer dated differently from the fund keeps its
+  fee in the Fees comparison, but its returns are left out of Value (different periods), with an info flag. Vanguard's
+  peer: HSBC FTSE All-World Index Fund Acc C (report 31 May 2026; FTSE All-World excludes small caps, disclosed).
 - Fund profile `pricing_point`: must be given; `null` = not stated in the documents (info flag: a timing
   difference cannot be ruled out; the fund's NAV is compared as published). Never guessed.
 - Ratings waiting for figures the documents do not give are "missing evidence" in the wording (evidence quality

@@ -48,7 +48,11 @@ def test_the_committed_manifests_hold_metadata_only():
     fidelity, vanguard = demos
     assert (fidelity.isin, vanguard.isin, vanguard.ticker) == ("GB00BJS8SH10", "GB00BD3RZ582", "VAFTGAG")
     assert {str(d.review_date) for d in demos} == {"2026-09-30"} and {d.return_check_tolerance_pp for d in demos} == {0.05}
-    assert "GB00B80QG615" in fidelity.peer and vanguard.live["peers"] == []
+    assert "GB00B80QG615" in fidelity.peer and "GB00BMJJJF91" in vanguard.peer
+    assert vanguard.live["peers"] == ["documents/HSBC_FTSE_All-World_Index_Fund_Acc_C_2026-05.pdf"]
+    assert "quick/peer.json" in vanguard.quick["json"]
+    notes = " ".join(vanguard.disclosures)
+    assert "includes small caps" in notes and "not an identical benchmark" in notes and "31 May 2026" in notes
     for path in (ROOT / "demo" / "library").glob("*.yaml"):
         text = path.read_text()
         assert not re.search(r"\d+\.\d+\s*%", text), path.name           # no percentage figure of any kind
@@ -253,14 +257,22 @@ def test_real_vanguard_demo(tmp_path):
     assert any(f.check == "pricing_point" and "not stated" in f.message for f in r.flags)       # not guessed
     names = {f["name"] for f in facts["figures"]}
     assert not any(n.startswith(("relative.", "risk.")) for n in names)                   # no TE, beta, R² made up
-    assert facts["peers"] == []
+    # The HSBC FTSE All-World Acc C peer: its fee is compared; its returns (31 May 2026) are not, as they cover
+    # different periods. Ratings and verdict as before the peer was added
+    [peer] = facts["peers"]
+    assert peer["isin"] == "GB00BMJJJF91" and peer["currency"] == "GBP" and not peer["used_for_returns"]
+    assert peer["excluded"] == "returns as at 31 May 2026, not 30 Sep 2026"
+    pillars = {p["name"]: p for p in facts["scorecard"]["pillars"]}
+    assert "returns as at 31 May 2026" in pillars["Value for investors"]["reason"]
+    typed_peer = json.loads(find_demo("vanguard_global").quick_files["json"][2].read_text())
+    assert f"vs HSBC FTSE All-World Index Fund Acc C {typed_peer['ocf_pct']:.2f}%" in pillars["Fees"]["reason"]
+    assert typed_peer["as_of_date"] == "2026-05-31" and typed_peer["benchmark_name"] == "FTSE All-World Index"
     figs = {f["name"]: f for f in facts["figures"]}
     typed = json.loads(find_demo("vanguard_global").quick_files["json"][1].read_text())["series"]
     assert (figs["fund_nav.ann.5y"]["value"], figs["index.ann.5y"]["value"]) == \
         (typed["fund_nav"]["5y"], typed["index"]["5y"])                     # the GBP figures, as typed (annualised)
     assert figs["fund_nav.cum.5y"]["source"] == "calculated" and figs["fund_nav.cum.5y"]["value"] > 60
-    text = " ".join(" ".join(page_texts(r.executive_pdf)).split())
-    assert len(page_texts(r.executive_pdf)) == 2
+    text = " ".join(" ".join(page_texts(r.pdf)).split())               # the Detailed Report starts with the same pages
     assert "Evidence missing" in text and "R² and beta are not in the documents provided" in text
     assert "resolve the data check" not in text.lower() and "CHECK DATA" not in text
 
