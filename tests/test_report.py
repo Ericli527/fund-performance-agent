@@ -303,3 +303,15 @@ def test_the_executive_summary_shows_the_answer_then_the_supporting_evidence(tmp
     page1 = " ".join(page_texts(build_executive(inp, tmp_path))[0].split())
     assert page1.index("Answer. Yes, the fund met its objective.") < page1.index("Supporting evidence")
     assert page1.index("Supporting evidence") < page1.index("It tracked its index closely.")
+
+
+def test_the_executive_pdf_shows_the_formal_commentary_not_the_dashboard_answer(tmp_path):
+    inp = made_up_inputs()
+    commentary = ["The fund aims to track its index and has kept to that mandate.",
+                  "Against its benchmark it trailed slightly, mostly because of its yearly charge.",
+                  "Its fee is in line with comparable funds."]
+    inp.facts["suggested_conclusion"] |= {"source": "ai", "angle": "analyst", "answer": "Yes, it met its objective.",
+                                          "evidence": ["It tracked its index closely."], "executive": commentary}
+    page1 = " ".join(page_texts(build_executive(inp, tmp_path))[0].split())
+    assert "Oversight commentary" in page1 and commentary[1] in page1
+    assert "Yes, it met its objective." not in page1                 # the dashboard answer stays on the dashboard

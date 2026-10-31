@@ -152,10 +152,14 @@ Instructions for Claude Code in this project. The build specification is
   both PDFs: Analyst view = Detailed primary, Management view = Executive primary (no rerun). Evidence dashboard
   (Appendix A) is code only (`evidence.py`, charts): t-test level and min points in `config/settings.yaml`.
 - Agent team (spec 8.6): Task Planner (menu choices only; code keeps all four ratings; default plan offline or on
-  failure), Reporting Agent (gpt-6.1-sol; answers the reviewer's typed question from the verified facts, documents and
-  research: `answer` (direct answer to every part, at most 5 sentences, ending with code's verdict sentence) then `evidence`
-  (2-6 points, at most 3 sentences, each figure with its period and comparison); medium reasoning (models.yaml `reasoning`);
-  summary up to 3,000 characters; the dashboard Summary is the focus; code's checks on both; dashboard and PDFs show Answer, then Supporting evidence), Judge (`ReviewResult`: approved, factual_issue, security_issue, conclusion_reasonable,
+  failure), Reporting Agent (gpt-6.1-sol, medium reasoning; one run, two narratives from the same verified evidence:
+  the dashboard answer to the typed question = `answer` (2-4 sentences, no verdict prose) + `evidence` (up to 3
+  non-repetitive points) + `next_step` (one action); and `executive` (3-6 formal paragraphs for the PDF, own wording,
+  cited market developments, ending with code's verdict sentence). Code checks both (figures, labels, ratings, repeated
+  points, copied dashboard text, citations, lengths); a failing commentary or market context is left out after the one
+  rewrite and the answer stays. Missing evidence is never poor performance. The dashboard shows the verdict and ratings
+  in their own sections, data-quality items once in a collapsed section; code's fallback = code's conclusion + code's
+  first action as the next step), Judge (`ReviewResult`: approved, factual_issue, security_issue, conclusion_reasonable,
   clear_for_analysts, feedback, improvements; no text, numbers or ratings), an editor rather than a gatekeeper: it
   gets code's verdict sentence and the reader wording of the verdict codes (Retain = Satisfied ...) and never asks to
   change it. It also gets a provenance line (how the figures were obtained, counted by code from their sources).

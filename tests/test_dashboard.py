@@ -162,3 +162,30 @@ def test_the_summary_shows_the_answer_then_the_supporting_evidence():
     assert page.index("Supporting evidence") < page.index("It tracked its index closely.")
     d["facts"]["suggested_conclusion"] = {"source": "code", "text": "Code's conclusion."}
     assert "Supporting evidence" not in text(dashboard_html(d, "analyst"))      # code's conclusion: one paragraph
+
+
+def test_the_dashboard_summary_is_answer_evidence_next_step_with_data_issues_collapsed():
+    d = data()
+    d["facts"]["suggested_conclusion"] = {"source": "ai", "angle": "analyst", "text": "x",
+                                          "answer": "Partly: it tracked its index, but the fee needs a peer check.",
+                                          "evidence": ["It tracked its index closely."],
+                                          "next_step": "Ask the manager for a peer fee comparison."}
+    html = dashboard_html(d, "analyst")
+    page = text(html)
+    assert page.index("Answer") < page.index("Supporting evidence") < page.index("Recommended next step")
+    assert "Ask the manager for a peer fee comparison." in page
+    summary = html.split("<h3>Summary</h3>", 1)[1].split("</div>", 1)[0]
+    assert "Suggested verdict:" not in summary                     # the verdict has its own section, not prose
+    if "Data quality and missing evidence" in summary:
+        assert "<details class='fp-details'>" in summary            # data issues are listed once, collapsed
+
+
+def test_code_fallback_shows_codes_conclusion_and_codes_next_step():
+    from fund_performance.presentation import next_step
+    d = data()
+    d["facts"]["suggested_conclusion"] = {"source": "code", "text": "Code's conclusion."}
+    d["facts"]["candidate_actions"] = [{"id": "record_decision", "action": "Record the decision.", "required": False},
+                                       {"id": "add_peer", "action": "Add a peer fund factsheet.", "required": False}]
+    page = text(dashboard_html(d, "analyst"))
+    assert "Code's conclusion." in page and "Supporting evidence" not in page
+    assert next_step(d["facts"]) == "Add a peer fund factsheet." and "Add a peer fund factsheet." in page
