@@ -19,7 +19,7 @@ from fund_performance.plain import verdict_meaning, verdict_name
 from fund_performance.presentation import (NAVY, NOT_AVAILABLE, QUESTIONS, RATING_STYLE,  # noqa: F401
                                            VERDICT_STYLE, EvidenceQuality, _date, _figures, _shown, _source,
                                            assessment_caveat, evidence_quality, flag_dicts, headline_metrics,
-                                           conclusion_origin, issue_groups, risk_measures, UNRELIABLE,
+                                           conclusion_origin, issue_groups, summary_parts, risk_measures, UNRELIABLE,
                                            UNRELIABLE_SOURCE, UNRELIABLE_WHY, assessment_meaning, comparison_invalid,
                                            report_action)
 from fund_performance.report import ANGLE_WORDS, JUDGE_WORDS, REPORT_TYPE_WORDS, plain_note
@@ -108,7 +108,14 @@ def _summary(data: dict, quality: EvidenceQuality) -> str:
         concerns_html += ("<p class='fp-concern-title'>Not enough evidence to judge</p>" + _list(gaps, "fp-concerns"))
     if not concerns_html:
         concerns_html = "<p class='fp-muted'>No rating is Amber, Red or waiting for a data check.</p>"
-    return (f"<div class='fp-card'><h3>Summary</h3><p class='fp-conclusion'>{escape(concl.get('text', ''))}</p>"
+    parts = summary_parts(concl)
+    if parts:
+        answer, evidence = parts
+        body = (f"<p class='fp-concern-title'>Answer</p><p class='fp-conclusion'>{escape(answer)}</p>"
+                + (f"<p class='fp-concern-title'>Supporting evidence</p>" + _list(evidence, "fp-evidence") if evidence else ""))
+    else:
+        body = f"<p class='fp-conclusion'>{escape(concl.get('text', ''))}</p>"
+    return (f"<div class='fp-card'><h3>Summary</h3>{body}"
             f"<p class='fp-muted'>{escape(who)}; a draft for the analyst.</p>{concerns_html}</div>")
 
 

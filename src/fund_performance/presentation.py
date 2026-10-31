@@ -162,6 +162,14 @@ def flag_dicts(flags) -> list[dict]:
 ANGLE_WORDS = {"board": "board", "analyst": "oversight analyst", "manager_meeting": "meeting with the manager"}
 
 
+def summary_parts(concl: dict) -> tuple[str, list[str]] | None:
+    """ (answer, supporting evidence) for an AI summary written as an answer to the reviewer's question; None for
+    code's own conclusion (one paragraph) or an executive fallback """
+    if concl.get("source") != "ai" or concl.get("executive_fallback") or not concl.get("answer"):
+        return None
+    return concl["answer"], list(concl.get("evidence") or [])
+
+
 def conclusion_origin(concl: dict) -> str:
     """ Who wrote the suggested conclusion """
     if concl.get("executive_fallback"):

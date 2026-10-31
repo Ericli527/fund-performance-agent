@@ -24,7 +24,7 @@ drafting:
   max_rewrites: 1      # if the draft fails the Judge's checklist: one targeted rewrite, then code's text
   max_drafts: 1        # Version 1 pilot: one Reporting Agent draft (the plan's first angle)
   rejudge_after_rewrite: false   # the rewrite is accepted on code's checks; the Judge does not run twice
-  max_summary_chars: 700   # a longer draft fails code's checks (Executive page 1 overflows at about 950)
+  max_summary_chars: 1200  # the answer and its supporting evidence together; longer drafts fail code's checks
   reporter_tools: true     # the Reporting Agent fetches verified evidence with read-only tools (scorecard, performance, peers)
   reporter_max_turns: 4    # at most 4 model turns per draft (tool rounds + the answer); at most 6 tool calls
 

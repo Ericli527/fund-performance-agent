@@ -150,3 +150,15 @@ def test_dashboard_data_from_a_demo_run(tmp_path):
     assert d["facts"] == result.facts and d["offline"] is True and d["findings"] and d["actions"]
     assert any(f["level"] == "info" for f in d["flags"])                 # every flag of the run, info included
     assert "Sample World Index Fund A Acc" in dashboard_html(d)
+
+
+def test_the_summary_shows_the_answer_then_the_supporting_evidence():
+    d = data()
+    d["facts"]["suggested_conclusion"] = {"source": "ai", "angle": "analyst", "text": "x",
+                                          "answer": "Yes, the fund met its objective.",
+                                          "evidence": ["It tracked its index closely.", "Its fee is competitive."]}
+    page = text(dashboard_html(d, "analyst"))
+    assert page.index("Answer") < page.index("Yes, the fund met its objective.") < page.index("Supporting evidence")
+    assert page.index("Supporting evidence") < page.index("It tracked its index closely.")
+    d["facts"]["suggested_conclusion"] = {"source": "code", "text": "Code's conclusion."}
+    assert "Supporting evidence" not in text(dashboard_html(d, "analyst"))      # code's conclusion: one paragraph

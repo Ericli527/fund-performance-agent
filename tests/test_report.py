@@ -270,12 +270,12 @@ def test_a_short_ai_summary_or_code_summary_is_used_as_it_is(tmp_path):
 def test_overlong_drafts_fail_codes_checks():
     from fund_performance.agents.reporter import MAX_SUMMARY_CHARS, draft_problems
     from fund_performance.config import load_settings
-    assert load_settings().drafting.max_summary_chars == MAX_SUMMARY_CHARS == 700
+    assert load_settings().drafting.max_summary_chars == MAX_SUMMARY_CHARS == 1200
     facts = made_up_inputs().facts
     short = "Short. " * 3
     assert not any(p.startswith("style: ") and "characters" in p for p in draft_problems(short, facts))
-    long_text = ("x" * 200 + ". ") * 4
-    assert f"style: {len(long_text.strip())} characters; use at most 700 (shorter sentences)" in \
+    long_text = ("x" * 400 + ". ") * 4
+    assert f"style: {len(long_text.strip())} characters; use at most 1200 (shorter sentences)" in \
         draft_problems(long_text.strip(), facts)
     assert not any("characters" in p for p in draft_problems(long_text.strip(), facts, max_chars=2000))
 
@@ -293,3 +293,13 @@ def test_the_sign_off_box_can_cross_a_page_break_without_breaking_the_reports(tm
     assert "☐ Satisfied" in executive and message.split()[-1] in executive
     detailed = " ".join(" ".join(page_texts(build_report(inp, tmp_path / "detailed"))).split())
     assert "☐ Satisfied" in detailed and "☐ Action needed" in detailed and message.split()[-1] in detailed
+
+
+def test_the_executive_summary_shows_the_answer_then_the_supporting_evidence(tmp_path):
+    inp = made_up_inputs()
+    inp.facts["suggested_conclusion"] |= {"source": "ai", "angle": "analyst",
+                                          "answer": "Yes, the fund met its objective.",
+                                          "evidence": ["It tracked its index closely.", "Its fee is competitive."]}
+    page1 = " ".join(page_texts(build_executive(inp, tmp_path))[0].split())
+    assert page1.index("Answer. Yes, the fund met its objective.") < page1.index("Supporting evidence")
+    assert page1.index("Supporting evidence") < page1.index("It tracked its index closely.")

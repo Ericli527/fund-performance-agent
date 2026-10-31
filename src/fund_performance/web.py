@@ -43,7 +43,7 @@ from fund_performance.controller import (DEFAULT_QUESTION, DOCUMENTS_STAGE, RunR
 from fund_performance.plain import verdict_meaning, verdict_name
 from agents import trace
 from fund_performance.agents.base import AI_CALLS, api_key_present
-from fund_performance.presentation import MISSING_MEANING, download_copy, missing_evidence
+from fund_performance.presentation import MISSING_MEANING, download_copy, missing_evidence, summary_parts
 from fund_performance.demos import (UPLOAD_OWN, Demo, find_demo, matching_demo, return_checks, selectable_cases,
                                     shown_demos)
 from fund_performance.report import ANGLE_WORDS, JUDGE_WORDS, REPORT_TYPE_WORDS
@@ -358,7 +358,14 @@ def summary_markdown(result: RunResult) -> str:
     if concl.get("text"):
         who = (f"AI draft for the {ANGLE_WORDS.get(concl.get('angle'), concl.get('angle'))}, chosen by the Judge"
                if concl.get("source") == "ai" else "written by code")
-        lines += ["", f"**Suggested conclusion ({who}; draft for the analyst).** {concl['text']}"]
+        parts = summary_parts(concl)
+        if parts:
+            answer, evidence = parts
+            lines += ["", f"**Answer ({who}; draft for the analyst).** {answer}"]
+            if evidence:
+                lines += ["", "**Supporting evidence**"] + [f"- {e}" for e in evidence]
+        else:
+            lines += ["", f"**Suggested conclusion ({who}; draft for the analyst).** {concl['text']}"]
     plan = facts.get("plan") or {}
     if plan:
         lines += ["", f"_Plan ({'Task Planner Agent' if plan.get('source') == 'planner' else plan.get('source')}): "
