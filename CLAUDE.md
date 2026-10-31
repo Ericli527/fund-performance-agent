@@ -158,6 +158,11 @@ Instructions for Claude Code in this project. The build specification is
   the real client).
 - Value and Fees reasons (findings, report, page) give the peer return gap and the fee gap (`plain.py`,
   from the figures the scorecard keeps in `Pillar.values`).
+- Test cases (Version 1, `docs/TEST_CASES.md`): "Choose a test case" offers Synthetic Demo, Fidelity Index US P Acc GBP,
+  Vanguard FTSE Global All Cap Index Fund GBP Acc and Upload Your Own Fund. A real case runs the Live AI workflow by
+  default where AI runs are on (else its Quick inputs); one whose private files are missing stays listed, names them
+  and fills in nothing (never synthetic data). On Render the private case files go on a persistent disk named by
+  FUND_DEMO_DATA (`scripts/check_test_cases.py` checks them); never in the repository.
 - Real-fund demo library (Stage 4B, `demos.py`): metadata in `demo/library/*.yaml` (no document figures); inputs and
   documents private in `data/demos/<id>/` (gitignored, never on Render); a demo with missing files is not shown.
   "Try a demo" cards (Fidelity + HSBC Acc C peer; Vanguard FTSE Global All Cap): Quick Demo (default) = prevalidated

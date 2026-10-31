@@ -211,7 +211,7 @@ def test_the_page_has_the_instructions_files_table_and_how_it_works():
     ui = build_ui()
     texts = " ".join(str(getattr(c, "value", "") or "") for c in ui.blocks.values())
     assert PUBLIC_DATA_HTML in texts and INSTRUCTIONS in texts and FILES_TABLE in texts and HOW_END in texts
-    for step in ("Try a demo", "Test a real fund", "Let the agent check itself", "Read the evidence",
+    for step in ("Choose a test case", "Test a real fund", "Let the agent check itself", "Read the evidence",
                  "Make the judgement"):
         assert step in INSTRUCTIONS
     accordions = {c.label: c.open for c in ui.blocks.values() if isinstance(c, gr.Accordion)}
@@ -229,7 +229,7 @@ def test_the_page_follows_the_new_layout():
     ui = build_ui()
     texts = " ".join(str(getattr(c, "value", "") or "") for c in ui.blocks.values())
     assert "<h1>Fund Performance Review</h1>" in texts and "Clear insights for better investment oversight." in texts
-    assert "What would you like to analyse?" in texts and "Try a demo" in texts and "Fund documents" in texts
+    assert "What would you like to analyse?" in texts and "Choose a test case" in texts and "Fund documents" in texts
     buttons = {c.value: c.variant for c in _blocks(gr.Button) if not isinstance(c, gr.DownloadButton)}
     assert buttons == {"Run Fund Review": "primary"}           # Stage 4B: demos are picked from cards
     files = [c.label for c in _blocks(gr.File)]
@@ -343,13 +343,13 @@ def test_code_decides_offline_runs_not_the_user(monkeypatch, tmp_path):
     assert run_offline(d["price"], []) is True
 
 
-def test_the_made_up_fund_is_not_a_demo_card_but_still_the_example_files():
-    """ Stage 4B: the made-up fund stays in CI and the example input files, not in the demo selector """
-    from fund_performance.demos import shown_demos
+def test_the_four_test_cases_are_offered_and_the_example_files_stay():
+    """ Version 1: Synthetic Demo, Fidelity, Vanguard (listed even when their private files are not installed) and
+    Upload Your Own Fund """
     cards = [c for c in _blocks(gr.Radio) if "fp-demo-cards" in (c.elem_classes or [])]
-    real = [d for d in shown_demos() if not d.fallback]
-    if real:                          # real demos installed: the made-up fund is not a card (on a server it is)
-        assert cards and all("Sample World" not in label for label, _ in cards[0].choices)
+    assert [label.split("\n")[0] for label, _ in cards[0].choices] == [
+        "Synthetic Demo", "Fidelity Index US P Acc GBP", "Vanguard FTSE Global All Cap Index Fund GBP Acc",
+        "Upload Your Own Fund"]
     assert "example_files/prices.csv" in zipfile.ZipFile(example_zip()).namelist()
 
 

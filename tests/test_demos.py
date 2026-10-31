@@ -108,8 +108,8 @@ def test_picking_a_demo_fills_the_quick_inputs_and_runs_offline(library):
     from fund_performance import web
     ui = web.build_ui()
     cards = next(c for c in ui.blocks.values() if "fp-demo-cards" in (getattr(c, "elem_classes", None) or []))
-    assert [v for _, v in cards.choices] == ["sample"]                                # the unavailable one is hidden
-    on_demo = next(f for f in ui.fns.values() if f.name == "on_demo").fn
+    assert [v for _, v in cards.choices] == ["sample", "absent", web.UPLOAD_OWN]     # an uninstalled case stays listed
+    on_demo = web.on_demo
     price, factsheet, kid, peers, json_files, options, info = on_demo("sample", web.QUICK)
     demo = find_demo("sample")
     assert price == str(demo.quick_files["price"]) and factsheet is None and kid is None and peers is None
@@ -117,6 +117,8 @@ def test_picking_a_demo_fills_the_quick_inputs_and_runs_offline(library):
     assert web.run_offline(price, json_files)                                         # code decides: no AI
     assert "Prevalidated inputs." in info and "Historical data" in info and "Return check" in info
     assert "Made-up factsheet" in info and "A made-up fund for tests." in info
+    assert "Documents loaded:</b> prices.csv, fund_profile.json, factsheet_performance.json, peer.json" in info
+    assert "Review date: 30 Sep 2026" in info
     assert web.demo_tag(price, json_files, "sample", web.QUICK).startswith("**Quick Demo: Sample World Index Fund")
 
 
@@ -124,7 +126,7 @@ def test_the_live_demo_is_offered_only_when_ai_runs_are_on(library, monkeypatch)
     from fund_performance import web
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     assert not web.live_demo_allowed()
-    on_demo = next(f for f in web.build_ui().fns.values() if f.name == "on_demo").fn
+    on_demo = web.on_demo
     assert on_demo("sample", web.LIVE)[4] is not None                  # without AI the quick inputs are loaded
     monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-real")
     monkeypatch.delenv("PORT", raising=False)
@@ -155,30 +157,57 @@ def test_a_live_demo_respects_the_ai_run_limit(library, tmp_path):
     assert out.message == web.LIMIT_REACHED and out.data is None
 
 
-def test_without_the_private_files_the_made_up_fund_is_the_quick_demo(tmp_path, monkeypatch):
-    """ Stage 6B: on a server without the real-fund files (Render), the made-up fund is offered instead; it runs
-    offline and its notice says the figures are invented """
+def test_without_the_private_files_the_real_cases_are_listed_but_never_replaced_by_made_up_data(tmp_path, monkeypatch):
+    """ Version 1 test cases on a server without the real-fund files (Render without its case folder): the synthetic
+    demo works; Fidelity and Vanguard stay listed, name their missing files and fill in nothing """
     from fund_performance import web
     monkeypatch.setenv(lib.DATA_ENV, str(tmp_path / "nothing"))
     ui = web.build_ui()
     cards = next(c for c in ui.blocks.values() if "fp-demo-cards" in (getattr(c, "elem_classes", None) or []))
-    assert [v for _, v in cards.choices] == ["sample_index_fund"] and cards.visible is True
-    on_demo = next(f for f in ui.fns.values() if f.name == "on_demo").fn
+    assert [v for _, v in cards.choices] == ["sample_index_fund", "fidelity_us", "vanguard_global", web.UPLOAD_OWN]
+    assert [label.split("\n")[0] for label, _ in cards.choices] == [
+        "Synthetic Demo", "Fidelity Index US P Acc GBP", "Vanguard FTSE Global All Cap Index Fund GBP Acc",
+        "Upload Your Own Fund"]
+    on_demo = web.on_demo
     price, _, _, _, json_files, _, info = on_demo("sample_index_fund", web.QUICK)
     assert web.run_offline(price, json_files) and "made-up data" in info and "every figure is invented" in info
     banner = web.demo_banner(price, json_files, "sample_index_fund", web.QUICK)
     assert banner["label"] == "Quick Demo" and "invented" in banner["notice"]
+    for case in ("fidelity_us", "vanguard_global"):
+        price, factsheet, kid, peers, json_files, _, info = on_demo(case, web.LIVE)
+        assert (price, factsheet, kid, peers, json_files) == (None,) * 5        # nothing filled in, nothing substituted
+        assert "Not installed on this server" in info and "no made-up data is used instead" in info
+        assert "Sample World" not in info and "documents/" in info               # names the missing files
 
 
-def test_the_made_up_fund_is_hidden_where_real_demos_are_installed(library):
-    from fund_performance.demos import shown_demos
-    sample = lib.Demo(**{**MANIFEST, "id": "made_up", "fallback": True, "review_date": lib.date(2026, 9, 30)},
-                      folder=library / "sample")
-    assert [d.id for d in shown_demos(load_demos() + [sample])] == ["sample"]
-    assert [d.id for d in shown_demos([sample])] == ["made_up"]
-    with_none = lib.Demo(**{**MANIFEST, "id": "none", "fallback": True, "review_date": lib.date(2026, 9, 30)},
-                         folder=library / "missing")
-    assert shown_demos([with_none]) == []                              # nothing installed at all: no cards
+def test_upload_your_own_fund_empties_the_boxes_and_a_mode_switch_never_clears_your_files(library):
+    from fund_performance import web
+    ui = web.build_ui()
+    fns = {f.name: f.fn for f in ui.fns.values()}
+    out = web.on_demo(web.UPLOAD_OWN, web.QUICK)
+    assert out[:5] == (None,) * 5 and "Upload your own fund" in out[6] and "not shared with other users" in out[6]
+    assert all(x == {"__type__": "update"} for x in fns["on_mode"](web.UPLOAD_OWN, web.LIVE))
+
+
+def test_a_real_case_runs_the_live_ai_workflow_by_default_where_ai_runs_are_on(library, monkeypatch):
+    from fund_performance import web
+    real = lib.Demo(**{**MANIFEST, "id": "sample", "review_date": lib.date(2026, 9, 30)}, folder=library / "sample")
+    monkeypatch.setattr(web, "find_demo", lambda demo_id: real if demo_id == "sample" else None)
+    on_case = next(f for f in web.build_ui().fns.values() if f.name == "on_case").fn
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-real")
+    monkeypatch.delenv("PORT", raising=False)
+    monkeypatch.delenv(web.OFFLINE_ENV, raising=False)
+    *boxes, mode = on_case("sample", web.QUICK)
+    assert mode == web.LIVE and boxes[1] is not None and boxes[4] is None       # the documents, read by the agents
+    assert not web.run_offline(boxes[0], boxes[4])
+    monkeypatch.delenv("OPENAI_API_KEY")
+    *boxes, mode = on_case("sample", web.LIVE)
+    assert mode == web.QUICK and boxes[4] is not None                           # AI off: the prevalidated inputs
+    synthetic = lib.Demo(**{**MANIFEST, "id": "sample", "fallback": True, "review_date": lib.date(2026, 9, 30)},
+                         folder=library / "sample")
+    monkeypatch.setattr(web, "find_demo", lambda demo_id: synthetic)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-real")
+    assert on_case("sample", web.LIVE)[-1] == web.QUICK                         # the synthetic demo: no AI by default
 
 
 # The real demos: private files, local only
@@ -234,3 +263,14 @@ def test_real_vanguard_demo(tmp_path):
     assert len(page_texts(r.executive_pdf)) == 2
     assert "Evidence missing" in text and "R² and beta are not in the documents provided" in text
     assert "resolve the data check" not in text.lower() and "CHECK DATA" not in text
+
+
+def test_the_case_check_script_reports_missing_files_without_their_content(tmp_path, capsys):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("check_test_cases", lib.ROOT / "scripts" / "check_test_cases.py")
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    assert script.main(str(tmp_path / "empty")) == 1                    # the real cases are not installed there
+    out = capsys.readouterr().out
+    assert "Synthetic Demo (sample_index_fund): ready" in out
+    assert "Fidelity Index US P Acc GBP (fidelity_us): NOT INSTALLED" in out and "missing: quick/" in out

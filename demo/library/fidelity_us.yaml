@@ -3,8 +3,8 @@
 # missing. No figure from a document is written here.
 id: fidelity_us
 order: 1
-title: "Fidelity Index US"
-subtitle: "S&P 500 tracker, compared with an HSBC peer"
+title: "Fidelity Index US P Acc GBP"
+subtitle: "Real S&P 500 tracker, compared with an HSBC peer"
 fund_name: "Fidelity Index US Fund P Accumulation"
 share_class: "P Accumulation (GBP)"
 isin: GB00BJS8SH10
