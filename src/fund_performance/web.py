@@ -501,6 +501,11 @@ async def start_review(question: str, price, factsheet, kid, peer_factsheets, js
                 failed = [f["message"] for f in intake.get("flags", []) if f.get("level") == "blocking"]
                 why = (" The Extractor Agent could not read the documents (" + "; ".join(failed)[:300] + ")."
                        if failed else "")
+                read = intake.get("text_chars") or {}
+                if read:                     # what the agent was given: a wrong or image-only file shows up here
+                    why += (" Documents read: " + "; ".join(
+                        f"{name} ({chars:,} characters of text{', likely a scanned image or the wrong file' if chars < 500 else ''})"
+                        for name, chars in read.items()) + ".")
                 return Outcome("**The review could not run: these values were not found in the documents.**" + why
                                + "\n" + "\n".join(f"- {x}" for x in built.problems)
                                + "\n\nUpload the fund's factsheet (and its KID for the objective), or use the JSON files "
@@ -974,6 +979,15 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
     return ui
 
 
+def case_paths() -> list[str]:
+    """ The private test-case folder (FUND_DEMO_DATA, e.g. a Render disk at /var/data/demos), so the page may load its
+    files into the upload boxes. Gradio serves only files the app created, the working folder and the temp folder
+    unless a folder is allowed here; only this folder is allowed, nothing else on the disk """
+    from fund_performance.demos import data_folder
+    folder = data_folder()
+    return [str(folder.resolve())] if folder.is_dir() else []
+
+
 def launch(ui: gr.Blocks | None = None) -> None:
     """ Hosts such as Render set PORT and need the app to listen on all interfaces. With APP_USERNAME and
     APP_PASSWORD set, the page asks for them before it opens """
@@ -982,4 +996,5 @@ def launch(ui: gr.Blocks | None = None) -> None:
     ui.queue(default_concurrency_limit=int(os.getenv("MAX_CONCURRENT_RUNS", "2")))
     ui.launch(css=CSS, theme=theme(), server_name="0.0.0.0" if on_host else None,
               server_port=int(os.environ["PORT"]) if on_host else None, auth=login(),
-              auth_message="Fund performance review: please log in.", max_file_size="20mb")
+              auth_message="Fund performance review: please log in.", max_file_size="20mb",
+              allowed_paths=case_paths())
