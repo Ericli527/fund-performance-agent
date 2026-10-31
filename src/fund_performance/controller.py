@@ -1,19 +1,19 @@
 """ Workflow controller (spec Section 8.5): a plain Python function, not an AI agent, that runs one review
 
-read files -> task plan (Task Planner Agent; default plan offline) -> extractor (only if there is no
-factsheet_performance.json) -> approved peers (only if there is no
-peer.json: the Extractor reads their factsheets) -> data checks -> mandate -> calculator
--> scorecard -> approved sources, planner and searches (parallel; only if the plan needs market context) ->
-analyst -> number, label, rating and wording checks -> evaluator -> reporting agents (one draft per angle, in
-parallel) -> code's checks and the Judge Agent -> report -> email (off by default).
+read files -> extractor (only if there is no factsheet_performance.json) -> approved peers (only if there is no
+peer.json: the Extractor reads their factsheets) -> task plan (Task Planner Agent: focus, angles and up to
+limits.max_web_searches web searches; default plan offline) -> data checks -> mandate -> web research (Search Agent:
+approved pages and the planned searches, started as a background task) alongside the calculator and scorecard ->
+code vets the research -> Reporting Agent (summary and cited market context) -> code's checks and the Judge Agent
+-> report -> email (off by default). The financial review never depends on the research.
 
 The extractor runs before the data checks because the repeated-price check compares with the factsheet.
 
 - The run stops with a clear message (RunStopped) when it cannot be scored at all: no folder, no or an invalid
   fund profile, no or an unreadable price file. A blocking data check does not stop the run: the affected
   rating is CHECK DATA and the verdict waits for a data check (spec 5.1 and 6.5), so the report says what to fix.
-- Limits from config: at most limits.max_web_searches web searches and limits.max_analyst_rewrites rewrites
-  (thresholds.yaml); a timeout for each AI step (settings.yaml). A step that times out is handled like a
+- Limits from config: at most limits.max_web_searches web searches (thresholds.yaml); a timeout for each AI step
+  (settings.yaml). A step that times out is handled like a
   failed step and flagged.
 - Each step is logged (start, end, inputs used, outputs) to runs/<timestamp>/log.json; the report's sources
   list is built from this log.
@@ -22,7 +22,6 @@ import asyncio
 from dataclasses import asdict, dataclass, field
 from typing import Callable
 from datetime import datetime
-from functools import partial
 import json
 import re
 from pathlib import Path
@@ -31,15 +30,14 @@ import traceback
 from contextlib import nullcontext
 from contextvars import ContextVar
 import uuid
-from fund_performance.agents.analyst import AI_TEXT_UNAVAILABLE, Narrative, template, write_narrative
+from fund_performance.agents.analyst import Narrative, assemble, numbered_sources, template
 from agents import get_current_trace, trace
 from fund_performance.agents.base import AI_CALLS, RunFn, api_key_present
-from fund_performance.agents.evaluator import review
 from fund_performance.agents.extractor import extract
 from fund_performance.agents.judge import draft_and_judge, REVISED
 from fund_performance.agents.task_planner import TaskPlan, plan_tasks
 from fund_performance.agents.mandate import read_mandate
-from fund_performance.agents.research import market_name, research, vet_summaries
+from fund_performance.agents.research import PlannedSearch, market_name, research, vet_summaries, with_timing
 from fund_performance.calc import calculate
 from fund_performance.checks import check_prices
 from fund_performance.config import RunSettings, Thresholds, load_settings, load_sources, load_thresholds
@@ -100,13 +98,14 @@ STAGES = {
     "mandate": (2, "Mandate Agent", "Reading the fund's objective and promises"),
     "calculator": (3, "Code: calculator", "Calculating returns, risk and gaps to the index"),
     "scorecard": (3, "Code: scorecard", "Rating mandate, performance, value for investors and fees"),
-    "research": (3, "Research Agents", "Checking approved sources and searching for market news"),
+    "research": (3, "Search Agent", "Reading approved sources and running the planned web searches, alongside the calculations"),
     "narrative": (4, "Oversight Analyst and Evaluator", "Writing and checking the market context"),
     "drafts": (4, "Reporting Agent and Judge", "Drafting the summary and checking it"),
     "report": (5, "Code: reports", "Building the Executive and Detailed PDF reports"),
 }
 TOTAL_STAGES = 5
-OUTCOME_ICON = {"ok": "✓", "skipped": "↷", "fallback": "↷", "failed": "✗", "timeout": "✗", "stopped": "✗"}
+OUTCOME_ICON = {"ok": "✓", "skipped": "↷", "fallback": "↷", "unavailable": "↷", "failed": "✗", "timeout": "✗",
+                "stopped": "✗"}
 DOCUMENTS_STAGE = (1, "Extractor Agent and Mandate Agent", "Reading the factsheet, KID and peer factsheets")
 
 
@@ -135,6 +134,7 @@ class RunLog:
                     "started": _now(), "ended": None, "status": "running", "message": None}
         self.steps: list[StepRecord] = []
         self._clock: dict[str, float] = {}
+        self.background: list[asyncio.Task] = []   # steps running alongside others (web research)
         self.on_step = on_step                   # gets a short progress message as each step starts
 
     def announce(self, step: str) -> None:
@@ -161,6 +161,8 @@ class RunLog:
             stage, who, _ = STAGES[record.step]
             word = {"ok": f"done ({record.seconds:.1f} s)", "skipped": "skipped",
                     "fallback": f"fallback after {record.seconds:.1f} s"}.get(status, status)
+            if status == "ok" and record.step == "research" and record.notes:
+                word += f": {record.notes[0]}"
             why = f": {record.notes[0]}" if status not in ("ok", "fallback") and record.notes else (
                 f": code's conclusion is used (labelled as such); {record.notes[0]}" if status == "fallback"
                 and record.notes else "")
@@ -173,10 +175,10 @@ class RunLog:
         return next((s for s in self.steps if s.step == name), None)
 
     def report_sources(self) -> tuple[list[str], list[dict]]:
-        """ The input files the read step used, and the numbered web sources the narrative step cited """
-        read, narrative = self.step("read_files"), self.step("narrative")
+        """ The input files the read step used, and the numbered web sources the market context may cite """
+        read, drafts = self.step("read_files"), self.step("drafts")
         files = read.outputs.get("input_files", []) if read else []
-        return files, narrative.outputs.get("sources", []) if narrative else []
+        return files, drafts.outputs.get("sources", []) if drafts else []
 
     def to_json(self) -> dict:
         files, web = self.report_sources()
@@ -313,6 +315,8 @@ async def run_review(folder: Path, question: str = DEFAULT_QUESTION, out_root: P
         log.finish("stopped", message)
         raise RunStopped(message) from e
     finally:
+        for task in log.background:              # a run that stopped early does not leave research running
+            task.cancel()
         log.run["ai_calls"] = {"total": len(calls), "by_agent": _count(calls), "calls": calls}
         AI_CALLS.reset(token)
         (run_dir / "log.json").write_text(json.dumps(log.to_json(), indent=1, ensure_ascii=False), encoding="utf-8")
@@ -355,6 +359,10 @@ def _sector_ocf(profile: FundProfile) -> dict | None:
 def _stop(log: RunLog, record: StepRecord, message: str):
     log.end(record, "stopped", notes=[message])
     raise RunStopped(message)
+
+
+def pages_read(found) -> list[dict]:
+    return [x for x in found.summaries if x.get("approved")]
 
 
 async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thresholds, s: RunSettings,
@@ -448,7 +456,8 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         plan = TaskPlan(reason="Default plan: offline run", source="default (offline)")
         log.end(step, "skipped", outputs=plan.to_dict(), notes=["offline run: default plan"])
     else:
-        planned = await _timed(plan_tasks(question, profile, r.task_planner), s.timeouts_seconds.task_planner)
+        budget = t.limits.max_web_searches if s.research.enabled else 0
+        planned = await _timed(plan_tasks(question, profile, r.task_planner, budget), s.timeouts_seconds.task_planner)
         if planned is None:
             plan = TaskPlan(reason="Default plan: the Task Planner did not answer in time")
             flags.append(DataFlag(check="task_planner", level="info", message=(
@@ -494,9 +503,39 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
             flags += mandate.flags
             log.end(step, outputs={"promises": len(promises), "flags": [f.message for f in mandate.flags]})
 
-    # 5. Calculator (with factsheet precedence)
+    # 5. Web research (Search Agent) starts now and runs alongside the calculations: it needs only the public fund
+    # details and the plan, never a figure. The calculations never wait for it or depend on it
+    research_step = log.start("research", announce=not offline and plan.market_context and s.research.enabled)
+    research_task = None
+    if offline:
+        log.end(research_step, "skipped", notes=["offline run"])
+    elif not s.research.enabled:
+        log.end(research_step, "skipped", notes=["web research is off (config/settings.yaml research.enabled)"])
+    elif not plan.market_context:
+        log.end(research_step, "skipped", notes=["the plan needs no market context"])
+    else:
+        sources_config = load_sources()
+        approved_pages = sources_config.for_fund(profile.isin, market_name(profile))
+        planned_searches = [PlannedSearch(**x) for x in plan.searches]
+        research_step.inputs = ([f"approved: {a.url}" for a in approved_pages]
+                                + [f"planned web search: {p.query}" for p in planned_searches])
+
+        async def do_research():
+            pages = await fetch_pages(approved_pages, sources_config.fetch, r.http_get)
+            found = await research(profile, planned_searches, t.limits.max_web_searches, pages, r.search, r.page)
+            return found, _FAILURE.get()
+
+        async def timed_research():
+            done = await _timed(do_research(), s.timeouts_seconds.research)
+            return done if done is not None else (None, _FAILURE.get())
+        research_task = asyncio.create_task(timed_research())
+        await asyncio.sleep(0)                     # let the research start before the calculations
+
+        log.background.append(research_task)    # cancelled by run_review if the run stops before it is awaited
+
+    # 6. Calculator (with factsheet precedence), in a worker thread so the research can make progress meanwhile
     step = log.start("calculator", [files["prices"].name] + (["factsheet figures"] if factsheet else []))
-    calculated = calculate(checked.prices, profile, t, factsheet)
+    calculated = await asyncio.to_thread(calculate, checked.prices, profile, t, factsheet)
     reported = apply_precedence(calculated, checked.flags, profile, t, factsheet, checked.comparison)
     text_log += reported.log
     flags = list(reported.flags) + flags
@@ -518,64 +557,37 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     text_log += [f"Suggested conclusion: {x}" for x in facts["suggested_conclusion"]["left_out"]]
     log.end(step, outputs={"ratings": {p.name: p.rating for p in card.pillars.values()}, "verdict": card.verdict})
 
-    # 7. Research: approved sources, planner and web searches, then vetting
+    # 7. Web research results: wait for the Search Agent, then code vets each summary against the facts
     vetted: list[dict] = []
-    step = log.start("research", announce=not offline and plan.market_context and s.research.enabled)
-    if offline:
-        log.end(step, "skipped", notes=["offline run"])
-    elif not s.research.enabled:
-        log.end(step, "skipped", notes=["web research is off (config/settings.yaml research.enabled)"])
-    elif not plan.market_context:
-        log.end(step, "skipped", notes=["the plan needs no market context"])
-    else:
-        sources = load_sources()
-        approved = sources.for_fund(profile.isin, market_name(profile))
-        step.inputs = [f"approved: {a.url}" for a in approved]
-
-        async def do_research():
-            pages = await fetch_pages(approved, sources.fetch, r.http_get)
-            found = await research(profile, card, t.limits.max_web_searches, pages, r.planner, r.search, r.page)
-            return found, vet_summaries(found.summaries, profile, facts,
-                                        market_grace_days=sources.vetting.market_grace_days)
-        done = await _timed(do_research(), s.timeouts_seconds.research)
-        if done is None:
-            flags.append(DataFlag(check="research", level="warning", message=(
-                f"Web research {_why(s.timeouts_seconds.research)}, so there is no market context")))
-            log.end(step, _status(), notes=[_why(s.timeouts_seconds.research)])
+    if research_task is not None:
+        found, failure = await research_task
+        if found is None:
+            flags.append(DataFlag(check="research", level="info", message=(
+                f"Web research {failure or 'did not finish'}, so the report has no market context (the financial "
+                "review is complete without it)")))
+            log.end(research_step, "unavailable", notes=[failure or "did not finish"])
         else:
-            found, (vetted, vet_flags, vet_log) = done
+            vetted, vet_flags, vet_log = vet_summaries(found.summaries, profile, facts,
+                                                       market_grace_days=sources_config.vetting.market_grace_days)
+            vetted = with_timing(vetted, profile)
             flags += found.flags + vet_flags
             text_log += found.log + vet_log
-            step.inputs += [f"web search: {p.query}" for p in found.plan]
-            log.end(step, outputs={"summaries": len(found.summaries), "kept": len(vetted),
-                                   "web_searches": len(found.plan)})
+            research_step.inputs += [f"web search: {p.query}" for p in found.plan]
+            outputs = {"summaries": len(found.summaries), "kept": len(vetted), "web_searches": len(found.plan),
+                       "queries": [{"topic": p.topic, "query": p.query, "reason": p.reason} for p in found.plan],
+                       "sources": [{"url": v["url"], "date": v["date"], "topic": v["topic"], "timing": v["timing"]}
+                                   for v in vetted]}
+            if vetted:
+                log.end(research_step, outputs=outputs, notes=[
+                    f"{len(vetted)} source(s) kept from {len(pages_read(found))} approved page(s) and "
+                    f"{len(found.plan)} web search(es)"])
+            else:
+                log.end(research_step, "unavailable", outputs=outputs,
+                        notes=["no credible source passed the date, relevance and figure checks"])
 
-    # 8. Analyst, code checks and Evaluator (one rewrite in total)
-    step = log.start("narrative", ["facts JSON"] + [f"source: {v['url']}" for v in vetted],
-                     announce=not offline and bool(vetted))
-    if offline:
-        narrative = Narrative(template(facts), "template")
-        log.end(step, "skipped", notes=["offline run: template narrative"])
-    elif not vetted:
-        # The Analyst writes only the market context, from sources: with none, code's findings stand alone
-        narrative = Narrative(template(facts), "template")
-        log.end(step, "skipped", notes=["no web sources (research off or none kept): findings written by code"])
-    else:
-        narrative = await _timed(write_narrative(facts, vetted, max_rewrites=t.limits.max_analyst_rewrites,
-                                                 run=r.analyst, quality_check=partial(review, run=r.evaluator),
-                                                 max_evaluator_rewrites=t.limits.max_evaluator_rewrites),
-                                 s.timeouts_seconds.narrative)
-        if narrative is None:
-            narrative = Narrative(template(facts), "template", [DataFlag(
-                check="analyst", level="warning", message=(
-                    f"{AI_TEXT_UNAVAILABLE}: the Analyst {_why(s.timeouts_seconds.narrative)}; template narrative "
-                    "used"))])
-            log.end(step, _status(), notes=[_why(s.timeouts_seconds.narrative)])
-        else:
-            log.end(step, "ok" if narrative.source == "ai" else "failed", notes=narrative.log)
-        flags += narrative.flags
-        text_log += narrative.log
-    step.outputs |= {"source": narrative.source, "sources": narrative.sources}
+    # 8. Narrative: the findings and actions are written by code; the market context, if any, comes from the
+    # Reporting Agent's checked draft below (the Analyst and Evaluator are not called in Version 1)
+    narrative = Narrative(template(facts), "template")
 
     # 8b. Reporting Agent (one draft per angle) and the Judge Agent's review; code checks and decides
     step = log.start("drafts", ["facts JSON"] + [f"angle: {a}" for a in plan.angles], announce=not offline)
@@ -584,7 +596,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     else:
         drafted = await _timed(draft_and_judge(facts, plan.angles, plan.focus, r.reporter, r.judge,
                                                s.drafting.max_rewrites, s.drafting.max_summary_chars,
-                                               s.drafting.max_drafts, s.drafting.rejudge_after_rewrite),
+                                               s.drafting.max_drafts, s.drafting.rejudge_after_rewrite, vetted),
                                s.timeouts_seconds.drafting)
         if drafted is None:
             flags.append(DataFlag(check="judge", level="info", message=(
@@ -597,6 +609,18 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
             if chosen:
                 facts["suggested_conclusion"] |= {"text": chosen.draft.text, "source": "ai", "angle": chosen.draft.angle,
                                                   "revised": REVISED in chosen.issues}
+                context = chosen.draft.market_context if not chosen.draft.context_problems else None
+                if context:
+                    narrative = Narrative(assemble(facts, context), "ai", [], [], numbered_sources(vetted))
+                    step.outputs["sources"] = narrative.sources
+                elif vetted:
+                    flags.append(DataFlag(check="research", level="info", message=(
+                        "Market context left out: " + ("it did not pass code's checks (figures, citations, dates)"
+                                                       if chosen.draft.market_context else
+                                                       "the Reporting Agent found no source relevant to this fund"))))
+            elif vetted:
+                flags.append(DataFlag(check="research", level="info", message=(
+                    "Market context left out: the AI draft was not used, so code's conclusion stands alone")))
             flags += drafted.flags
             text_log += drafted.log
             log.end(step, "ok" if chosen else "fallback", outputs={

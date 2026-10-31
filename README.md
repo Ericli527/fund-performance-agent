@@ -32,14 +32,14 @@ Upload: price file (CSV/Excel) + factsheet (PDF/Word) [+ KID, peer factsheets] +
    ├─ Peer checks (code)      currency, pricing time, share class, income vs accumulation; peers averaged
    ├─ Scorecard (code)        4 ratings and the suggested verdict, from config/thresholds.yaml
    ├─ Evidence (code)         yearly gaps, hit rate, t-test, peer percentile; conclusion, points, questions
-   ├─ Research                approved pages fetched by code + up to 3 web searches (AI), vetted by code
+   ├─ Research (AI + code)    Search Agent: approved pages + up to 5 web searches planned by the Task Planner,
+   │                          running alongside the calculator; code vets dates, relevance and figures
    ├─ Findings and actions    written by code
-   ├─ Market context (AI)     checked by code, then by the Evaluator Agent (AI)
-   ├─ Reporting Agents (AI)   draft the conclusion for the board, the analyst and the manager meeting, in parallel
-   ├─ Judge (AI) + code       code checks every figure; the Judge marks a checklist; code scores and picks the best,
-   │                          or sends the drafts back once; code's own conclusion is the fallback
-   └─ Reports (code)          report_executive.pdf (2 pages) and report.pdf (Detailed: the executive pages plus
-                              Appendices A–D); optional email (Resend, Executive Report by default)
+   ├─ Reporting Agent (AI)    the summary and a cited market context ([n], no figures), one draft
+   ├─ Judge (AI) + code       code checks every figure and citation; the Judge checks facts, reasoning, prompt
+   │                          injection and clarity; one targeted rewrite at most; code's own conclusion is the fallback
+   └─ Reports (code)          report_executive.pdf (2 pages as a target, more rather than cut) and report.pdf
+                              (Detailed: the executive pages plus Appendices A–D); optional email (off by default)
 ```
 
 Every run is saved in `runs/<timestamp>/`: `report.pdf` (Detailed), `report_executive.pdf`, `facts.json`, `run_log.txt` and `log.json` (each step,

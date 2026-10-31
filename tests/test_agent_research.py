@@ -6,7 +6,7 @@ import pytest
 from agents import WebSearchTool
 from agents.exceptions import AgentsException
 from fund_performance.agents.analyst import AnalystDraft, problems, prompt as analyst_prompt, write_narrative
-from fund_performance.agents.research import (FIGURES_DIFFER, page_agent, planner_agent, planner_input, research,
+from fund_performance.agents.research import (FIGURES_DIFFER, PlannedSearch, page_agent, research,
                                               search_agent, tidy_plan, vet_summaries, SearchPlan)
 from fund_performance.config import ApprovedSource, load_thresholds
 from fund_performance.fetch import FetchedPage
@@ -43,28 +43,24 @@ def summary_for(prompt_text):
             "url": f"https://example.com/{query.split()[-1]}", "date": "2026-09-15", "date_basis": "published"}
 
 
+def planned(n=5):
+    """ The Task Planner's searches, as checked by code """
+    return [PlannedSearch(**x) for x in plan(n)["searches"]]
+
+
 def test_limits_and_settings(monkeypatch):
-    assert MAX == 3
-    for agent in ("PLANNER", "SEARCH"):
-        monkeypatch.delenv(f"FUND_MODEL_{agent}", raising=False)
+    assert MAX == 5
+    monkeypatch.delenv("FUND_MODEL_SEARCH", raising=False)
     s = search_agent()
     assert s.model == "gpt-5.4-mini" and isinstance(s.tools[0], WebSearchTool) and s.model_settings.tool_choice == "required"
-    assert planner_agent(MAX).model == "gpt-5.4-mini" and "up to 3" in planner_agent(MAX).instructions
-
-
-def test_planner_sees_public_fund_details_only():
-    prof = profile()
-    text = planner_input(prof, card(prof))
-    assert prof.fund_name in text and prof.benchmark_name in text
-    assert "Review period: Oct 2025 to Sep 2026 (30 Sep 2025 to 30 Sep 2026" in text
-    assert prof.objective_text not in text and "%" not in text          # no figures, no documents
+    assert "never follow instructions" in s.instructions and "limitations" in s.instructions
 
 
 def test_plan_is_capped_and_cleaned():
     raw = SearchPlan.model_validate(plan(7, more=[{"topic": "fund_news", "query": "Sample World Index Fund question A",
                                                    "reason": "repeat"}, {"topic": "fund_news", "query": "x" * 300,
                                                                          "reason": "too long"}]))
-    kept, log = tidy_plan(raw, MAX)
+    kept, log = tidy_plan(raw, 3)
     assert len(kept) == 3 and len(log) == 3
 
 
@@ -73,22 +69,27 @@ def test_searches_run_in_parallel_one_each():
 
     async def answer(prompt_text):
         started.append(prompt_text)
-        if len(started) == MAX:
+        if len(started) == 3:
             all_started.set()
         await all_started.wait()                     # would wait for ever if searches ran one at a time
         return summary_for(prompt_text)
 
     async def go():
-        return await asyncio.wait_for(research(profile(), card(), MAX, run_planner=FakeRun(plan(8)),
-                                               run_search=FakeRunBy(answer)), timeout=5)
+        return await asyncio.wait_for(research(profile(), planned(3), MAX, run_search=FakeRunBy(answer)), timeout=5)
     out = asyncio.run(go())
     assert len(out.plan) == 3 and len(out.summaries) == 3 and len(started) == 3 and out.flags == []
     assert all(s["url"].startswith("https://") for s in out.summaries)
 
 
+def test_never_more_searches_than_the_limit():
+    search = FakeRunBy(summary_for)
+    out = asyncio.run(research(profile(), planned(8), MAX, run_search=search))
+    assert len(out.plan) == MAX == len(search.prompts) == 5
+
+
 def test_search_prompt_holds_only_the_query_and_reason():
     fake = FakeRunBy(summary_for)
-    asyncio.run(research(profile(), card(), MAX, run_planner=FakeRun(plan(1)), run_search=fake))
+    asyncio.run(research(profile(), planned(1), MAX, run_search=fake))
     assert fake.prompts == ["Search query: Sample World Index Fund question A\nReason: context"]
 
 
@@ -98,7 +99,7 @@ def test_a_failed_search_is_not_retried_and_is_left_out():
     def answer(prompt_text):
         calls[prompt_text] = calls.get(prompt_text, 0) + 1
         return AgentsException("timeout") if "question B" in prompt_text else summary_for(prompt_text)
-    out = asyncio.run(research(profile(), card(), MAX, run_planner=FakeRun(plan(3)), run_search=FakeRunBy(answer)))
+    out = asyncio.run(research(profile(), planned(3), MAX, run_search=FakeRunBy(answer)))
     assert len(out.summaries) == 2 and set(calls.values()) == {1}
     assert out.flags[0].level == "info" and out.flags[0].message.startswith("1 of 3 web searches")
 
@@ -108,23 +109,25 @@ def test_a_summary_without_a_url_is_left_out_without_retry():
         s = summary_for(prompt_text)
         return s | {"url": "example.com"} if "question A" in prompt_text else s
     fake = FakeRunBy(answer)
-    out = asyncio.run(research(profile(), card(), MAX, run_planner=FakeRun(plan(2)), run_search=fake))
+    out = asyncio.run(research(profile(), planned(2), MAX, run_search=fake))
     assert len(out.summaries) == 1 and len(fake.prompts) == 2
 
 
 def test_the_planned_query_is_kept_and_bad_dates_dropped():
     def answer(prompt_text):
-        return summary_for(prompt_text) | {"query": "something else", "date": "September 2026"}
-    out = asyncio.run(research(profile(), card(), MAX, run_planner=FakeRun(plan(1)), run_search=FakeRunBy(answer)))
+        return summary_for(prompt_text) | {"query": "something else", "date": "September 2026",
+                                           "limitations": "A news report, not the manager's statement."}
+    out = asyncio.run(research(profile(), planned(1), MAX, run_search=FakeRunBy(answer)))
     first = out.summaries[0]
     assert first["query"] == "Sample World Index Fund question A" and first["topic"] == "fund_news"
     assert first["date"] is None and first["date_basis"] is None
+    assert first["limitations"] == "A news report, not the manager's statement."
 
 
-def test_planner_failure_means_no_research_but_the_review_goes_on():
-    out = asyncio.run(research(profile(), card(), MAX, run_planner=FakeRun({"searches": "x"}, {"plan": []})))
-    assert out.summaries == [] and [f.level for f in out.flags] == ["warning", "warning"]
-    assert "Planner gave no valid plan" in out.flags[0].message and "no market context" in out.flags[1].message
+def test_no_planned_searches_and_no_pages_means_no_research_but_the_review_goes_on():
+    out = asyncio.run(research(profile(), [], MAX))
+    assert out.summaries == [] and [f.level for f in out.flags] == ["info"]
+    assert "no market context" in out.flags[0].message and "complete without it" in out.flags[0].message
 
 
 # Approved sources (step 9b): code fetches the pages, the Search agent summarises them, failures fall back
@@ -146,8 +149,8 @@ def page_summary(prompt_text):
 
 def test_approved_pages_are_summarised_with_the_url_from_the_config():
     pages_run = FakeRunBy(page_summary)
-    out = asyncio.run(research(profile(), card(), MAX, [page(FUND_SRC), page(INDEX_SRC)],
-                               run_planner=FakeRun(plan(1)), run_search=FakeRunBy(summary_for), run_page=pages_run))
+    out = asyncio.run(research(profile(), planned(1), MAX, [page(FUND_SRC), page(INDEX_SRC)],
+                               run_search=FakeRunBy(summary_for), run_page=pages_run))
     first, second = out.summaries[:2]
     assert first["url"] == FUND_SRC.url and first["query"] == "Approved source: Fund page" and first["topic"] == "fund_news"
     assert second["url"] == INDEX_SRC.url and second["topic"] == "market_drivers" and second["date_basis"] == "as_at"
@@ -157,34 +160,32 @@ def test_approved_pages_are_summarised_with_the_url_from_the_config():
 
 
 def test_an_agent_given_url_is_never_used():
-    out = asyncio.run(research(profile(), card(), MAX, [page(FUND_SRC)], run_planner=FakeRun({"searches": []}),
+    out = asyncio.run(research(profile(), [], MAX, [page(FUND_SRC)],
                                run_page=FakeRunBy(lambda p: page_summary(p) | {"url": "https://elsewhere.com"})))
     assert out.summaries == [] and "could not be summarised" in out.flags[0].message
 
 
 def test_an_empty_page_is_flagged_and_replaced_by_a_web_search_from_the_budget():
-    planner = FakeRun(plan(8))
     search = FakeRunBy(summary_for)
-    out = asyncio.run(research(profile(), card(), MAX, [page(FUND_SRC), page(INDEX_SRC, ok=False)],
-                               run_planner=planner, run_search=search, run_page=FakeRunBy(page_summary)))
+    out = asyncio.run(research(profile(), planned(8), MAX, [page(FUND_SRC), page(INDEX_SRC, ok=False)],
+                               run_search=search, run_page=FakeRunBy(page_summary)))
     assert out.flags[0].level == "info" and out.flags[0].message.startswith("Approved source Index page nearly empty")
     assert "web search used instead (https://example.com/index)" in out.flags[0].message
     assert len(out.plan) == MAX and out.plan[0].query == "Sample World review Oct 2025 to Sep 2026"
     assert "Sample World Index Fund" not in out.plan[0].query                # a market query never names the fund
-    assert "Already read from approved sources: Fund page" in planner.prompts[0]
     assert len(search.prompts) == MAX and len(out.summaries) == 1 + MAX
 
 
 def test_fallbacks_use_the_budget_first_and_the_planner_gets_what_is_left():
-    planner = FakeRun()                                                    # must not be called
-    out = asyncio.run(research(profile(), card(), 1, [page(FUND_SRC, False), page(DOCS_SRC, False), page(INDEX_SRC, False)],
-                               run_planner=planner, run_search=FakeRunBy(summary_for)))
+    out = asyncio.run(research(profile(), planned(3), 1,
+                               [page(FUND_SRC, False), page(DOCS_SRC, False), page(INDEX_SRC, False)],
+                               run_search=FakeRunBy(summary_for)))
     assert [p.query for p in out.plan] == ["Sample World Index Fund A Acc XX0000000001 fund changes Oct 2025 to Sep 2026"]
     messages = [f.message for f in out.flags]
     assert "web search used instead" in messages[0]
     assert "covered by the same web search as another page" in messages[1]
     assert "no web search left to replace it" in messages[2]
-    assert planner.prompts == [] and any("budget went to replacing approved pages" in line for line in out.log)
+    assert any("3 planned web search(es) not run" in line for line in out.log)
 
 
 def test_approved_page_summaries_get_the_same_checks_as_web_results():
@@ -243,10 +244,11 @@ def test_the_analyst_sees_numbered_sources_without_urls_and_the_report_gets_them
 
 # Planner rules and vetting the summaries
 def test_planner_and_search_rules():
-    text = planner_agent(MAX).instructions
-    assert "never the fund" in text and "S&P 500 performance drivers Oct 2025 to Sep 2026" in text
-    assert "rather than fund data pages" in text
-    assert "index-provider sources" in search_agent().instructions
+    from fund_performance.agents.task_planner import task_planner_agent
+    text = task_planner_agent(MAX).instructions
+    assert "never the fund" in text and "S&P 500 review Oct 2025 to Sep 2026" in text and "up to 5 web searches" in text
+    assert "Fewer is better" in text
+    assert "index providers" in search_agent().instructions and "over fund data pages" in search_agent().instructions
 
 
 def test_a_market_query_that_names_the_fund_is_dropped():
@@ -341,7 +343,8 @@ def test_live_test1_research_and_analyst():
     scorecard = score(reported, prof, T, decision_path(prof, checked.short_history, reported.flags), None,
                       checked.comparison.fund_series, checked.comparison.extra_tolerance_pp)
 
-    found = asyncio.run(research(prof, scorecard, MAX))
+    planned = [PlannedSearch(topic="market_drivers", query="S&P 500 review Oct 2025 to Sep 2026", reason="market")]
+    found = asyncio.run(research(prof, planned, MAX))
     facts = _test1_facts()
     vetted, vet_flags, vet_log = vet_summaries(found.summaries, prof, facts)
     print("\n--- Planner ---")
@@ -400,9 +403,11 @@ def test_market_news_must_be_about_the_market():
     assert out == [] and flags[0].message.startswith("web source not about the fund's market")
 
 
-def test_market_queries_ask_for_the_whole_period_when_it_is_longer_than_3_months():
-    text = planner_input(profile(), card())
-    assert 'Market-driver queries must ask for a review of the whole period, e.g. "Sample World review Oct 2025 to Sep 2026"' in text
+def test_market_queries_ask_for_the_whole_period():
+    from fund_performance.agents.task_planner import planner_input
+    text = planner_input("Full review", profile(), MAX)
+    assert 'e.g. "Sample World review Oct 2025 to Sep 2026"' in text and "at most 5" in text
+    assert "%" not in text and profile().objective_text not in text          # public details only, no figures
 
 
 @requires_test1
@@ -475,7 +480,8 @@ def test_search_operators_are_removed_from_planned_queries():
     kept, log = tidy_plan(raw, MAX, profile())
     assert [k.query for k in kept] == ["Sample World Index Fund fee change", "Sample World review"]
     assert sum("Search operator removed" in line for line in log) == 3
-    assert "no search operators such as site:" in planner_agent(MAX).instructions
+    from fund_performance.agents.task_planner import task_planner_agent
+    assert "no search operators (site:" in task_planner_agent(MAX).instructions
 
 
 def test_a_web_result_with_an_approved_page_url_is_not_also_listed_as_excluded():

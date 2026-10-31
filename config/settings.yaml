@@ -37,7 +37,7 @@ statistics:
   min_points: 8                    # fewer yearly values than this: no test
 
 research:
-  enabled: false       # Version 1 pilot: no web research (and so no market-context Analyst or Evaluator calls)
+  enabled: true        # Version 1: the Task Planner proposes up to limits.max_web_searches searches; one Search Agent runs them
 
 email:
   enabled: false

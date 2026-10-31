@@ -20,18 +20,21 @@ def calls_of(result) -> dict:
     return json.loads((result.run_dir / "log.json").read_text())["run"]["ai_calls"]
 
 
-def test_the_pilot_defaults_switch_off_research_and_extra_drafts():
+def test_the_version_1_defaults_one_draft_research_on_email_off():
     s = load_settings()
-    assert s.research.enabled is False and s.email.enabled is False
+    assert s.research.enabled is True and s.email.enabled is False
+    from fund_performance.config import load_thresholds
+    assert load_thresholds().limits.max_web_searches == 5
     assert (s.drafting.max_drafts, s.drafting.max_rewrites, s.drafting.rejudge_after_rewrite) == (1, 1, False)
 
 
 def test_a_review_makes_a_bounded_set_of_ai_calls_and_records_them(tmp_path):
-    """ JSON route: Task Planner, Mandate, one Reporting Agent draft, one Judge pass: 4 calls; no research """
+    """ JSON route: Task Planner, Mandate, the Planner's 2 web searches (one Search Agent each), one Reporting Agent
+    draft, one Judge review: 6 calls. No research planner, Analyst or Evaluator """
     result = run(tmp_path, mocked())
     calls = calls_of(result)
-    assert calls["total"] == 4 and calls["by_agent"] == {"Task Planner Agent": 1, "Mandate Agent": 1,
-                                                         "Reporting Agent": 1, "Judge Agent": 1}
+    assert calls["total"] == 6 and calls["by_agent"] == {"Task Planner Agent": 1, "Mandate Agent": 1,
+                                                         "Search Agent": 2, "Reporting Agent": 1, "Judge Agent": 1}
     assert all(c["outcome"] == "ok" and c["seconds"] >= 0 for c in calls["calls"])
     log = json.loads((result.run_dir / "log.json").read_text())
     assert log["run"]["run_id"] == result.run_dir.name
@@ -118,6 +121,13 @@ def test_the_progress_area_replaces_a_running_step_with_its_outcome():
     h = progress_history(h, "✓ Step 3 of 5 · Code: scorecard · done (0.1 s)")
     h = progress_history(h, "↷ Step 3 of 5 · Research Agents · skipped: web research is off")
     assert h == ["✓ Step 3 of 5 · Code: scorecard · done (0.1 s)", "↷ Step 3 of 5 · Research Agents · skipped: web research is off"]
+    # web research runs alongside the calculator: its outcome replaces its own running line, not the last line
+    h = progress_history([], "▶ Step 3 of 5 · Search Agent · Searching…")
+    h = progress_history(h, "▶ Step 3 of 5 · Code: calculator · Calculating…")
+    h = progress_history(h, "✓ Step 3 of 5 · Code: calculator · done (0.1 s)")
+    h = progress_history(h, "✓ Step 3 of 5 · Search Agent · done (4.0 s): 3 source(s) kept")
+    assert h == ["✓ Step 3 of 5 · Search Agent · done (4.0 s): 3 source(s) kept",
+                 "✓ Step 3 of 5 · Code: calculator · done (0.1 s)"]
     info = run_info({"run_id": "r1", "trace_id": "trace_x", "ai_calls": {"total": 2, "by_agent": {"Judge Agent": 1, "Reporting Agent": 1}}})
     assert info == "Run r1 · 2 AI call(s) (Judge Agent 1, Reporting Agent 1) · OpenAI trace trace_x"
     assert progress_markdown(h, info).endswith(info)
