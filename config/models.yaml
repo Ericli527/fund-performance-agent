@@ -18,8 +18,8 @@ agents:
   analyst: gpt-5.4
   evaluator: gpt-6.1-sol          # a different model from the Analyst, with its own strict checking prompt (step 10)
   task_planner: gpt-5.4-mini      # turns the request into a task plan (menu choices only)
-  reporter: gpt-5.4               # Reporting Agents: one draft conclusion per angle
-  judge: gpt-6.1-sol              # Judge Agent: checklist per draft, a different model from the Reporting Agents
+  reporter: gpt-6.1-sol           # Reporting Agent: answers the reviewer's question (answer, then supporting evidence)
+  judge: gpt-6.1-sol              # Judge Agent: reviews the draft (owner decision: the same model as the Reporting Agent)
 
 models:
   gpt-5.4-mini:
@@ -31,3 +31,8 @@ models:
   gpt-6.1-sol:
     supports_temperature: false
     reasoning_effort: low
+
+# reasoning: a reasoning effort for one agent instead of its model's. The Reporting Agent writes the answer to the
+#   reviewer's question on the dashboard, so it thinks harder (medium); every other agent keeps its model's setting
+reasoning:
+  reporter: medium

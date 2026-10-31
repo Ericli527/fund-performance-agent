@@ -23,7 +23,7 @@ def test_models_per_agent_match_the_owner_decision(monkeypatch):
     assert {a: m.for_agent(a)[0] for a in m.agents} == {
         "extractor": "gpt-5.4-mini", "mandate": "gpt-5.4-mini", "planner": "gpt-5.4-mini",
         "search": "gpt-5.4-mini", "analyst": "gpt-5.4", "evaluator": "gpt-6.1-sol", "task_planner": "gpt-5.4-mini",
-        "reporter": "gpt-5.4", "judge": "gpt-6.1-sol"}
+        "reporter": "gpt-6.1-sol", "judge": "gpt-6.1-sol"}
 
 
 def test_an_environment_variable_overrides_one_agent_only(monkeypatch):

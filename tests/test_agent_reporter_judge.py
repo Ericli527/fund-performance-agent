@@ -44,7 +44,7 @@ def test_the_verdict_sentence_comes_from_code():
 def test_code_checks_figures_verdict_and_style():
     assert draft_problems(GOOD["analyst"], facts()) == []
     bad = draft_problems("The fund was 0.42% a year behind its index, 0.10 behind -0.1 more. Fine.", facts())
-    assert any("0.42%" in p for p in bad) and any(p.startswith("verdict: end with") for p in bad)
+    assert any("0.42%" in p for p in bad) and any(p.startswith("verdict: end the answer with") for p in bad)
     assert any("minus sign" in p for p in bad)
 
 
@@ -76,7 +76,7 @@ def test_a_style_point_alone_never_rejects_a_useful_draft():
 def test_the_judge_reviews_only_the_draft_and_treats_inputs_as_untrusted_data():
     judge = FakeRun(review())
     asyncio.run(draft_and_judge(facts(), ["board"], ["Fees"], reporter(GOOD), judge))
-    assert "Draft for the board:" in judge.prompts[0] and "Verified facts (decided by code)" in judge.prompts[0]
+    assert "Draft for the board (the answer, then the supporting evidence):" in judge.prompts[0] and "Verified facts (decided by code)" in judge.prompts[0]
     assert "untrusted data" in INSTRUCTIONS and "Do not calculate metrics, change ratings" in INSTRUCTIONS
 
 
@@ -245,3 +245,43 @@ def test_an_unsupported_claim_now_gets_one_targeted_rewrite_not_a_fallback():
                                          rejudge=False))
     assert len(prompts) == 2 and "unsupported claim that figures were read by AI" in prompts[1]
     assert result.chosen is not None and result.chosen.draft.rewritten and not result.flags   # the AI draft is kept
+
+
+# The dashboard summary answers the reviewer's typed question: the answer first, then the supporting evidence
+ANSWER = "Yes, the fund met its objective: it tracked its index closely and its fee is competitive. " + ENDING
+POINTS = ["The fund was 0.10% a year behind its index over 5 years, mostly because of its 0.06% yearly fee.",
+          "Its fee is in line with comparable index funds."]
+
+
+def test_the_reporting_agent_answers_the_question_then_gives_supporting_evidence():
+    question = "Is this fund meeting its objective, and is its fee justified?"
+    reporter_run, judge = FakeRunBy(lambda p: {"answer": ANSWER, "evidence": POINTS}), FakeRun(review())
+    result = asyncio.run(draft_and_judge(facts(), ["analyst"], ["Fees"], reporter_run, judge, question=question))
+    draft = result.chosen.draft
+    assert draft.answer == ANSWER and draft.evidence == POINTS and draft.figures_match
+    assert draft.text == ANSWER + "\n\nSupporting evidence:\n- " + POINTS[0] + "\n- " + POINTS[1]
+    assert reporter_run.prompts[0].startswith(f"Question to answer: {question}")
+    assert f"The reviewer's question the draft must answer: {question}" in judge.prompts[0]
+
+
+def test_codes_checks_cover_the_evidence_and_keep_the_verdict_at_the_end_of_the_answer():
+    from fund_performance.agents.reporter import draft_problems
+    assert draft_problems(ANSWER, facts(), evidence=POINTS) == []
+    wrong = draft_problems(ANSWER, facts(), evidence=["It returned 99.9% a year over 5 years."])
+    assert any("99.9%" in p for p in wrong)                                 # a figure not in the facts, in the evidence
+    assert any(p.startswith("verdict: end the answer with") for p in
+               draft_problems("Yes, it did.", facts(), evidence=[ENDING]))  # the verdict belongs to the answer
+    many = draft_problems(ANSWER, facts(), evidence=["One point."] * 6 + ["Two. Three. Four. Five."])
+    assert any("7 evidence points; use at most 6" in p for p in many)
+    assert any("evidence point 7 has 4 sentences; use at most 3" in p for p in many)
+
+
+def test_the_reporting_and_judge_agents_use_the_chosen_model(monkeypatch):
+    from fund_performance.agents.judge import judge_agent
+    from fund_performance.agents.reporter import reporter_agent
+    for agent in ("REPORTER", "JUDGE"):
+        monkeypatch.delenv(f"FUND_MODEL_{agent}", raising=False)
+    assert reporter_agent().model == reporter_agent(tools=True).model == judge_agent().model == "gpt-6.1-sol"
+    # the Reporting Agent writes the dashboard answer, so it thinks harder than the Judge on the same model
+    assert reporter_agent().model_settings.reasoning.effort == "medium"
+    assert judge_agent().model_settings.reasoning.effort == "low"

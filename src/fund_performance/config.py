@@ -135,6 +135,9 @@ class ModelSpec(_Section):
 class ModelsConfig(_Section):
     agents: dict[AgentName, str]
     models: dict[str, ModelSpec]
+    # Optional: a reasoning effort for one agent instead of its model's (e.g. the Reporting Agent thinks harder than
+    # the Judge, which uses the same model)
+    reasoning: dict[AgentName, Literal["minimal", "low", "medium", "high"]] = {}
 
     @model_validator(mode="after")
     def _every_agent_has_a_known_model(self) -> "ModelsConfig":
@@ -151,7 +154,10 @@ class ModelsConfig(_Section):
         model = os.getenv(f"FUND_MODEL_{agent.upper()}") or self.agents[agent]
         if model not in self.models:
             raise ValueError(f"FUND_MODEL_{agent.upper()}={model} is not listed under 'models' in models.yaml")
-        return model, self.models[model]
+        spec = self.models[model]
+        if agent in self.reasoning and not spec.supports_temperature:
+            spec = spec.model_copy(update={"reasoning_effort": self.reasoning[agent]})
+        return model, spec
 
 
 def load_models(path: str | Path = MODELS_PATH) -> ModelsConfig:
@@ -226,7 +232,7 @@ class DraftingSettings(_Section):
     max_drafts: int = Field(default=1, ge=1)
     rejudge_after_rewrite: bool = False
     # The longest summary a draft may have: it is Executive page 1's summary (measured to fit with room to spare)
-    max_summary_chars: int = Field(default=700, ge=200)
+    max_summary_chars: int = Field(default=3000, ge=200)
     # Agentic Tools V2.1: the Reporting Agent fetches the evidence with read-only tools (reporting_tools.py) within
     # reporter_max_turns model turns; false gives it the whole facts payload, as before
     reporter_tools: bool = False

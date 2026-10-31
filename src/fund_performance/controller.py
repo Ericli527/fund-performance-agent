@@ -598,7 +598,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                                                s.drafting.max_rewrites, s.drafting.max_summary_chars,
                                                s.drafting.max_drafts, s.drafting.rejudge_after_rewrite, vetted,
                                                s.drafting.reporter_tools, plan.to_dict(),
-                                               s.drafting.reporter_max_turns),
+                                               s.drafting.reporter_max_turns, question),
                                s.timeouts_seconds.drafting)
         if drafted is None:
             flags.append(DataFlag(check="judge", level="info", message=(
@@ -609,7 +609,9 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
             chosen = drafted.chosen
             facts["drafts"] = [x.to_dict(x is chosen) for x in drafted.scored]
             if chosen:
-                facts["suggested_conclusion"] |= {"text": chosen.draft.text, "source": "ai", "angle": chosen.draft.angle,
+                facts["suggested_conclusion"] |= {"text": chosen.draft.text, "answer": chosen.draft.answer,
+                                                  "evidence": chosen.draft.evidence, "question": question,
+                                                  "source": "ai", "angle": chosen.draft.angle,
                                                   "revised": REVISED in chosen.issues}
                 context = chosen.draft.market_context if not chosen.draft.context_problems else None
                 if context:

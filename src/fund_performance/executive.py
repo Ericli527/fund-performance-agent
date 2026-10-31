@@ -20,7 +20,7 @@ import re
 from fund_performance.presentation import (CHART_LEFT_OUT, UNRELIABLE, comparison_invalid,
                                            NAVY, NOT_AVAILABLE, RATING_STYLE, VERDICT_STYLE, _figures,
                                            _shown, _source, assessment_caveat, chart_choice, comparison_problems,
-                                           evidence_quality, flag_dicts, conclusion_origin, headline_metrics,
+                                           evidence_quality, flag_dicts, conclusion_origin, headline_metrics, summary_parts,
                                            issue_groups, merge_same_ending, missing_evidence, point_to_data_issues,
                                            report_action, assessment_meaning,
                                            risk_measures)
@@ -169,6 +169,16 @@ def _scorecard(data: dict) -> str:
             f"<th class='l'>Why</th></tr>{rows}</table>")
 
 
+def _summary_html(concl: dict) -> str:
+    """ The AI's answer to the reviewer's question, then its supporting evidence; code's conclusion as one paragraph """
+    parts = summary_parts(concl)
+    if not parts:
+        return f"<p>{escape(concl.get('text', ''))}</p>"
+    answer, evidence = parts
+    return (f"<p><b>Answer.</b> {escape(answer)}</p>"
+            + (f"<p><b>Supporting evidence</b></p>{_ul(evidence)}" if evidence else ""))
+
+
 def page1(inp, content: ExecutiveContent) -> str:
     data = content.data
     concl = data["facts"].get("suggested_conclusion") or {}
@@ -188,7 +198,7 @@ def page1(inp, content: ExecutiveContent) -> str:
 {_statuses(data)}
 {_metrics(data['facts'])}
 <table width="100%"><tr><td width="52%" valign="top">
-<h2>Summary</h2><p>{escape(concl.get('text', ''))}</p><p class='x-src'>{escape(conclusion_origin(concl))}; a draft for
+<h2>Summary</h2>{_summary_html(concl)}<p class='x-src'>{escape(conclusion_origin(concl))}; a draft for
 the analyst.</p>
 {'<h2>Key findings</h2>' + _ul(findings) if findings else ''}
 </td><td width="3%"></td><td valign="top" align="center">{chart}</td></tr></table>

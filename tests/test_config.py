@@ -64,3 +64,16 @@ def test_misspelt_key_is_rejected(raw, tmp_path):
     path.write_text(yaml.safe_dump(raw))
     with pytest.raises(ValidationError):
         load_thresholds(path)
+
+
+def test_one_agent_can_reason_harder_than_its_model_default(tmp_path):
+    from pathlib import Path
+    import yaml
+    from fund_performance.config import load_models
+    data = yaml.safe_load(open(Path(__file__).resolve().parents[1] / "config" / "models.yaml"))
+    m = load_models()
+    assert m.reasoning == {"reporter": "medium"}
+    assert m.for_agent("reporter")[1].reasoning_effort == "medium" and m.for_agent("judge")[1].reasoning_effort == "low"
+    data["reasoning"] = {}
+    (tmp_path / "models.yaml").write_text(yaml.safe_dump(data))
+    assert load_models(tmp_path / "models.yaml").for_agent("reporter")[1].reasoning_effort == "low"
