@@ -270,14 +270,14 @@ def test_a_short_ai_summary_or_code_summary_is_used_as_it_is(tmp_path):
 def test_overlong_drafts_fail_codes_checks():
     from fund_performance.agents.reporter import MAX_SUMMARY_CHARS, draft_problems
     from fund_performance.config import load_settings
-    assert load_settings().drafting.max_summary_chars == MAX_SUMMARY_CHARS == 1200
+    assert load_settings().drafting.max_summary_chars == MAX_SUMMARY_CHARS == 3000
     facts = made_up_inputs().facts
     short = "Short. " * 3
     assert not any(p.startswith("style: ") and "characters" in p for p in draft_problems(short, facts))
-    long_text = ("x" * 400 + ". ") * 4
-    assert f"style: {len(long_text.strip())} characters; use at most 1200 (shorter sentences)" in \
+    long_text = ("x" * 800 + ". ") * 4
+    assert f"style: {len(long_text.strip())} characters; use at most 3000 (shorter sentences)" in \
         draft_problems(long_text.strip(), facts)
-    assert not any("characters" in p for p in draft_problems(long_text.strip(), facts, max_chars=2000))
+    assert not any("characters" in p for p in draft_problems(long_text.strip(), facts, max_chars=4000))
 
 
 

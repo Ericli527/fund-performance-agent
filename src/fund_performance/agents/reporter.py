@@ -18,7 +18,7 @@ from fund_performance.conclusion import text_problems
 MAX_SENTENCES = 4           # the answer: up to three sentences and code's verdict sentence
 MAX_EVIDENCE = 4            # supporting points
 MAX_EVIDENCE_SENTENCES = 2  # per point
-MAX_SUMMARY_CHARS = 1200    # answer and evidence together (settings.yaml drafting)
+MAX_SUMMARY_CHARS = 3000    # answer and evidence together: the dashboard Summary (settings.yaml drafting)
 EVIDENCE_HEADING = "Supporting evidence"
 ANGLE_BRIEFS = {
     "board": "For the board: the outcome in plain words, whether the fund did what it promised, and whether any "
