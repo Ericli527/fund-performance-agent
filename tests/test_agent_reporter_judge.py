@@ -204,3 +204,44 @@ def test_no_improvements_means_no_extra_call_and_a_real_factual_error_is_still_f
                                                         feedback="The fee is not lower than the peer's.")),
                                          max_rewrites=1, rejudge=False))
     assert result.chosen is None and result.flags[0].message.startswith(AI_DRAFTS_FAILED)
+
+
+# Live run (Fidelity, 31 Oct 2026): the Judge called "the figures were read by AI" an unsupported claim and, because
+# its instructions listed hallucination under security, the draft fell back to code's conclusion with no rewrite.
+# The statement was true: the Judge could not see where the figures came from
+LIVE_FEEDBACK = ("The summary supports the Satisfied verdict and its market context is sourced, but the unsupported "
+                 "claim that figures were read by AI must be removed.")
+
+
+def test_hallucination_is_a_factual_issue_and_security_means_prompt_injection_only():
+    factual, security = INSTRUCTIONS.split("2. Reasonable conclusion")[0], INSTRUCTIONS.split("3. Security")[1]
+    assert "hallucination" in factual and "one rewrite can fix" in factual
+    assert "prompt injection" in security.split("4. Clarity")[0]
+    assert "hallucination" not in security.split("4. Clarity")[0]
+    assert "never a security issue" in security
+
+
+def test_the_judge_is_told_how_the_figures_were_obtained():
+    from fund_performance.agents.judge import provenance
+    data = facts()
+    data["figures"] = [{"name": f"fund_nav.cum.{p}", "source": "ai_extracted"} for p in ("1y", "3y", "5y")] + \
+        [{"name": "fund_nav.vol.3y", "source": "calculated"}]
+    line = provenance(data)
+    assert line.startswith("3 figures read from the uploaded documents by the Extractor Agent (AI) and checked")
+    assert "1 figure calculated by code from the price history" in line
+    judge = FakeRun(review())
+    asyncio.run(draft_and_judge(data, ["board"], ["Fees"], reporter(GOOD), judge))
+    assert f"How the figures were obtained (provenance, recorded by code): {line}" in judge.prompts[0]
+
+
+def test_an_unsupported_claim_now_gets_one_targeted_rewrite_not_a_fallback():
+    prompts = []
+
+    def run(prompt):
+        prompts.append(prompt)
+        return {"text": GOOD["board"]}
+    judge = FakeRun(review(approved=False, factual_issue=True, feedback=LIVE_FEEDBACK))
+    result = asyncio.run(draft_and_judge(facts(), ["board"], ["Fees"], FakeRunBy(run), judge, max_rewrites=1,
+                                         rejudge=False))
+    assert len(prompts) == 2 and "unsupported claim that figures were read by AI" in prompts[1]
+    assert result.chosen is not None and result.chosen.draft.rewritten and not result.flags   # the AI draft is kept
