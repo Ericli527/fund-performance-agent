@@ -805,13 +805,15 @@ p {{ margin: 0 0 3px 0; }} ul, ol {{ margin: 0 0 3px 0; }} li {{ margin-bottom: 
 
 def build_html(inp: ReportInputs, out_dir: Path) -> str:
     """ The Detailed Report: the two Executive Report pages, then Appendices A to D, each from a new page """
-    from fund_performance.executive import EXEC_CSS, executive_html
+    from fund_performance.executive import EXEC_CSS, executive_html, long_commentary
     footer = (f'<div id="footer">{escape(inp.profile.fund_name)} · Detailed Report (draft) · figures to '
               f'{inp.profile.as_of_date:%d %b %Y} · Public data only · Page <pdf:pagenumber> of <pdf:pagecount></div>')
     p1, p2 = executive_html(inp, out_dir)
     appendices = [_dashboard(inp, out_dir), _page2(inp, out_dir), _page3(inp)]
     appendices.append(_appendix(inp, False, plain_text("".join([p1, p2] + appendices))))
-    body = '<div style="page-break-before: always"></div>'.join([p1, p2] + appendices)
+    separator = '' if long_commentary(inp.facts) else '<div style="page-break-before: always"></div>'
+    body = p1 + separator + p2 + '<div style="page-break-before: always"></div>' + \
+        '<div style="page-break-before: always"></div>'.join(appendices)
     return f"<html><head><meta charset='utf-8'/><style>{CSS}{EXEC_CSS}</style></head><body>{footer}{body}</body></html>"
 
 
@@ -841,7 +843,9 @@ def layout_problems(path: Path) -> list[str]:
     run to any length here (nothing is cut); the two-page limit applies to the Executive Report itself """
     texts = page_texts(path)
     problems = [] if texts and PAGE_TITLES[0] in texts[0] else ["the overview is not on page 1"]
-    start = 1
+    if texts and all(t in texts[0] for t in PAGE_TITLES[:2]) and texts[0].index(PAGE_TITLES[1]) < texts[0].index(PAGE_TITLES[0]):
+        problems.append("the comparisons section precedes the overview")
+    start = 0
     for title in PAGE_TITLES[1:]:
         page = next((i for i in range(start, len(texts)) if title in texts[i]), None)
         if page is None:

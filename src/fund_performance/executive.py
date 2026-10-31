@@ -183,6 +183,11 @@ def _summary_html(concl: dict) -> str:
             + (f"<p><b>Supporting evidence</b></p>{_ul(evidence)}" if evidence else ""))
 
 
+def long_commentary(facts: dict) -> bool:
+    concl = facts.get("suggested_conclusion") or {}
+    return len(" ".join(executive_commentary(concl)) or concl.get("text", "")) > 700
+
+
 def page1(inp, content: ExecutiveContent) -> str:
     data = content.data
     concl = data["facts"].get("suggested_conclusion") or {}
@@ -196,16 +201,25 @@ def page1(inp, content: ExecutiveContent) -> str:
                  f"</b><br/>{escape(content.chart_caption)}</td></tr></table>")
     else:
         chart = f"<p class='x-src'>{escape(content.chart_caption)}</p>"
+    heading = 'Oversight commentary' if executive_commentary(concl) else 'Summary'
+    summary = (f"<h2>{heading}</h2>{_summary_html(concl)}<p class='x-src'>"
+               f"{escape(conclusion_origin(concl))}; a draft for the analyst.</p>")
+    findings_html = '<h2>Key findings</h2>' + _ul(findings) if findings else ''
+    # xhtml2pdf cannot split a table row. Long commentary in the side-by-side row moves the whole row to
+    # the next page, leaving page one mostly empty. Render long commentary as normal flowing paragraphs.
+    long_summary = long_commentary(data["facts"])
+    if long_summary:
+        chart = chart.replace("width='330'", "width='240'")
+        narrative = summary + findings_html + f"<div align='center'>{chart}</div>"
+    else:
+        narrative = (f"<table width='100%'><tr><td width='52%' valign='top'>{summary}{findings_html}</td>"
+                     f"<td width='3%'></td><td valign='top' align='center'>{chart}</td></tr></table>")
     return f"""
 {_banner(inp)}
 <h1>{PAGE1}</h1>
 {_statuses(data)}
 {_metrics(data['facts'])}
-<table width="100%"><tr><td width="52%" valign="top">
-<h2>{'Oversight commentary' if executive_commentary(concl) else 'Summary'}</h2>{_summary_html(concl)}<p class='x-src'>{escape(conclusion_origin(concl))}; a draft for
-the analyst.</p>
-{'<h2>Key findings</h2>' + _ul(findings) if findings else ''}
-</td><td width="3%"></td><td valign="top" align="center">{chart}</td></tr></table>
+{narrative}
 <h2>The four ratings</h2>{_scorecard(data)}
 """
 
@@ -427,8 +441,9 @@ def build_executive(inp, out_dir: Path, name: str = "report_executive.pdf") -> P
     p1, p2 = executive_html(inp, out_dir)
     footer = (f'<div id="footer">{escape(inp.profile.fund_name)} · Executive Report (draft) · figures to '
               f'{inp.profile.as_of_date:%d %b %Y} · Public data only · Page <pdf:pagenumber> of <pdf:pagecount></div>')
+    separator = "" if long_commentary(inp.facts) else "<div style='page-break-before: always'></div>"
     html = (f"<html><head><meta charset='utf-8'/><style>{CSS}{EXEC_CSS}</style></head><body>{footer}{p1}"
-            f"<div style='page-break-before: always'></div>{p2}</body></html>")
+            f"{separator}{p2}</body></html>")
     path = out_dir / name
     _render(html, path)
     problems = executive_structure_problems(page_texts(path))
@@ -455,10 +470,10 @@ def build_executive_reliably(inp, out_dir: Path, name: str = "report_executive.p
 
 
 def executive_structure_problems(texts: list[str]) -> list[str]:
-    """ Page 1 holds "Overview" and a later page starts the "Comparisons and decision" section """
+    """ The overview comes first, followed by the comparisons and decision section. """
     if not texts or PAGE1 not in texts[0]:
         return ["page 1 is missing"]
-    if not any(PAGE2 in t for t in texts[1:]):
+    if not any(PAGE2 in t for t in texts) or (PAGE2 in texts[0] and texts[0].index(PAGE2) < texts[0].index(PAGE1)):
         return ["the 'Comparisons and decision' page is missing"]
     return []
 

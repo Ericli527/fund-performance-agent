@@ -254,7 +254,8 @@ def test_a_long_ai_summary_is_kept_in_full_on_the_executive_pages(tmp_path):
                                                  "code_text": concl.get("code_text") or concl["text"]}
     path, note = build_executive_reliably(inp, tmp_path / "exec")
     text = " ".join(" ".join(page_texts(path)).split())
-    assert " ".join(long_ai.split()) in text and note is not None and note.level == "info"
+    assert " ".join(long_ai.split()) in text
+    assert (note is not None and note.level == "info") == (len(page_texts(path)) > 2)
 
 
 def test_a_short_ai_summary_or_code_summary_is_used_as_it_is(tmp_path):
@@ -323,3 +324,17 @@ def test_executive_actions_include_both_document_and_historical_price_checks(tmp
     inp.facts["data_flags"].append({"check": "repeated_prices", "level": "warning", "message": "Repeated prices"})
     text = " ".join(" ".join(page_texts(build_executive(inp, tmp_path))).split())
     assert "Verify the AI-extracted figures against the documents and check the flagged historical prices before sign-off." in text
+
+
+def test_long_executive_commentary_starts_on_first_page_and_is_kept_in_both_reports(tmp_path):
+    inp = made_up_inputs()
+    paragraphs = [f"Paragraph {i}: " + ("The evidence supports the investment objective over the review period. " * 4)
+                  for i in range(1, 5)]
+    inp.facts["suggested_conclusion"] |= {"source": "ai", "angle": "board", "executive": paragraphs}
+    for path in (build_executive(inp, tmp_path / "executive"), build_report(inp, tmp_path / "detailed")):
+        pages = page_texts(path)
+        assert "Oversight commentary" in pages[0] and "Paragraph 1" in pages[0]
+        full = " ".join(" ".join(pages).split())
+        for p in paragraphs:
+            assert " ".join(p.split()) in full
+        assert "Analyst sign-off" in full and "☐ Satisfied" in full
