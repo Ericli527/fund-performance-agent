@@ -181,13 +181,21 @@ def repeated_points(answer: str, evidence: list[str]) -> list[str]:
     return found
 
 
+def citation_problems(text: str, sources: list[dict] | None) -> list[str]:
+    """ A citation resolves only to an available source with evidence for the Judge to review. """
+    return [f"citation: [{n}] does not match a source with a summary" for n in sorted(set(_CITE.findall(text)))
+            if not 1 <= int(n) <= len(sources or []) or not (sources[int(n) - 1].get("summary") or "").strip()]
+
+
 def draft_problems(text: str, facts: dict, max_chars: int = MAX_SUMMARY_CHARS,
-                   evidence: list[str] | None = None, next_step: str | None = None) -> list[str]:
+                   evidence: list[str] | None = None, next_step: str | None = None,
+                   sources: list[dict] | None = None) -> list[str]:
     """ Code's checks on the dashboard answer: `text` is the answer, `evidence` the supporting points, `next_step` the
     recommended action. Every figure, label and rating is checked; lengths are bounded; no point is repeated """
     evidence = list(evidence or [])
     whole = compose(text, evidence, next_step)
-    found = [f"check: {p}" for p in text_problems(whole, facts)]
+    found = [f"check: {p}" for p in text_problems(_CITE.sub("", whole), facts)]
+    found += citation_problems(whole, sources)
     found += ["style: no web addresses" for _ in _URL.findall(whole)][:1]
     found += [f"style: minus sign after '{m.group(1)}'; write 'behind by 0.10%'" for m in _MINUS_AFTER.finditer(whole)]
     if sentences(text) > MAX_SENTENCES:
@@ -214,8 +222,7 @@ def executive_problems(paragraphs: list[str], facts: dict, sources: list[dict] |
     found = [f"check: {p}" for p in text_problems(_CITE.sub("", text), facts)]
     found += ["style: no web addresses" for _ in _URL.findall(text)][:1]
     found += [f"style: minus sign after '{m.group(1)}'; write 'behind by 0.10%'" for m in _MINUS_AFTER.finditer(text)]
-    found += [f"citation: [{n}] does not match a source" for n in sorted(set(_CITE.findall(text)))
-              if not 1 <= int(n) <= len(sources or [])]
+    found += citation_problems(text, sources)
     if not MIN_PARAGRAPHS <= len(paragraphs) <= MAX_PARAGRAPHS:
         found.append(f"style: {len(paragraphs)} paragraphs; write {MIN_PARAGRAPHS} to {MAX_PARAGRAPHS}")
     found += [f"style: paragraph {i} has {sentences(p)} sentences; use at most {MAX_PARAGRAPH_SENTENCES}"
@@ -246,7 +253,7 @@ def reporter_agent(tools: bool = False) -> Agent:
 def source_view(sources: list[dict] | None) -> list[dict]:
     """ What the Reporting Agent and the Judge see of each vetted source: its number, never its URL """
     return [{"source": f"[{i}]", "topic": x.get("topic"), "date": x.get("date"), "timing": x.get("timing"),
-             "summary": x["summary"], "limitations": x.get("limitations")} for i, x in enumerate(sources or [], start=1)]
+             "summary": x.get("summary"), "limitations": x.get("limitations")} for i, x in enumerate(sources or [], start=1)]
 
 
 def context_problems(context: str | None, facts: dict, sources: list[dict] | None) -> list[str]:
@@ -261,6 +268,7 @@ def context_problems(context: str | None, facts: dict, sources: list[dict] | Non
     numbered = numbered_sources(sources)
     as_of = (facts.get("fund") or {}).get("as_of_date")
     found = problems(AnalystDraft(market_context=context), facts, len(numbered))
+    found += citation_problems(context, sources)
     if not numbered:
         found.append("market context: there are no sources, so give null")
     elif as_of:
@@ -330,7 +338,7 @@ async def write_draft(facts: dict, angle: str, focus: list[str], run: RunFn | No
     executive = [" ".join(p.split()) for p in out.executive if p.strip()]
     market = " ".join((out.market_context or "").split()) or None
     dashboard = compose(answer, evidence, next_step)
-    return Draft(angle, dashboard, draft_problems(answer, facts, max_chars, evidence, next_step),
+    return Draft(angle, dashboard, draft_problems(answer, facts, max_chars, evidence, next_step, sources),
                  rewritten=bool(issues), market_context=market, context_problems=context_problems(market, facts, sources),
                  tools_used=used, answer=answer, evidence=evidence, next_step=next_step, executive=executive,
                  executive_problems=executive_problems(executive, facts, sources, dashboard))

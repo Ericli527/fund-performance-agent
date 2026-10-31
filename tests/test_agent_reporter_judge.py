@@ -347,3 +347,58 @@ def test_missing_evidence_is_never_treated_as_poor_performance():
     assert "Missing evidence is not poor performance" in __import__(
         "fund_performance.agents.reporter", fromlist=["x"]).INSTRUCTIONS
     assert "treats missing evidence as poor performance or an" in INSTRUCTIONS
+
+
+def test_judge_sees_executive_sources_without_market_context():
+    from fund_performance.agents.judge import judge_input
+    from fund_performance.agents.reporter import Draft
+    source = {"summary": "Technology shares rose.", "url": "https://example.org/private"}
+    draft = Draft("board", text="The fund tracked its index.", executive=["Technology shares rose [1]."])
+    prompt = judge_input(facts(), draft, [source])
+    assert "Technology shares rose [1]." in prompt
+    assert '"summary": "Technology shares rose."' in prompt
+    assert '"source": "[1]"' in prompt and "untrusted data" in prompt
+    assert source["url"] not in prompt
+
+
+def test_rejected_market_context_does_not_hide_executive_sources():
+    from fund_performance.agents.judge import judge_input
+    from fund_performance.agents.reporter import Draft
+    draft = Draft("board", text="The fund tracked its index.", executive=["Shares rose [1]."],
+                  market_context="Rejected unsafe context [1].", context_problems=["invalid"])
+    prompt = judge_input(facts(), draft, [{"summary": "Shares rose."}])
+    assert "Rejected unsafe context" not in prompt
+    assert '"summary": "Shares rose."' in prompt and "Shares rose [1]." in prompt
+
+
+def test_unresolved_citations_require_revision_in_all_narratives():
+    from fund_performance.agents.reporter import context_problems, draft_problems, executive_problems
+    for sources in ([], [{"summary": ""}], [{"topic": "market"}]):
+        assert any("[1] does not match" in p for p in draft_problems("Shares rose [1].", facts(), sources=sources))
+        assert any("[1] does not match" in p for p in executive_problems(
+            [EXEC[0], "Shares rose [1].", EXEC[2]], facts(), sources, "Different dashboard."))
+        assert any("[1] does not match" in p for p in context_problems("Shares rose [1].", facts(), sources))
+
+
+def test_judge_flags_an_unsupported_cited_executive_claim_for_revision():
+    source = {"summary": "Technology shares fell.", "topic": "market"}
+    drafts = [two_part(executive=[EXEC[0], "Technology shares rose [1].", EXEC[2]]),
+              two_part(executive=[EXEC[0], "Technology shares fell [1].", EXEC[2]])]
+    reporter_run = FakeRun(*drafts)
+    judge = FakeRun(review(approved=False, factual_issue=True, feedback="Source [1] says shares fell."), review())
+    result = asyncio.run(draft_and_judge(facts(), ["analyst"], ["Fees"], reporter_run, judge,
+                                         max_rewrites=1, rejudge=True, sources=[source]))
+    assert "Technology shares fell." in judge.prompts[0]
+    assert "Source [1] says shares fell." in reporter_run.prompts[1]
+    assert result.chosen and "fell [1]" in result.chosen.draft.executive[1]
+    assert "unresolved or" in INSTRUCTIONS and "unsupported citation is a factual issue" in INSTRUCTIONS
+
+
+def test_unresolved_executive_citation_triggers_a_rewrite_and_is_omitted_if_unfixed():
+    reporter_run = FakeRunBy(lambda p: two_part(executive=[EXEC[0], "Shares rose [1].", EXEC[2]]))
+    judge = FakeRun(review())
+    result = asyncio.run(draft_and_judge(facts(), ["analyst"], ["Fees"], reporter_run, judge,
+                                         sources=[], rejudge=False))
+    assert "[1] does not match a source" in reporter_run.prompts[1]
+    assert "Shares rose [1]." not in judge.prompts[0]
+    assert result.chosen and not result.chosen.draft.executive

@@ -180,6 +180,17 @@ def test_a_market_context_that_fails_codes_checks_is_left_out_but_the_summary_st
     assert len(runners.reporter.prompts) == 2 and "market context: number" in runners.reporter.prompts[1]
 
 
+def test_dashboard_citations_keep_sources_when_market_context_is_absent(tmp_path):
+    runners = mocked()
+    runners.task_planner, runners.search = FakeRunBy(lambda p: plan_with(1)), FakeRunBy(search_answer)
+    runners.reporter = FakeRunBy(lambda p: {
+        "answer": "The market context is relevant [1].", "evidence": [], "market_context": None})
+    result = asyncio.run(run_review(SAMPLE, out_root=tmp_path, runners=runners))
+    assert result.facts["suggested_conclusion"]["source"] == "ai"
+    assert "[1]" in result.facts["suggested_conclusion"]["answer"]
+    assert result.log.report_sources()[1][0]["number"] == 1
+
+
 def test_missing_peer_evidence_is_named_once_and_never_as_poor_value(tmp_path):
     """ No peer fund: Value and Fees wait for evidence. The dashboard lists that gap once, in the collapsed
     data-quality section; the answer and next step do not repeat it as a finding against the fund """
