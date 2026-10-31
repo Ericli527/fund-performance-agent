@@ -178,3 +178,29 @@ def test_a_market_context_that_fails_codes_checks_is_left_out_but_the_summary_st
     assert result.facts["suggested_conclusion"]["source"] == "ai" and result.narrative.output.market_context is None
     assert any(f.message.startswith("Market context left out") for f in result.flags)
     assert len(runners.reporter.prompts) == 2 and "market context: number" in runners.reporter.prompts[1]
+
+
+def test_missing_peer_evidence_is_named_once_and_never_as_poor_value(tmp_path):
+    """ No peer fund: Value and Fees wait for evidence. The dashboard lists that gap once, in the collapsed
+    data-quality section; the answer and next step do not repeat it as a finding against the fund """
+    import shutil
+    from fund_performance.dashboard import dashboard_html
+    folder = tmp_path / "no_peer"
+    shutil.copytree(SAMPLE, folder, ignore=shutil.ignore_patterns("peer.json", "peer_factsheet.pdf"))
+    runners = mocked()
+    runners.task_planner = FakeRunBy(lambda p: plan_with(0))
+    runners.reporter = FakeRunBy(lambda p: {
+        "answer": "Partly: the fund tracked its index closely, but its value and fee cannot be judged without a peer.",
+        "evidence": ["Over 5 years the fund stayed close to its index."],
+        "next_step": "Add a comparable peer fund's factsheet so value and fees can be rated.",
+        "executive": []})
+    result = asyncio.run(run_review(folder, out_root=tmp_path / "runs", runners=runners))
+    pillars = {p["name"]: p for p in result.facts["scorecard"]["pillars"]}
+    assert pillars["Fees"]["summary"] == "Add peer" or "peer" in pillars["Fees"]["reason"].lower()
+    data = {"facts": result.facts, "reasons": result.reasons, "flags": [f.model_dump() for f in result.flags],
+            "findings": [], "actions": []}
+    summary = dashboard_html(data, "analyst").split("<h3>Summary</h3>", 1)[1].split("</div>", 1)[0]
+    details = summary.split("<details", 1)[1] if "<details" in summary else ""
+    assert details and summary.split("<details", 1)[0].count("needs a peer") == 0     # the gap sits in the details
+    assert "too high" not in summary.lower() and "poor value" not in summary.lower()
+    assert any("Executive commentary left out" in f.message for f in result.flags)    # the PDF falls back cleanly

@@ -566,12 +566,16 @@ analyst signs off. Code keeps every number, rating and the final pick.
   The Reporting Agent's optional `market_context` (at most 3 sentences, [n] citations, no figures) is checked by
   code's market-context checks and reviewed by the Judge with the numbered sources; the Analyst and Evaluator are not
   called. Research failures or timeouts leave the financial review complete, with an info note.
-- **Answer to the reviewer's question:** the Reporting Agent (gpt-6.1-sol) gets the question typed on the page and
-  returns `answer` (the direct answer first, every part of the question answered, at most 5 sentences, ending with
-  code's verdict sentence) and `evidence` (2 to 6 supporting points of at most 3 sentences, each one verified fact with
-  its period and comparison, or a cited research finding, and why it matters). It runs at medium reasoning effort
-  (`config/models.yaml` `reasoning`); the Judge keeps low. The summary may run to 3,000 characters. Code checks both parts (figures, labels, ratings, length). The dashboard, both PDFs and the plain-text
-  summary show "Answer", then "Supporting evidence"; code's own conclusion stays one paragraph.
+- **Two narratives, one run:** the Reporting Agent (gpt-6.1-sol, medium reasoning) writes, from the same verified
+  evidence: (A) the dashboard answer to the typed question: `answer` (2 to 4 sentences; the verdict and ratings are
+  shown separately), `evidence` (up to 3 material, non-repetitive points) and `next_step` (one action); (B) `executive`,
+  a formal commentary for the PDF (3 to 6 paragraphs: mandate, performance against the benchmark, fees and peer value
+  with their evidence limits, cited market developments, risks and priorities, ending with code's verdict sentence).
+  Code checks both: figures, labels, ratings, minus signs, web addresses, citations, lengths, repeated points and a
+  commentary that copies the dashboard. A commentary or market context still failing after the one rewrite is left
+  out (info flag) and the answer stays. The Judge reviews both. Missing evidence is never presented as poor
+  performance or an excessive fee. The dashboard lists data-quality items once, collapsed; the Executive PDF shows the
+  commentary (else the answer, else code's conclusion).
 - **Reporting Agent tools (V2.1):** with `drafting.reporter_tools` on, the agent receives a brief and fetches the
   evidence with read-only tools: `get_oversight_scorecard()` (ratings, reasons, verdict and its sentence, findings,
   points for judgement, material warnings, missing evidence), `get_fund_performance(period)` (fund and benchmark

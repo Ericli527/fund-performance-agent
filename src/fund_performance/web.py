@@ -364,6 +364,8 @@ def summary_markdown(result: RunResult) -> str:
             lines += ["", f"**Answer ({who}; draft for the analyst).** {answer}"]
             if evidence:
                 lines += ["", "**Supporting evidence**"] + [f"- {e}" for e in evidence]
+            if concl.get("next_step"):
+                lines += ["", f"**Recommended next step.** {concl['next_step']}"]
         else:
             lines += ["", f"**Suggested conclusion ({who}; draft for the analyst).** {concl['text']}"]
     plan = facts.get("plan") or {}

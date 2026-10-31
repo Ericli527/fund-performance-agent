@@ -20,7 +20,7 @@ import re
 from fund_performance.presentation import (CHART_LEFT_OUT, UNRELIABLE, comparison_invalid,
                                            NAVY, NOT_AVAILABLE, RATING_STYLE, VERDICT_STYLE, _figures,
                                            _shown, _source, assessment_caveat, chart_choice, comparison_problems,
-                                           evidence_quality, flag_dicts, conclusion_origin, headline_metrics, summary_parts,
+                                           evidence_quality, flag_dicts, conclusion_origin, headline_metrics, summary_parts, executive_commentary,
                                            issue_groups, merge_same_ending, missing_evidence, point_to_data_issues,
                                            report_action, assessment_meaning,
                                            risk_measures)
@@ -170,7 +170,11 @@ def _scorecard(data: dict) -> str:
 
 
 def _summary_html(concl: dict) -> str:
-    """ The AI's answer to the reviewer's question, then its supporting evidence; code's conclusion as one paragraph """
+    """ The Executive commentary (AI, checked by code); else the dashboard answer and its evidence; else code's
+    conclusion as one paragraph """
+    paragraphs = executive_commentary(concl)
+    if paragraphs:
+        return "".join(f"<p>{escape(p)}</p>" for p in paragraphs)
     parts = summary_parts(concl)
     if not parts:
         return f"<p>{escape(concl.get('text', ''))}</p>"
@@ -198,7 +202,7 @@ def page1(inp, content: ExecutiveContent) -> str:
 {_statuses(data)}
 {_metrics(data['facts'])}
 <table width="100%"><tr><td width="52%" valign="top">
-<h2>Summary</h2>{_summary_html(concl)}<p class='x-src'>{escape(conclusion_origin(concl))}; a draft for
+<h2>{'Oversight commentary' if executive_commentary(concl) else 'Summary'}</h2>{_summary_html(concl)}<p class='x-src'>{escape(conclusion_origin(concl))}; a draft for
 the analyst.</p>
 {'<h2>Key findings</h2>' + _ul(findings) if findings else ''}
 </td><td width="3%"></td><td valign="top" align="center">{chart}</td></tr></table>

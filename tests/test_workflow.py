@@ -193,7 +193,7 @@ def test_a_draft_that_cannot_be_used_is_a_labelled_fallback_not_a_failure_or_war
 
     def reporter(prompt):
         calls["n"] += 1
-        return reporter_answer(prompt) if calls["n"] == 1 else {"text": "No verdict sentence."}   # fails code's checks
+        return reporter_answer(prompt) if calls["n"] == 1 else {"text": "The fund returned 99.9% a year."}   # fails code's checks
     runners.judge, runners.reporter = FakeRunBy(judge), FakeRunBy(reporter)
     lines = []
     result = run(tmp_path, runners, on_step=lines.append)

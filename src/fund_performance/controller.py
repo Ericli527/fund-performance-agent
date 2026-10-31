@@ -611,8 +611,18 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
             if chosen:
                 facts["suggested_conclusion"] |= {"text": chosen.draft.text, "answer": chosen.draft.answer,
                                                   "evidence": chosen.draft.evidence, "question": question,
+                                                  "next_step": chosen.draft.next_step,
+                                                  "executive": [] if chosen.draft.executive_problems else
+                                                  chosen.draft.executive,
                                                   "source": "ai", "angle": chosen.draft.angle,
                                                   "revised": REVISED in chosen.issues}
+                if not facts["suggested_conclusion"]["executive"]:
+                    flags.append(DataFlag(check="judge", level="info", message=(
+                        "Executive commentary left out: " + ("it did not pass code's checks"
+                                                             if chosen.draft.executive else "the AI draft had none")
+                        + "; the PDF shows the dashboard answer")))
+                elif vetted and "[" in " ".join(chosen.draft.executive):
+                    step.outputs["sources"] = numbered_sources(vetted)      # the commentary cites them: list them
                 context = chosen.draft.market_context if not chosen.draft.context_problems else None
                 if context:
                     narrative = Narrative(assemble(facts, context), "ai", [], [], numbered_sources(vetted))

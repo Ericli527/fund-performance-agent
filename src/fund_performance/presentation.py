@@ -170,6 +170,26 @@ def summary_parts(concl: dict) -> tuple[str, list[str]] | None:
     return concl["answer"], list(concl.get("evidence") or [])
 
 
+GENERIC_ACTIONS = {"record_decision", "read_sources"}
+
+
+def next_step(facts: dict) -> str | None:
+    """ The recommended next step: the AI's (checked by code), else code's most important candidate action """
+    concl = facts.get("suggested_conclusion") or {}
+    if concl.get("source") == "ai" and concl.get("next_step"):
+        return concl["next_step"]
+    actions = facts.get("candidate_actions") or []
+    chosen = (next((a for a in actions if a.get("required")), None)
+              or next((a for a in actions if a.get("id") not in GENERIC_ACTIONS), None)
+              or (actions[0] if actions else None))
+    return chosen.get("action") if chosen else None
+
+
+def executive_commentary(concl: dict) -> list[str]:
+    """ The Executive commentary paragraphs (AI, checked by code), or [] """
+    return list(concl.get("executive") or []) if concl.get("source") == "ai" else []
+
+
 def conclusion_origin(concl: dict) -> str:
     """ Who wrote the suggested conclusion """
     if concl.get("executive_fallback"):

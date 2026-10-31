@@ -19,7 +19,7 @@ from fund_performance.plain import verdict_meaning, verdict_name
 from fund_performance.presentation import (NAVY, NOT_AVAILABLE, QUESTIONS, RATING_STYLE,  # noqa: F401
                                            VERDICT_STYLE, EvidenceQuality, _date, _figures, _shown, _source,
                                            assessment_caveat, evidence_quality, flag_dicts, headline_metrics,
-                                           conclusion_origin, issue_groups, summary_parts, risk_measures, UNRELIABLE,
+                                           conclusion_origin, issue_groups, summary_parts, next_step, risk_measures, UNRELIABLE,
                                            UNRELIABLE_SOURCE, UNRELIABLE_WHY, assessment_meaning, comparison_invalid,
                                            report_action)
 from fund_performance.report import ANGLE_WORDS, JUDGE_WORDS, REPORT_TYPE_WORDS, plain_note
@@ -97,17 +97,11 @@ def _header(data: dict, quality: EvidenceQuality) -> str:
 
 
 def _summary(data: dict, quality: EvidenceQuality) -> str:
+    """ The analyst's answer: Answer, Supporting evidence and Recommended next step. The verdict and ratings are shown
+    in their own sections; data-quality items are listed once, in a collapsible section """
     facts = data["facts"]
     concl = facts.get("suggested_conclusion") or {}
     who = conclusion_origin(concl)
-    gaps, concerns = issue_groups(facts, data["reasons"])
-    concerns_html = ""
-    if concerns:
-        concerns_html += "<p class='fp-concern-title'>Performance concerns</p>" + _list(concerns, "fp-concerns")
-    if gaps:
-        concerns_html += ("<p class='fp-concern-title'>Not enough evidence to judge</p>" + _list(gaps, "fp-concerns"))
-    if not concerns_html:
-        concerns_html = "<p class='fp-muted'>No rating is Amber, Red or waiting for a data check.</p>"
     parts = summary_parts(concl)
     if parts:
         answer, evidence = parts
@@ -115,8 +109,21 @@ def _summary(data: dict, quality: EvidenceQuality) -> str:
                 + (f"<p class='fp-concern-title'>Supporting evidence</p>" + _list(evidence, "fp-evidence") if evidence else ""))
     else:
         body = f"<p class='fp-conclusion'>{escape(concl.get('text', ''))}</p>"
+    step = next_step(facts)
+    if step:
+        body += f"<p class='fp-concern-title'>Recommended next step</p><p>{escape(step)}</p>"
+    gaps, concerns = issue_groups(facts, data["reasons"])
+    details = ""
+    if concerns:
+        details += "<p class='fp-concern-title'>Performance concerns</p>" + _list(concerns, "fp-concerns")
+    if gaps:
+        details += "<p class='fp-concern-title'>Not enough evidence to judge</p>" + _list(gaps, "fp-concerns")
+    count = len(gaps) + len(concerns)
+    details_html = (f"<details class='fp-details'><summary>Data quality and missing evidence ({count})</summary>"
+                    f"{details}</details>" if details else
+                    "<p class='fp-muted'>No rating is Amber, Red or waiting for a data check.</p>")
     return (f"<div class='fp-card'><h3>Summary</h3>{body}"
-            f"<p class='fp-muted'>{escape(who)}; a draft for the analyst.</p>{concerns_html}</div>")
+            f"<p class='fp-muted'>{escape(who)}; a draft for the analyst.</p>{details_html}</div>")
 
 
 def _metrics(facts: dict) -> str:
