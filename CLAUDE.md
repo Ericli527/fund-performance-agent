@@ -154,8 +154,11 @@ Instructions for Claude Code in this project. The build specification is
 - Agent team (spec 8.6): Task Planner (menu choices only; code keeps all four ratings; default plan offline or on
   failure), Reporting Agent (explains the verified findings for one angle; facts only; must end with code's verdict
   sentence; code's checks), Judge (`ReviewResult`: approved, factual_issue, security_issue, conclusion_reasonable,
-  clear_for_analysts, feedback; no text, numbers or ratings). Code decides: security -> code's conclusion; factual,
-  reasoning or not approved -> one targeted rewrite; else pass (clarity alone never rejects). Each agent is a plain
+  clear_for_analysts, feedback, improvements; no text, numbers or ratings), an editor rather than a gatekeeper: it
+  gets code's verdict sentence and the reader wording of the verdict codes (Retain = Satisfied ...) and never asks to
+  change it. Code decides: security -> code's conclusion; a real factual error or a conclusion contradicting the
+  ratings -> one targeted rewrite (code's conclusion if it fails); everything else passes, and the Judge's up to 3
+  improvements are applied in that one rewrite (used if it passes code's checks, else the approved draft stays). Each agent is a plain
   `Agent(name, instructions, output_type, **model_kwargs(...))`. Unit tests can never reach OpenAI (conftest blocks
   the real client).
 - Value and Fees reasons (findings, report, page) give the peer return gap and the fee gap (`plain.py`,

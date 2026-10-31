@@ -138,7 +138,8 @@ def reporter_input(facts: dict, angle: str, focus: list[str], issues: list[str] 
     if issues:
         prompt += ("\n\nYour previous draft:\n" + (previous or "")
                    + (f"\nYour previous market context:\n{previous_context}" if previous_context else "")
-                   + "\n\nFix every issue below and keep everything else that was right:\n"
+                   + "\n\nFix every issue below and keep everything else that was right. Always end with the verdict "
+                   "sentence given above, word for word:\n"
                    + "\n".join(f"- {i}" for i in issues))
     return prompt
 

@@ -112,7 +112,7 @@ def test_decisions_come_from_code_not_the_judges_approval_alone():
     assert decide(ReviewResult(**review(security_issue=True))) == "fallback"     # approved, but a security issue
     assert decide(ReviewResult(**review(factual_issue=True))) == "revise"
     assert decide(ReviewResult(**review(conclusion_reasonable=False))) == "revise"
-    assert decide(ReviewResult(**review(approved=False))) == "revise"
+    assert decide(ReviewResult(**review(approved=False))) == "pass"          # not approved for style: never rejected
     assert decide(ReviewResult(**review(clear_for_analysts=False))) == "pass"
 
 
@@ -143,3 +143,64 @@ def test_an_unreachable_judge_means_code_text_with_a_flag():
     from agents.exceptions import AgentsException
     result = asyncio.run(draft_and_judge(facts(), ["board"], ["Fees"], reporter(GOOD), FakeRun(AgentsException("x"))))
     assert result.chosen is None and "AI draft not reviewed" in result.flags[0].message
+
+
+# The Judge enhances rather than rejects (Live run, Fidelity: "Replace 'Satisfied, no action needed' with the code's
+# verdict 'Retain'" sent the draft back, the rewrite broke the verdict sentence, and code's conclusion was used)
+def test_the_judge_is_told_code_verdict_sentence_and_its_reader_wording():
+    judge = FakeRun(review())
+    asyncio.run(draft_and_judge(facts(), ["board"], ["Fees"], reporter(GOOD), judge))
+    assert f"Code's verdict sentence (correct by definition; never ask to change it): {ENDING}" in judge.prompts[0]
+    assert "Retain = Satisfied" in judge.prompts[0] and "Review = Action needed" in judge.prompts[0]
+    assert "Never flag that" in INSTRUCTIONS and "not to reject it" in INSTRUCTIONS
+
+
+def test_style_points_become_improvements_and_the_improved_draft_is_used():
+    prompts = []
+
+    def run(prompt):
+        prompts.append(prompt)
+        return {"text": GOOD["analyst"] if len(prompts) > 1 else GOOD["board"]}
+    judge = FakeRun(review(approved=False, clear_for_analysts=False, feedback="Accurate but brief.",
+                           improvements=["say that the 5-year returns are annualised"]))
+    result = asyncio.run(draft_and_judge(facts(), ["board"], ["Fees"], FakeRunBy(run), judge, max_rewrites=1,
+                                         rejudge=False))
+    assert len(judge.prompts) == 1 and len(prompts) == 2                    # one Judge pass, one enhancing rewrite
+    assert "improve: say that the 5-year returns are annualised" in prompts[1]
+    assert "Always end with the verdict sentence given above, word for word" in prompts[1]
+    assert result.chosen.draft.text == GOOD["analyst"] and result.chosen.draft.rewritten and not result.flags
+    assert "improved once with the Judge's suggestions" in result.reason
+
+
+def test_an_improvement_that_breaks_codes_checks_keeps_the_approved_draft_never_code_text():
+    calls = {"n": 0}
+
+    def run(prompt):
+        calls["n"] += 1
+        return {"text": GOOD["board"] if calls["n"] == 1 else "Suggested verdict: Retain."}  # breaks the verdict rule
+    judge = FakeRun(review(improvements=["use the verdict code Retain"]))
+    result = asyncio.run(draft_and_judge(facts(), ["board"], ["Fees"], FakeRunBy(run), judge, max_rewrites=1,
+                                         rejudge=False))
+    assert calls["n"] == 2 and result.chosen.draft.text == GOOD["board"] and not result.chosen.draft.rewritten
+    assert not result.flags and any("approved draft is kept" in line for line in result.log)
+
+
+def test_no_improvements_means_no_extra_call_and_a_real_factual_error_is_still_fixed_or_falls_back():
+    calls = {"n": 0}
+
+    def run(prompt):
+        calls["n"] += 1
+        return {"text": GOOD["board"]}
+    result = asyncio.run(draft_and_judge(facts(), ["board"], ["Fees"], FakeRunBy(run), FakeRun(review()),
+                                         max_rewrites=1, rejudge=False))
+    assert calls["n"] == 1 and result.chosen.draft.text == GOOD["board"]
+    bad = {"n": 0}
+
+    def wrong_then_broken(prompt):
+        bad["n"] += 1
+        return {"text": GOOD["board"] if bad["n"] == 1 else "No verdict."}
+    result = asyncio.run(draft_and_judge(facts(), ["board"], ["Fees"], FakeRunBy(wrong_then_broken),
+                                         FakeRun(review(approved=False, factual_issue=True,
+                                                        feedback="The fee is not lower than the peer's.")),
+                                         max_rewrites=1, rejudge=False))
+    assert result.chosen is None and result.flags[0].message.startswith(AI_DRAFTS_FAILED)
