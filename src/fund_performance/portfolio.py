@@ -27,7 +27,7 @@ def source_checked_exposures(candidates: list[ExtractedExposure], documents: dic
             match = next((i for i, page in enumerate(pages, 1) if quote.casefold() in ' '.join(page.split()).casefold()), None)
             if match is not None:
                 row = {'name': item.name, 'weight_pct': item.weight_pct, 'source': f'{name}, page {match}',
-                       'excerpt': quote, 'qualification': 'AI-extracted; quotation matched, classification requires review'}
+                       'excerpt': quote, 'qualification': 'AI-extracted; quotation matched, classification and date require review'}
                 if row not in groups[item.category]:
                     groups[item.category].append(row)
                 break

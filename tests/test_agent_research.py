@@ -268,6 +268,24 @@ def test_search_plan_has_a_hard_maximum_of_five():
     assert len(kept) == 5
 
 
+def test_portfolio_queries_and_sources_must_match_current_exposures():
+    from fund_performance.agents.research import SearchPlan, tidy_plan, vet_summaries, with_timing
+    exposure = {'holdings': [{'name': 'Example Corp', 'source': 'fund.pdf, page 1'}]}
+    plan = SearchPlan(searches=[{'topic': 'portfolio_exposure', 'query': 'Example Corp outlook', 'reason': 'holding'},
+                                {'topic': 'portfolio_exposure', 'query': 'Unknown Corp outlook', 'reason': 'holding'}])
+    kept, _ = tidy_plan(plan, 5, profile(), exposure)
+    assert [x.query for x in kept] == ['Example Corp outlook']
+    assert not tidy_plan(plan, 5, profile(), None)[0]
+    good = {'query': 'Example Corp outlook', 'topic': 'portfolio_exposure', 'summary': 'Example Corp changed its outlook.',
+            'url': 'https://example.org/a', 'date': '2026-09-15'}
+    bad = good | {'url': 'https://example.org/b', 'summary': 'Unknown Corp changed its outlook.'}
+    found, _, _ = vet_summaries([good, bad], profile(), {}, exposures=exposure)
+    assert found == [good]
+    later = good | {'date': '2026-10-01'}
+    found, _, _ = vet_summaries([later], profile(), {}, market_grace_days=31, exposures=exposure)
+    assert with_timing(found, profile())[0]['timing'] == 'after the review date'
+
+
 def test_a_market_query_that_names_the_fund_is_dropped():
     prof = profile()
     raw = SearchPlan.model_validate({"searches": [

@@ -52,6 +52,14 @@ def test_reviewer_can_request_one_revision_and_security_failure_is_not_published
     assert output['status'] == 'unavailable' and 'security' in output['reason']
 
 
+def test_reviewer_rejects_unsupported_disagreement_after_one_revision():
+    invented = BASE | {'recommendation': 'monitor', 'scorecard_agreement': False,
+                       'scorecard_disagreement_reason': 'An unverified holding creates a material risk.'}
+    reject = {'material_issue': True, 'security_issue': False, 'feedback': 'The holding is unsupported.'}
+    output = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(invented, invented), FakeRun(reject, reject)))
+    assert output['status'] == 'unavailable' and 'unsupported' in output['reason']
+
+
 def test_invalid_or_missing_analyst_output_is_not_replaced_by_scorecard():
     output = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun({'bad': 1}), FakeRun(PASS)))
     assert output['status'] == 'unavailable' and 'assessment' not in output

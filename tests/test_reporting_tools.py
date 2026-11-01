@@ -217,3 +217,17 @@ def test_investment_analyst_invokes_existing_tools_in_sdk_loop(sdk_with):
     assert result['tool_calls'] == ['get_oversight_scorecard', 'get_research_sources']
     outputs = [item['output'] for item in model.inputs[1] if isinstance(item, dict) and item.get('type') == 'function_call_output']
     assert 'Retain' in outputs[0] and 'No vetted market research' in outputs[1]
+
+
+def test_planner_receives_only_current_run_source_matched_exposures(sdk_with):
+    profile = FundProfile.model_validate(json.loads((Path(__file__).parent / "fixtures" / "fund_profile_sample.json").read_text()))
+    answer = {"report_type": "quarterly_review", "focus": ["Mandate"], "market_context": True,
+              "manager_questions": True, "angles": ["board"], "searches": [], "reason": "Review exposures."}
+    model = sdk_with(ScriptedModel([[('get_portfolio_exposures', {})], answer]))
+    exposures = {'holdings': [{'name': 'Example Corp', 'weight_pct': 4.2, 'source': 'fund.pdf, page 1',
+                               'qualification': 'AI-extracted; classification requires review'}]}
+    calls = []
+    plan, flags = asyncio.run(plan_tasks('Review the fund', profile, tool_calls=calls, exposures=exposures))
+    outputs = [item['output'] for item in model.inputs[1] if isinstance(item, dict) and item.get('type') == 'function_call_output']
+    assert not flags and calls == ['get_portfolio_exposures'] and plan.source == 'planner'
+    assert 'Example Corp' in outputs[0] and 'fund.pdf, page 1' in outputs[0]

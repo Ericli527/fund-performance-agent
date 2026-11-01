@@ -590,7 +590,8 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
             log.end(research_step, "unavailable", notes=[failure or "did not finish"])
         else:
             vetted, vet_flags, vet_log = vet_summaries(found.summaries, profile, facts,
-                                                       market_grace_days=sources_config.vetting.market_grace_days)
+                                                       market_grace_days=sources_config.vetting.market_grace_days,
+                                                       exposures=(intake or {}).get("portfolio_exposures"))
             vetted = with_timing(vetted, profile)
             flags += found.flags + vet_flags
             text_log += found.log + vet_log

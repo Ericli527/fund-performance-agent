@@ -14,7 +14,7 @@ def test_source_match_retains_page_and_isolates_each_run():
     values = source_checked_exposures([candidate()], {'fund.pdf': ['Fund holdings Example Corp 4.2%']})
     assert values['holdings'][0]['source'] == 'fund.pdf, page 1'
     assert values['sectors'] is None and values['concentration'] is None
-    assert 'requires review' in values['holdings'][0]['qualification']
+    assert 'require review' in values['holdings'][0]['qualification']
     a, b = PlanningContext.of(PROFILE, exposures=values), PlanningContext.of(PROFILE, exposures=values)
     a.exposures['holdings'][0]['name'] = 'changed'
     assert portfolio_exposures(b.exposures)['holdings'][0]['name'] == 'Example Corp'

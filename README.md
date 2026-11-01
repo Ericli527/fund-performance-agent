@@ -34,6 +34,7 @@ Upload: price file (CSV/Excel) + factsheet (PDF/Word) [+ KID, peer factsheets] +
    ├─ Evidence (code)         yearly gaps, hit rate, t-test, peer percentile; conclusion, points, questions
    ├─ Research (AI + code)    Search Agent: approved pages + up to 5 web searches planned by the Task Planner,
    │                          running alongside the calculator; code vets dates, relevance and figures
+   ├─ Investment Analyst      separate qualitative recommendation, with a material-issue quality review
    ├─ Findings and actions    written by code
    ├─ Reporting Agent (AI)    the summary and a cited market context ([n], no figures), one draft
    ├─ Judge (AI) + code       code checks every figure and citation; the Judge checks facts, reasoning, prompt
@@ -44,6 +45,11 @@ Upload: price file (CSV/Excel) + factsheet (PDF/Word) [+ KID, peer factsheets] +
 
 Every run is saved in `runs/<timestamp>/`: `report.pdf` (Detailed), `report_executive.pdf`, `facts.json`, `run_log.txt` and `log.json` (each step,
 its inputs and its outputs).
+
+`investment_assessment.json` contains the independent AI recommendation and its cited evidence, or an explicit
+unavailable status when the agent or its quality review fails. It does not replace the deterministic scorecard.
+Source-matched portfolio excerpts are AI-extracted; their classification and date still need review. The current
+dashboard and PDFs continue to use the existing reporting flow.
 
 ## Run it on your computer
 

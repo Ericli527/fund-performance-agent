@@ -24,7 +24,7 @@ from fund_performance.agents.base import RunFn, model_kwargs, run_structured
 from fund_performance.fetch import FetchedPage
 from fund_performance.models import DataFlag, FundProfile
 
-Topic = Literal["fund_news", "manager_changes", "market_drivers"]
+Topic = Literal["fund_news", "manager_changes", "market_drivers", "portfolio_exposure"]
 MAX_QUERY_CHARS = 200
 MAX_SUMMARY_CHARS = 1200
 _OPERATORS = re.compile(r"(?:^|\s)-?(?:site|inurl|intitle|filetype):\S+", re.IGNORECASE)
@@ -156,7 +156,21 @@ def review_months(profile: FundProfile) -> int:
     return (end.year - start.year) * 12 + end.month - start.month
 
 
-def tidy_plan(plan: SearchPlan, max_searches: int, profile: FundProfile | None = None) -> tuple[list[PlannedSearch], list[str]]:
+def exposure_names(exposures: dict | None) -> list[str]:
+    """Names actually supplied by the current run's source-matched portfolio evidence."""
+    return [row['name'] for category in ('holdings', 'sectors', 'regions', 'currencies')
+            for row in (exposures or {}).get(category) or []
+            if isinstance(row, dict) and isinstance(row.get('name'), str) and len(row['name'].strip()) >= 3]
+
+
+def mentions_exposure(text: str, exposures: dict | None) -> bool:
+    lower = text.casefold()
+    return any(re.search(r'(?<!\w)' + re.escape(name.casefold().strip()) + r'(?!\w)', lower)
+               for name in exposure_names(exposures))
+
+
+def tidy_plan(plan: SearchPlan, max_searches: int, profile: FundProfile | None = None,
+              exposures: dict | None = None) -> tuple[list[PlannedSearch], list[str]]:
     """ Code keeps the limits: at most max_searches, no search operators (site:, inurl: ...), no empty, overlong
     or repeated queries, and no market-driver query that names the fund """
     max_searches = min(max(max_searches, 0), 5)
@@ -173,6 +187,9 @@ def tidy_plan(plan: SearchPlan, max_searches: int, profile: FundProfile | None =
             continue
         if profile is not None and item.topic == "market_drivers" and names_the_fund(query, profile):
             log.append(f"Market-driver query left out because it names the fund: {query!r}")
+            continue
+        if item.topic == "portfolio_exposure" and not mentions_exposure(query, exposures):
+            log.append(f"Portfolio query left out because no source-matched exposure is named: {query!r}")
             continue
         seen.add(query.lower())
         kept.append(item.model_copy(update={"query": query}))
@@ -382,7 +399,7 @@ def same_url(url: str) -> str:
 
 
 def vet_summaries(summaries: list[dict], profile: FundProfile, facts: dict, tolerance_pp: float = 0.5,
-                  market_grace_days: int = 0) -> tuple[list[dict], list[DataFlag], list[str]]:
+                  market_grace_days: int = 0, exposures: dict | None = None) -> tuple[list[dict], list[DataFlag], list[str]]:
     """ Leave out summaries with no date at all (a publish or an "as at" date both count), dated outside the
     review period, about a different fund or jurisdiction (fund searches) or not about the market (market
     searches), or with fund or index returns that differ from the factsheet by more than tolerance_pp
@@ -422,6 +439,13 @@ def vet_summaries(summaries: list[dict], profile: FundProfile, facts: dict, tole
         if topic == "market_drivers":
             if market_name(profile).lower() not in text.lower():
                 exclude(s, f"{NOT_THE_MARKET} ({market_name(profile)})")
+                continue
+        elif topic == "portfolio_exposure":
+            matching = [name for name in exposure_names(exposures)
+                        if mentions_exposure(s.get('query', ''), {'holdings': [{'name': name}]})
+                        and mentions_exposure(text, {'holdings': [{'name': name}]})]
+            if not matching:
+                exclude(s, "source does not match a portfolio exposure in this review: excluded")
                 continue
         elif not matches_fund(text, profile) or (
                 not profile.isin.upper().startswith("US") and any(d in s["url"].lower() for d in US_FILINGS)):
