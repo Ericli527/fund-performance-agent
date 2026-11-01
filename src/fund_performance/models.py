@@ -3,7 +3,7 @@ from datetime import date
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
-Source = Literal["factsheet", "calculated", "ai_extracted", "user", "web"]   # "user": corrected on the page
+Source = Literal["factsheet", "calculated", "calculated_provisional", "ai_extracted", "user", "web"]
 ObjectiveType = Literal["index_tracker", "active_target", "active_comparator", "active_constraint",
                         "income_target", "absolute_return"]
 BenchmarkRole = Literal["target", "comparator", "constraint", "none"]
@@ -99,6 +99,7 @@ class FactsheetPerformance(_Strict):
     risk_3y_nav: Risk3y | None = None
     # Figures a person corrected on the page before the run, e.g. ["index.5y"] (reported as "Entered by user")
     user_entered: list[str] = Field(default_factory=list)
+    provisional_returns: list[str] = Field(default_factory=list)
 
     @field_validator("series_annualised")
     @classmethod
@@ -182,7 +183,7 @@ class Figure(BaseModel):
 
     @property
     def needs_verification(self) -> bool:
-        return self.source == "ai_extracted"
+        return self.source in ("ai_extracted", "calculated_provisional")
 
     @property
     def label(self) -> str:

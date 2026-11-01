@@ -63,6 +63,27 @@ def apply_precedence(calculated: CalcResult, price_flags: list[DataFlag], profil
                   for f in price_flags]
     out.flags += calculated.flags
     _comparison(out, calculated, profile, thresholds, factsheet, comparison)
+    if factsheet is not None and factsheet.provisional_returns:
+        provisional = set(factsheet.provisional_returns)
+        # The opposite return basis can be derived from a recovered value; only mark it if code derived it.
+        for key in list(provisional):
+            parts = key.split('.')
+            if len(parts) != 3 or parts[0] not in ('fund_nav', 'fund_pnav', 'index') or parts[1] not in ('cum', 'ann') or parts[2] not in ('1y', '3y', '5y'):
+                continue
+            if key in out.figures and out.figures[key].source == 'factsheet':
+                out.figures[key] = out.figures[key].model_copy(update={'source': 'ai_extracted'})
+            name, kind, period = parts
+            other = f"{name}.{'ann' if kind == 'cum' else 'cum'}.{period}"
+            figure = out.figures.get(other)
+            if figure is not None and figure.source == 'calculated':
+                out.figures[other] = figure.model_copy(update={'source': 'calculated_provisional'})
+                provisional.add(other)
+        series = comparison.fund_series if comparison else PRICE_SERIES
+        for period in ('1y', '3y', '5y'):
+            for kind, input_kind in (('excess_cum', 'cum'), ('td', 'ann'), ('td_ex_cost', 'ann')):
+                key = f'comparison.{kind}.{period}'
+                if key in out.figures and ({f'{series}.{input_kind}.{period}', f'index.{input_kind}.{period}'} & provisional):
+                    out.figures[key] = out.figures[key].model_copy(update={'source': 'calculated_provisional'})
     if factsheet is not None and factsheet.source == "ai_extracted":
         # Figures the Extractor Agent read keep that label, so the report shows them "(please verify)"
         out.figures = {k: f.model_copy(update={"source": "ai_extracted"}) if f.source == "factsheet" else f

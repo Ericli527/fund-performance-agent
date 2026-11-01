@@ -267,14 +267,19 @@ async def read_documents(factsheet: Path, kid: Path | None = None, peer_factshee
         docs[name] = read_document_pages(path)
     text = "\n\n".join(f"=== Document: {name} ===\n" + "\n".join(pages) for name, pages in docs.items())
     extracted: ExtractionResult = await extract(text, run_extractor)
-    fs = extracted.factsheet
+    from fund_performance.fund_context import build_fund_context, recover_returns
+    from fund_performance.portfolio import source_checked_exposures
+    fs, recovered = recover_returns(extracted.factsheet, extracted.return_evidence, docs)
     draft = dict(extracted.profile_draft)
+    exposures = source_checked_exposures(extracted.exposures, docs)
+    context = build_fund_context(extracted.document_summary, draft, fs, exposures, list(docs), recovered=recovered)
     log = [f"Extractor Agent read: {', '.join(docs)}"]
 
     mandate: MandateOutput | None = None
     objective = draft.get("objective_text")
     if objective:
-        result = await run_structured(mandate_agent(), f"Objective text:\n{objective}", MandateOutput, run=run_mandate)
+        from fund_performance.agents.mandate import mandate_prompt
+        result = await run_structured(mandate_agent(), mandate_prompt(objective, context), MandateOutput, run=run_mandate)
         mandate = result.output if result.ok else None
         log.append("Mandate Agent read the objective" if mandate else
                    "Mandate Agent gave no valid answer: " + "; ".join(result.errors))
@@ -308,9 +313,16 @@ async def read_documents(factsheet: Path, kid: Path | None = None, peer_factshee
         _, name, period = spec.key.split(".")
         series = fs.series.get(name) if fs else None
         value = getattr(series, f"y{period[0]}") if series else None
-        rows.append(_row(spec, value, AI, locate(value, docs)))
+        recovered_source = next((r['source'] for r in recovered if r['series'] == name and r['period'] == period
+                                 and r['basis'] == 'cumulative'), None)
+        rows.append(_row(spec, value, AI, recovered_source or locate(value, docs)))
 
+    if mandate:
+        context['mandate_interpretation'] = mandate.interpretation or None
     flags = [f.model_dump() for f in extracted.flags] + fee_flags
+    if recovered:
+        flags.append({'check': 'provisional_returns', 'level': 'warning', 'message':
+                      'Returns recovered from document quotations are provisional; verify them and any derived comparisons.'})
     uploaded = [peer_factsheets] if isinstance(peer_factsheets, Path) else list(peer_factsheets or [])
     peer_docs = [(p, "uploaded", "") for p in uploaded]
     if not peer_docs:
@@ -338,9 +350,8 @@ async def read_documents(factsheet: Path, kid: Path | None = None, peer_factshee
                                     "message": f"Peer factsheet {path.name}: {f.message}"} for f in peer_result.flags]
         log.append(f"Extractor Agent read the {'approved ' if origin == 'approved' else ''}peer factsheet: {path.name}")
 
-    from fund_performance.portfolio import source_checked_exposures
     return {"rows": rows, "documents": list(docs) + [p.name for p, _, _ in peer_docs],
-            "portfolio_exposures": source_checked_exposures(extracted.exposures, docs),
+            "portfolio_exposures": exposures, "fund_context": context,
             "text_chars": {name: sum(len(x) for x in pages) for name, pages in docs.items()},
             "factsheet": fs.model_dump(mode="json", by_alias=True) if fs else None,
             "promises": mandate.promises if mandate else [],

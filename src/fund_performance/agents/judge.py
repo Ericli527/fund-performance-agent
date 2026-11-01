@@ -86,6 +86,7 @@ REVISED = "revised once after the Judge's review; checked by code, not judged ag
 
 PROVENANCE_WORDS = {
     "ai_extracted": "read from the uploaded documents by the Extractor Agent (AI) and checked against them by code",
+    "calculated_provisional": "calculated by code from AI-extracted figures that require verification",
     "factsheet": "typed from the factsheet beforehand and checked by code (prevalidated inputs, no AI)",
     "calculated": "calculated by code from the price history",
     "user": "entered or corrected by a person on the page",

@@ -251,3 +251,34 @@ def test_planner_receives_missing_data_flags_and_isolated_exposures(sdk_with):
     assert outputs[0]['values']['time_horizon_years'] is None
     assert {item['message'] for item in outputs[0]['mandate_checks']} == {'Horizon unavailable', 'Charge unavailable'}
     assert outputs[1]['holdings'][0]['name'] == 'Example Corp'
+
+
+def test_planner_reads_fund_context_and_plans_without_holdings(sdk_with):
+    profile = FundProfile.model_validate(json.loads((Path(__file__).parent / 'fixtures' / 'fund_profile_sample.json').read_text()))
+    answer = {'report_type': 'quarterly_review', 'focus': ['Mandate'], 'market_context': True,
+              'manager_questions': True, 'angles': ['board'], 'reason': 'Assess the index strategy.',
+              'searches': [{'topic': 'market_drivers', 'query': 'Sample World equity market review',
+                            'objective': 'Understand global markets', 'relevance': 'Index strategy'}]}
+    model = sdk_with(ScriptedModel([[('get_fund_context', {})], answer]))
+    brief = {'document_summary': 'The fund tracks a diversified global equity index.',
+             'mandate_interpretation': 'Passive index tracking.', 'sources': ['fund.pdf'],
+             'summary_evidence_level': 'provisional'}
+    calls = []
+    plan, flags = asyncio.run(plan_tasks('Review the fund', profile, max_searches=5,
+                                          tool_calls=calls, fund_context=brief))
+    output = [x['output'] for x in model.inputs[1] if isinstance(x, dict) and x.get('type') == 'function_call_output']
+    assert not flags and calls == ['get_fund_context'] and 'diversified global equity' in output[0]
+    assert plan.searches[0]['query'] == 'Sample World equity market review'
+
+
+def test_investment_analyst_can_reuse_the_same_context(sdk_with):
+    from fund_performance.agents.investment_analyst import assess
+    from test_investment_analyst import BASE, PASS
+    from conftest import FakeRun
+    profile = FundProfile.model_validate(json.loads((Path(__file__).parent / 'fixtures' / 'fund_profile_sample.json').read_text()))
+    brief = {'document_summary': 'Global equity index strategy.', 'summary_evidence_level': 'provisional'}
+    model = sdk_with(ScriptedModel([[('get_fund_context', {})], BASE | {'evidence_references': ['fund_context']}]))
+    result = asyncio.run(assess(FACTS, profile, [], 'Review', review_run=FakeRun(PASS), fund_context=brief))
+    assert result['status'] == 'available' and result['evidence']['fund_context'] == brief
+    outputs = [x['output'] for x in model.inputs[1] if isinstance(x, dict) and x.get('type') == 'function_call_output']
+    assert 'Global equity index strategy.' in outputs[0]

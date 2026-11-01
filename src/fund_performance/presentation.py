@@ -12,7 +12,8 @@ VERDICT_STYLE = {"Retain": "#2e7d32", "Monitor": "#b7791f", "Review": "#c62828",
 QUESTIONS = {"Mandate": "Is the fund doing what it promised?", "Performance": "How did it do against its index?",
              "Value for investors": "Did investors get a fair outcome?", "Fees": "Is the fee justified?"}
 SOURCE_WORDS = {"factsheet": "Factsheet", "calculated": "Calculated", "ai_extracted": "AI-read from the factsheet "
-                "(verify)", "user": "Entered by user", "web": "Web"}
+                "(verify)", "calculated_provisional": "Calculated from AI-read figures (verify)",
+                "user": "Entered by user", "web": "Web"}
 NOT_AVAILABLE = "Not available"
 
 

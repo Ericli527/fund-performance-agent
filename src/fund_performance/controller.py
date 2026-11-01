@@ -38,6 +38,7 @@ from fund_performance.agents.judge import draft_and_judge, REVISED
 from fund_performance.agents.task_planner import TaskPlan, plan_tasks
 from fund_performance.agents.mandate import read_mandate
 from fund_performance.agents.investment_analyst import assess as assess_investment
+from fund_performance.fund_context import build_fund_context, recover_returns
 from fund_performance.agents.research import PlannedSearch, market_name, research, vet_summaries, with_timing
 from fund_performance.calc import calculate
 from fund_performance.checks import check_prices
@@ -48,7 +49,7 @@ from fund_performance.facts import build_facts
 from fund_performance.fetch import GetFn, fetch_pages, http_get
 from fund_performance.config import load_peers
 from fund_performance.intake import peer_record, read_peer
-from fund_performance.io import detect_file_type, read_document, read_json, read_peers, read_prices
+from fund_performance.io import detect_file_type, read_document, read_document_pages, read_json, read_peers, read_prices
 from fund_performance.mandate import decision_path
 from fund_performance.models import DataFlag, FactsheetPerformance, FundProfile, Peer
 from fund_performance.peers import approved_peers, compare_peers
@@ -373,6 +374,8 @@ def pages_read(found) -> list[dict]:
 async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thresholds, s: RunSettings,
                r: Runners, log: RunLog, text_log: list[str], intake: dict | None = None) -> RunResult:
     flags: list[DataFlag] = [DataFlag(**f) for f in (intake or {}).get("flags", [])]
+    review_exposures = (intake or {}).get("portfolio_exposures")
+    standalone_context = None
 
     # 0. The documents route: what the agents read and what the person confirmed, before the run
     if intake:
@@ -427,7 +430,8 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                                       f"not run ({why}). Calculated figures only"))
         log.end(step, "skipped", notes=[why])
     else:
-        text = "\n\n".join(read_document(p) for p in files["documents"])
+        documents = {p.name: read_document_pages(p) for p in files["documents"]}
+        text = "\n\n".join(f"=== Document: {name} ===\n" + "\n".join(pages) for name, pages in documents.items())
         extracted = await _timed(extract(text, r.extractor), s.timeouts_seconds.extractor)
         if extracted is None:
             flags.append(DataFlag(check="extractor_agent", level="warning", message=(
@@ -435,8 +439,15 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                 "only")))
             log.end(step, _status(), notes=[_why(s.timeouts_seconds.extractor)])
         else:
-            factsheet = extracted.factsheet
+            from fund_performance.portfolio import source_checked_exposures
+            factsheet, recovered = recover_returns(extracted.factsheet, extracted.return_evidence, documents)
+            review_exposures = source_checked_exposures(extracted.exposures, documents)
+            standalone_context = build_fund_context(extracted.document_summary, extracted.profile_draft,
+                                                     factsheet, review_exposures, list(documents), recovered=recovered)
             flags += extracted.flags
+            if recovered:
+                flags.append(DataFlag(check="provisional_returns", level="warning", message=
+                    "Returns recovered from document quotations are provisional; verify them and any derived comparisons."))
             log.end(step, "ok" if factsheet else "failed", {"figures": "ai_extracted" if factsheet else None})
 
     # 2b. Approved peers (config/peers.yaml), when no peer was given: the Extractor reads their factsheets
@@ -489,6 +500,9 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     # 4. Mandate Agent
     step = log.start("mandate", ["fund_profile.json: objective text"], announce=not offline and not intake)
     promises: list[str] = []
+    context_brief = (intake or {}).get("fund_context") or standalone_context or build_fund_context(
+        profile=profile.model_dump(mode="json"), factsheet=factsheet,
+        exposures=review_exposures)
     if offline:
         flags.append(DataFlag(check="run", level="info", message=OFFLINE_NOTE))
         log.end(step, "skipped", notes=["offline run"])
@@ -497,15 +511,19 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         log.end(step, outputs={"promises": len(promises)},
                 notes=["Mandate Agent read the objective before the run"], quiet=True)
     else:
-        mandate = await _timed(read_mandate(profile, r.mandate), s.timeouts_seconds.mandate)
+        mandate = await _timed(read_mandate(profile, r.mandate, context_brief), s.timeouts_seconds.mandate)
         if mandate is None:
             flags.append(DataFlag(check="mandate_agent", level="blocking", message=(
                 f"CHECK DATA: Mandate Agent {_why(s.timeouts_seconds.mandate)}")))
             log.end(step, _status(), notes=[_why(s.timeouts_seconds.mandate)])
         else:
             profile, promises = mandate.profile, mandate.promises
+            if mandate.agent_output:
+                context_brief['mandate_interpretation'] = mandate.agent_output.interpretation or None
             flags += mandate.flags
             log.end(step, outputs={"promises": len(promises), "flags": [f.message for f in mandate.flags]})
+
+    (run_dir / "fund_context.json").write_text(json.dumps(context_brief, indent=1, ensure_ascii=False), encoding="utf-8")
 
     # Plan after mandate interpretation so both document and structured-input routes use the same mandate.
     step = log.start("plan", ["question", "fund_profile.json: public details"], announce=not offline)
@@ -516,7 +534,8 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         budget = t.limits.max_web_searches if s.research.enabled else 0
         planning_calls: list[str] = []
         planned = await _timed(plan_tasks(question, profile, r.task_planner, budget, tool_calls=planning_calls,
-                                          mandate_flags=flags, exposures=(intake or {}).get("portfolio_exposures")),
+                                          mandate_flags=flags, exposures=review_exposures,
+                                          fund_context=context_brief),
                                s.timeouts_seconds.task_planner)
         if planned is None:
             plan = TaskPlan(reason="Default plan: the Task Planner did not answer in time")
@@ -549,7 +568,8 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
 
         async def do_research():
             pages = await fetch_pages(approved_pages, sources_config.fetch, r.http_get)
-            found = await research(profile, planned_searches, t.limits.max_web_searches, pages, r.search, r.page)
+            found = await research(profile, planned_searches, t.limits.max_web_searches, pages, r.search, r.page,
+                                   fund_context=context_brief)
             return found, _FAILURE.get()
 
         async def timed_research():
@@ -598,7 +618,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         else:
             vetted, vet_flags, vet_log = vet_summaries(found.summaries, profile, facts,
                                                        market_grace_days=sources_config.vetting.market_grace_days,
-                                                       exposures=(intake or {}).get("portfolio_exposures"))
+                                                       exposures=review_exposures)
             vetted = with_timing(vetted, profile)
             flags += found.flags + vet_flags
             text_log += found.log + vet_log
@@ -661,7 +681,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         assessment_calls: list[str] = []
         assessment = await _timed(assess_investment(facts, profile, vetted, question, r.investment_analyst,
                                                    r.investment_reviewer, assessment_calls,
-                                                   (intake or {}).get("portfolio_exposures")), s.timeouts_seconds.narrative)
+                                                   review_exposures, context_brief), s.timeouts_seconds.narrative)
         if assessment is None:
             assessment = {"status": "unavailable", "reason": _why(s.timeouts_seconds.narrative),
                           "tool_calls": assessment_calls}

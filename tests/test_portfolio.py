@@ -27,3 +27,18 @@ def test_invented_or_ambiguous_portfolio_items_are_not_used():
         candidate(name='Other Corp', weight_pct=8.0, quote='Benchmark holdings Other Corp 8.0%'),
         candidate(quote='Fund holdings Example Corp 4.2% Other Corp 8.0%')], text)
     assert values['holdings'] is None and values['unavailable']
+
+
+def test_index_fund_rows_and_qualitative_exposures_are_provisional():
+    documents = {'fund.pdf': ['Index Fund\nTechnology 25.0%\nThe portfolio invests globally.\n'
+                              'Benchmark holdings Other Corp 8.0%']}
+    items = [candidate(category='sectors', name='Technology', weight_pct=25.0,
+                       quote='Index Fund Technology 25.0%', subject='fund'),
+             candidate(category='portfolio_description', name='invests globally', weight_pct=None,
+                       quote='The portfolio invests globally.', subject='fund'),
+             candidate(name='Other Corp', weight_pct=8.0, quote='Benchmark holdings Other Corp 8.0%',
+                       subject='benchmark')]
+    result = source_checked_exposures(items, documents)
+    assert result['sectors'][0]['weight_pct'] == 25.0
+    assert result['portfolio_description'][0]['weight_pct'] is None
+    assert result['holdings'] is None and result['sectors'][0]['evidence_level'] == 'provisional'

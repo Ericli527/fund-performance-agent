@@ -30,14 +30,15 @@ class PlanningContext:
     mandate_flags: list[dict] = field(default_factory=list)
     calls: list[str] = field(default_factory=list)
     exposures: dict | None = None
+    fund_context: dict | None = None
 
     @classmethod
     def of(cls, profile: FundProfile, flags: list[DataFlag] | None = None,
-           exposures: dict | None = None) -> "PlanningContext":
+           exposures: dict | None = None, fund_context: dict | None = None) -> "PlanningContext":
         return cls(profile.model_copy(deep=True),
                    [{"level": f.level, "message": f.message} for f in flags or []
                     if f.check in ("mandate_agent", "fund_horizon", "ongoing_charge")],
-                   exposures=copy.deepcopy(exposures))
+                   exposures=copy.deepcopy(exposures), fund_context=copy.deepcopy(fund_context))
 
     def allow(self, name: str) -> bool:
         if len(self.calls) >= 6:
@@ -62,4 +63,13 @@ def get_portfolio_exposures(ctx: RunContextWrapper[PlanningContext]) -> dict:
     return portfolio_exposures(ctx.context.exposures)
 
 
-TOOLS = [get_fund_mandate, get_portfolio_exposures]
+@function_tool
+def get_fund_context(ctx: RunContextWrapper[PlanningContext]) -> dict:
+    """Source-labelled fund context from this review, or an explicit unavailable result."""
+    if not ctx.context.allow("get_fund_context"):
+        return {"error": "planning tool call limit reached"}
+    return copy.deepcopy(ctx.context.fund_context) if ctx.context.fund_context else {
+        "unavailable": "No document context brief is available for this review."}
+
+
+TOOLS = [get_fund_mandate, get_portfolio_exposures, get_fund_context]

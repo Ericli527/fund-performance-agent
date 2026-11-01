@@ -37,7 +37,7 @@ PAGE_TITLES = ("Overview", "Comparisons and decision") + APPENDIX_TITLES
 NAVY = "#1f3a5f"
 RATING_COLOURS = {GREEN: "#2e7d32", AMBER: "#d18f00", RED: "#c62828", CHECK_DATA: "#6d4c9f", MANUAL_CHECK: "#546e7a"}
 RATING_WORDS = {GREEN: "Green", AMBER: "Amber", RED: "Red", CHECK_DATA: "Check data", MANUAL_CHECK: "Manual check"}
-SOURCE_WORDS = {"factsheet": "Factsheet", "calculated": "Calculated", "ai_extracted": "AI-extracted (please verify)",
+SOURCE_WORDS = {"factsheet": "Factsheet", "calculated": "Calculated", "calculated_provisional": "Calculated from AI-extracted figures (please verify)", "ai_extracted": "AI-extracted (please verify)",
                 "user": "Entered by user",
                 "web": "Web"}
 AOV_DISCLAIMER = ("This is an indicative assessment from public data. It does not replace the AFM's formal "
@@ -97,7 +97,7 @@ def fmt(name: str, fig: Figure | None, verify: bool = True) -> str:
         return "–"
     two_dp = any(part in TWO_DP for part in name.split("."))
     text = fig.display(percent_decimals=2 if two_dp else 1, ratio_decimals=2).replace("-", "−")
-    return text + (" (please verify)" if verify and fig.source == "ai_extracted" else "")
+    return text + (" (please verify)" if verify and fig.needs_verification else "")
 
 
 def source_of(*figs: Figure | None) -> str:
