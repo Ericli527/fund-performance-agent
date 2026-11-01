@@ -5,7 +5,7 @@ Each candidate has an id, its wording, its own fixed timing ("when", part of the
 required (a required action is always used while there is room for it).
 """
 import re
-from fund_performance.presentation import missing_evidence
+from fund_performance.presentation import historical_price_warning, missing_evidence
 
 SIGN_OFF = "before signing off this review"
 NEXT_REVIEW = "before the next quarterly review"
@@ -58,11 +58,25 @@ def candidate_actions(facts: dict) -> list[dict]:
             found.append(_action(f"amber_{_slug(p['name'])}",
                                  f"Recheck {p['name']} {AT_NEXT_REVIEW}: {p['reason']}.",
                                  AT_NEXT_REVIEW, False))
-    for i, f in enumerate(x for x in facts.get("data_flags", []) if x.get("level") == "warning"):
-        found.append(_action(f"warning_{i + 1}", f"Check this data warning {SIGN_OFF}: {f['message'].rstrip('.')}.",
-                             SIGN_OFF, False))
+    warnings = [f for f in facts.get("data_flags", []) if f.get("level") == "warning"]
+    repeated = [f for f in warnings if f.get("check") == "repeated_prices"]
+    if any(not historical_price_warning(f) for f in repeated):
+        found.append(_action("warning_repeated_prices", f"Investigate repeated prices {SIGN_OFF} and confirm their "
+                             "effect on the current review calculations.", SIGN_OFF, False))
+    seen = set()
+    for f in warnings:
+        check = f.get("check", "data_quality")
+        if check in seen or check in ("repeated_prices", "provisional_returns"):
+            continue
+        seen.add(check)
+        label = check.replace("_", " ")
+        found.append(_action(f"warning_{len(seen)}", f"Investigate the {label} data issue {SIGN_OFF} and confirm "
+                             "whether it affects the review conclusions.", SIGN_OFF, False))
     found.append(_action("record_decision", f"Record the decision and its reasons in the approval box {THIS_REVIEW}.",
                          THIS_REVIEW, False))
+    if any(historical_price_warning(f) for f in repeated):
+        found.append(_action("warning_historical_prices", f"Review historical repeated prices {NEXT_REVIEW} if using "
+                             "longer-period results, to establish their effect on those calculations.", NEXT_REVIEW, False))
     found.append(_action("read_sources", f"Read the evidence and its sources on pages 2 to 4 {SIGN_OFF}.",
                          SIGN_OFF, False))
     return found

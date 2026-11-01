@@ -328,10 +328,10 @@ def material_issues(data: dict) -> str:
     if more > 0:
         data_items.append(f"… and {more} more data warning{'s' if more != 1 else ''}, listed in full in the Detailed "
                           "Report (Appendix D).")
-    if quality.ai_read:
-        data_items.append("Figures were read from the documents by AI: check them against the factsheet.")
     if data_items:
         body += "<p class='x-group'>Data issues (evidence quality)</p>" + _ul(data_items)
+    if quality.ai_read:
+        body += "<p class='x-group'>Evidence note</p>" + _ul(["AI-extracted figures require verification against the documents."])
     return body or "<p>No performance concerns, no gaps in the evidence and no data issues.</p>"
 
 

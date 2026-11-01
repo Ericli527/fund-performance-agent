@@ -43,6 +43,21 @@ def test_invented_numerical_claim_is_rejected():
     assert any('numerical' in issue for issue in issues)
 
 
+def test_provisional_context_and_cited_research_figures_are_available():
+    context = {'sources': ['fund.pdf'], 'document_summary': 'fund.pdf reports a provisional 3-year return of 17.3%.',
+               'financial_evidence': {'series': {'fund_nav': {'3y': 17.3}}}}
+    source = {'summary': 'The benchmark provider reported a 2.7% change.', 'url': 'https://example.org/index',
+              'date': '2026-09-01'}
+    item = BASE | {'investment_thesis': 'The provisional 3-year return was 17.3%; the index change was 2.7%.',
+                   'evidence_references': ['fund_context', 'research:1']}
+    result = asyncio.run(assess(FACTS, PROFILE, [source], 'Review', FakeRun(item), FakeRun(PASS),
+                                fund_context=context))
+    assert result['status'] == 'available' and result['evidence']['fund_context'] == context
+    no_source = context | {'sources': []}
+    assert any('numerical' in x for x in problems(InvestmentAssessment.model_validate(item), FACTS, [source],
+                                                    fund_context=no_source))
+
+
 def test_reviewer_can_request_one_revision_and_security_failure_is_not_published():
     bad_review = {'material_issue': True, 'security_issue': False, 'feedback': 'Explain the evidence.'}
     output = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(BASE, BASE), FakeRun(bad_review, PASS)))

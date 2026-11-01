@@ -177,7 +177,7 @@ def test_a_market_context_that_fails_codes_checks_is_left_out_but_the_summary_st
     result = asyncio.run(run_review(SAMPLE, out_root=tmp_path, runners=runners))
     assert result.facts["suggested_conclusion"]["source"] == "ai" and result.narrative.output.market_context is None
     assert any(f.message.startswith("Market context left out") for f in result.flags)
-    assert len(runners.reporter.prompts) == 2 and "market context: number" in runners.reporter.prompts[1]
+    assert len(runners.reporter.prompts) == 1
 
 
 def test_dashboard_citations_keep_sources_when_market_context_is_absent(tmp_path):

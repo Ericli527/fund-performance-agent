@@ -159,13 +159,13 @@ def _attention(data: dict, quality: EvidenceQuality, analyst: bool) -> str:
               if p["rating"] == "MANUAL CHECK"]
     data_items = ([f"Data check: {m}" for m in quality.blocking] + [f"Warning: {m}" for m in quality.warnings]
                   + [f"Reviewer check: {m}" for m in manual])
-    if quality.ai_read and quality.level != "check":
-        data_items.append("Figures were read from the documents by AI: check them against the factsheet.")
     data_items += list(data.get("attachment_limitations") or [])
     actions = [report_action(a) for a in data.get("actions") or []]
     body = ""
     if data_items:
         body += "<p class='fp-group'>Evidence quality: data issues to resolve or check</p>" + _list(data_items)
+    if quality.ai_read:
+        body += "<p class='fp-group'>Evidence note</p>" + _list(["AI-extracted figures require verification against the documents."])
     if actions:
         body += "<p class='fp-group'>Recommended actions</p>" + _list(actions)
     if not body:
