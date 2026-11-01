@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 
 from conftest import FakeRun, FIXTURES
-from fund_performance.agents.investment_analyst import AnalystContext, assess, problems, InvestmentAssessment, risk_quality
+from fund_performance.agents.investment_analyst import (AnalystContext, assess, problems, InvestmentAssessment,
+                                                        research_availability, risk_quality)
 from fund_performance.models import FundProfile
 
 FACTS = json.loads((Path(__file__).parent / 'golden' / 'demo_facts.json').read_text())
@@ -49,6 +50,7 @@ def test_provisional_context_and_cited_research_figures_are_available():
     source = {'summary': 'The benchmark provider reported a 2.7% change.', 'url': 'https://example.org/index',
               'date': '2026-09-01'}
     item = BASE | {'investment_thesis': 'The provisional 3-year return was 17.3%; the index change was 2.7%.',
+                   'uncertainties': ['The source is limited.'],
                    'evidence_references': ['fund_context', 'research:1']}
     result = asyncio.run(assess(FACTS, PROFILE, [source], 'Review', FakeRun(item), FakeRun(PASS),
                                 fund_context=context))
@@ -122,13 +124,114 @@ def test_context_is_private_to_each_review():
 def test_insufficient_evidence_and_research_reference_are_preserved():
     item = BASE | {'recommendation': 'insufficient_evidence', 'scorecard_agreement': False,
                    'scorecard_disagreement_reason': 'Material uncertainty requires investigation.',
-                   'evidence_references': ['scorecard', 'research:1']}
+                   'evidence_references': ['scorecard', 'research:1'], 'uncertainties': ['Evidence is limited.']}
     source = {'summary': 'Benchmark methodology changed.', 'url': 'https://example.org/change',
               'date': '2026-10-01', 'title': 'Methodology', 'timing': 'after the review date'}
     result = asyncio.run(assess(FACTS, PROFILE, [source], 'Review', FakeRun(item), FakeRun(PASS)))
     assert result['status'] == 'available'
     assert result['evidence']['research:1'] == source
     assert result['assessment']['recommendation'] == 'insufficient_evidence'
+
+
+def test_research_availability_distinguishes_absent_excluded_and_partial_sources():
+    assert research_availability(PROFILE, [], {'completed': True})['status'] == 'no_usable_research_retrieved'
+    assert research_availability(PROFILE, [], {'candidate_count': 2, 'excluded_count': 2})['status'] == 'retrieved_but_excluded'
+    assert research_availability(PROFILE, [], {'completed': True, 'retrieved_pages': 1})['status'] == 'retrieved_without_usable_summary'
+    sources = [
+        {'topic': 'fund_news', 'approved': True, 'date': '2026-10-15', 'date_basis': 'as_at',
+         'summary': 'Fidelity fund page.', 'limitations': 'Published after the review.'},
+        {'topic': 'fund_news', 'approved': True, 'date': '2026-11-01', 'date_basis': 'published',
+         'summary': 'Fidelity manager page.', 'limitations': 'Later publication.'},
+        {'topic': 'market_drivers', 'date': '2026-06-30', 'date_basis': 'published',
+         'summary': 'Market commentary.', 'limitations': 'Only covers one quarter.'},
+        {'topic': 'market_drivers', 'date': '2026-09-15', 'date_basis': 'published',
+         'summary': 'Market commentary.', 'limitations': 'Limited period coverage.'}]
+    summary = research_availability(PROFILE, sources, {'candidate_count': 5, 'excluded_count': 1})
+    assert summary['status'] == 'vetted_sources_available' and summary['vetted_source_count'] == 4
+    assert [s['date_relation'] for s in summary['sources']] == ['after_review', 'after_review', 'during_review', 'during_review']
+    assert summary['sources'][2]['limitations'] == 'Only covers one quarter.'
+    assert 'not proof of complete period coverage' in summary['qualification']
+
+
+def test_false_missing_research_claim_is_corrected_without_losing_judgement():
+    sources = [{'topic': 'fund_news', 'approved': True, 'date': day, 'summary': 'Fidelity fund page.',
+                'limitations': 'Published after the review.'} for day in ('2026-10-15', '2026-11-01')]
+    sources += [{'topic': 'market_drivers', 'date': day, 'summary': 'Market commentary.',
+                 'limitations': 'Only partial period coverage.'} for day in ('2026-06-30', '2026-09-15')]
+    first = BASE | {'uncertainties': ['Research evidence could not be retrieved.'],
+                    'recommended_actions': ['Verify sources before sign-off.']}
+    fixed = first | {'uncertainties': ['Two fund pages were published after the review; market commentary has partial coverage.']}
+    analyst, reviewer = FakeRun(first, fixed), FakeRun(PASS)
+    output = asyncio.run(assess(FACTS, PROFILE, sources, 'Review', analyst, reviewer,
+                                research_state={'attempted': True, 'completed': True, 'candidate_count': 4,
+                                                'excluded_count': 0}))
+    assert output['status'] == 'available' and output['assessment']['recommendation'] == 'satisfied'
+    assert output['assessment']['recommended_actions'] == ['Verify sources before sign-off.']
+    assert '"vetted_source_count": 4' in analyst.prompts[0] and '"date_relation": "after_review"' in analyst.prompts[0]
+    assert 'correct the claim' in analyst.prompts[1] and len(reviewer.prompts) == 1
+    assert output['diagnostics']['attempts'][0]['validation_issues'] and output['diagnostics']['attempts'][1]['review'] == 'accepted'
+
+
+def test_reviewer_can_request_narrow_date_qualification_after_research_was_supplied():
+    sources = [{'date': '2026-10-15', 'topic': 'fund_news', 'summary': 'Later fund page.',
+                'limitations': 'Published after the review.'}]
+    initial = BASE | {'uncertainties': ['No research was available before the review date.'],
+                      'recommended_actions': ['Verify sources before sign-off.']}
+    revised = initial | {'uncertainties': ['The fund page was published after the review date.']}
+    reviewer = FakeRun({'material_issue': True, 'security_issue': False,
+                        'feedback': 'Clarify the publication date and historical coverage.'}, PASS)
+    analyst = FakeRun(initial, revised)
+    result = asyncio.run(assess(FACTS, PROFILE, sources, 'Review', analyst, reviewer))
+    assert result['status'] == 'available' and result['assessment']['recommendation'] == 'satisfied'
+    assert result['assessment']['recommended_actions'] == ['Verify sources before sign-off.']
+    assert result['diagnostics']['attempts'][0]['review'] == 'material_issue'
+    assert result['diagnostics']['attempts'][1]['review'] == 'accepted'
+    assert 'smallest correction' in analyst.prompts[1]
+
+
+def test_reviewer_feedback_and_unavailable_reason_are_logged_without_source_text():
+    feedback = 'PRIVATE SOURCE PASSAGE: research evidence was unavailable; the publication date needs correction.'
+    reviewer = FakeRun(*[{'material_issue': True, 'security_issue': False, 'feedback': feedback}] * 2)
+    result = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(BASE, BASE), reviewer))
+    assert result['status'] == 'unavailable' and 'PRIVATE SOURCE PASSAGE' not in json.dumps(result)
+    assert result['diagnostics']['final_reason'] == 'unresolved_reviewer_issue_after_revision'
+    assert len(result['diagnostics']['attempts']) == 2
+    assert set(result['diagnostics']['attempts'][0]['feedback_categories']) >= {'research_availability', 'date_or_coverage'}
+
+
+def test_repeated_false_availability_claim_records_validation_failure():
+    source = {'date': '2026-09-01', 'summary': 'Market evidence.', 'limitations': 'Partial coverage.'}
+    result = asyncio.run(assess(FACTS, PROFILE, [source], 'Review', FakeRun(BASE, BASE), FakeRun(PASS)))
+    assert result['status'] == 'unavailable'
+    assert result['diagnostics']['final_reason'] == 'validation_failed_after_revision'
+    assert result['diagnostics']['attempts'][1]['validation_issues'] == ['false_missing_research']
+    assert result['diagnostics']['attempts'][1]['review'] == 'not_run'
+
+
+def test_absolute_research_absence_is_not_excused_by_a_later_coverage_caveat():
+    from fund_performance.agents.investment_analyst import missing_research_claim
+    assert missing_research_claim('Research evidence could not be retrieved, and period coverage is limited.')
+    assert not missing_research_claim('No research was available before the review date.')
+
+
+def test_controller_persists_redacted_diagnostics_for_both_attempts(tmp_path):
+    from fund_performance.config import load_settings
+    from fund_performance.controller import run_review
+    from test_controller import mocked
+    secret = 'PRIVATE SOURCE PASSAGE research publication date is incorrect'
+    runners = mocked()
+    runners.investment_analyst = FakeRun(BASE, BASE)
+    runners.investment_reviewer = FakeRun(*[{'material_issue': True, 'security_issue': False, 'feedback': secret}] * 2)
+    settings = load_settings().model_copy(deep=True)
+    settings.research.enabled = False
+    sample = Path(__file__).parents[1] / 'demo' / 'sample_index_fund'
+    result = asyncio.run(run_review(sample, out_root=tmp_path, runners=runners, settings=settings))
+    log_text = (result.run_dir / 'log.json').read_text()
+    log = json.loads(log_text)
+    step = next(s for s in log['steps'] if s['step'] == 'investment_assessment')
+    diagnostic = step['outputs']['diagnostics']
+    assert secret not in log_text and diagnostic['final_reason'] == 'unresolved_reviewer_issue_after_revision'
+    assert len(diagnostic['attempts']) == 2 and diagnostic['attempts'][0]['feedback_summary']
 
 
 def test_risk_tool_suppresses_unreliable_benchmark_comparisons():
