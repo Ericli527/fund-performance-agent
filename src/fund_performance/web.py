@@ -769,6 +769,10 @@ CSS = f"""
 .fp-question {{ color: {MUTED}; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }}
 .fp-verdict {{ color: {NAVY_TEXT}; font-size: 21px; font-weight: 650; }}
 .fp-dashboard {{ overflow-wrap: anywhere; }}
+.fp-allocation {{ margin: 12px 0; }}
+.fp-allocation-label {{ display: flex; justify-content: space-between; gap: 12px; }}
+.fp-allocation-track {{ height: 8px; background: #edf1f5; border-radius: 4px; overflow: hidden; }}
+.fp-allocation-fill {{ height: 100%; background: {BLUE}; border-radius: 4px; }}
 .fp-concern-title, .fp-group {{ font-weight: 600; color: {NAVY_TEXT}; margin-top: 10px !important; }}
 .fp-metrics {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }}
 .fp-metric {{ background: #fff; border: 1px solid {BORDER}; border-radius: 12px; padding: 14px 16px; }}

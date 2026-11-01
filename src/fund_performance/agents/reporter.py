@@ -150,7 +150,8 @@ class Draft:
     executive_problems: list[str] = field(default_factory=list)
     detailed_analysis: list[str] = field(default_factory=list)
     research_narrative: list[str] = field(default_factory=list)
-    additional_problems: list[str] = field(default_factory=list)
+    detailed_problems: list[str] = field(default_factory=list)
+    research_problems: list[str] = field(default_factory=list)
 
     @property
     def figures_match(self) -> bool:
@@ -370,12 +371,15 @@ async def write_draft(facts: dict, angle: str, focus: list[str], run: RunFn | No
     dashboard = compose(answer, evidence, next_step)
     from fund_performance.agents.investment_analyst import context_numbers
     check_facts = facts | {"provisional_context": context_numbers(fund_context), "research_sources": sources or []}
-    extra_text = "\n".join(detailed + research)
-    extra_problems = ([f"additional narrative: {p}" for p in text_problems(_CITE.sub("", extra_text), check_facts)]
-                      + citation_problems(extra_text, sources)
-                      + (["additional narrative: no web addresses"] if _URL.search(extra_text) else []))
+    def narrative_problems(parts: list[str], label: str) -> list[str]:
+        text = "\n".join(parts)
+        return ([f"{label}: {p}" for p in text_problems(_CITE.sub("", text), check_facts)]
+                + [f"{label}: {p}" for p in citation_problems(text, sources)]
+                + ([f"{label}: no web addresses"] if _URL.search(text) else []))
     return Draft(angle, dashboard, draft_problems(answer, check_facts, max_chars, evidence, next_step, sources),
                  rewritten=bool(issues), market_context=market, context_problems=context_problems(market, check_facts, sources),
                  tools_used=used, answer=answer, evidence=evidence, next_step=next_step, executive=executive,
                  executive_problems=executive_problems(executive, check_facts, sources, dashboard),
-                 detailed_analysis=detailed, research_narrative=research, additional_problems=extra_problems)
+                 detailed_analysis=detailed, research_narrative=research,
+                 detailed_problems=narrative_problems(detailed, "detailed narrative"),
+                 research_problems=narrative_problems(research, "research narrative"))

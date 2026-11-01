@@ -84,6 +84,36 @@ def test_four_sections_show_question_separate_assessments_and_partial_evidence()
     assert 'No vetted research' in views['portfolio'] and 'Returns to' in views['performance']
 
 
+def test_sourced_allocation_bars_and_qualitative_fallback():
+    from fund_performance.dashboard import dashboard_sections
+    d = data()
+    d['presentation_context'] = {'fund_context': {'portfolio_exposures': {
+        'sectors': [{'name': 'Technology', 'weight_pct': 25, 'source': 'fund.pdf, page 1',
+                     'excerpt': 'Fund technology sector 25%', 'evidence_level': 'provisional'},
+                    {'name': 'Unverified', 'weight_pct': 40, 'source': 'fund.pdf',
+                     'excerpt': 'Fund sector 41%', 'evidence_level': 'provisional'},
+                    {'name': 'Benchmark weight', 'weight_pct': 50, 'source': 'index.pdf',
+                     'evidence_level': 'verified', 'subject': 'benchmark'}],
+        'regions': [{'name': 'Global diversification', 'weight_pct': None, 'source': 'fund.pdf'}]}}}
+    html = dashboard_sections(d)['portfolio']
+    assert "width:25%" in html and 'Sector allocation' in html and 'provisional' in html
+    assert "width:40%" not in html and "width:50%" not in html and 'Global diversification' in html
+
+
+def test_question_answer_preserves_requested_action_alongside_signoff():
+    from fund_performance.dashboard import dashboard_sections
+    d = data()
+    d['facts']['figures'][0]['source'] = 'ai_extracted'
+    d['facts']['data_flags'] = [{'check': 'repeated_prices', 'level': 'warning', 'message': 'Repeated price'}]
+    d['facts']['suggested_conclusion'] = {'source': 'ai', 'answer': 'The fund tracks its benchmark.',
+        'evidence': ['Tracking is close.'], 'next_step': 'Ask the manager about the fee.'}
+    d['presentation_context'] = {'question': '  Please assess the fund.\nExplain the risks.  '}
+    overview = dashboard_sections(d)['overview']
+    assert '  Please assess the fund.\nExplain the risks.  ' in overview
+    assert 'The fund tracks its benchmark.' in overview and 'Tracking is close.' in overview
+    assert 'Ask the manager about the fee.' in overview and 'Sign-off check' in overview
+
+
 def test_a_suggested_satisfied_with_open_data_issues_is_never_shown_as_final():
     html = text(dashboard_html(data(flags=[{"check": "x", "level": "warning", "message": "Gap in prices"}])))
     assert "Satisfied" in html and "Not final: review the data warnings first." in html

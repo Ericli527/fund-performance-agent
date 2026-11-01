@@ -15,6 +15,8 @@ The audience changes only how much is shown: the Investment Analyst view opens t
 leads with the summary and the decisions. Both show the same facts and ratings.
 """
 import base64
+import math
+import re
 from html import escape
 from fund_performance.plain import verdict_meaning, verdict_name
 from fund_performance.presentation import (NAVY, NOT_AVAILABLE, QUESTIONS, RATING_STYLE,  # noqa: F401
@@ -120,10 +122,14 @@ def _summary(data: dict, quality: EvidenceQuality, title: str = "Summary") -> st
         body = (f"<p class='fp-concern-title'>Answer</p><p class='fp-conclusion'>{escape(answer)}</p>"
                 + (f"<p class='fp-concern-title'>Supporting evidence</p>" + _list(evidence, "fp-evidence") if evidence else ""))
     else:
-        body = f"<p class='fp-concern-title'>Answer</p><p class='fp-conclusion'>{escape(concl.get('text', ''))}</p>"
-    step = next_step(facts)
+        answer = concl.get('text') or 'The answer is unavailable; review the scorecard and evidence below.'
+        body = f"<p class='fp-concern-title'>Answer</p><p class='fp-conclusion'>{escape(answer)}</p>"
+    check = next_step(facts)
+    step = concl.get("next_step") or check
     if step:
         body += f"<p class='fp-concern-title'>Recommended next step</p><p>{escape(step)}</p>"
+    if check and step != check:
+        body += f"<p class='fp-concern-title'>Sign-off check</p><p>{escape(check)}</p>"
     gaps, concerns = issue_groups(facts, data["reasons"])
     details = ""
     if concerns:
@@ -352,6 +358,36 @@ def dashboard_html(data: dict, audience: str = "analyst") -> str:
             f"<p class='fp-view'>{view}. Both views use the same figures and ratings.</p>{''.join(parts)}</div>")
 
 
+def _allocation_bars(exposures: dict) -> str:
+    """Display only sourced, unambiguous weights; extracted classifications remain provisional."""
+    sections = []
+    for key, heading in (("sectors", "Sector allocation"), ("regions", "Geographic allocation")):
+        bars = []
+        for row in exposures.get(key) or []:
+            if (not isinstance(row, dict) or not row.get("name") or not row.get("source")
+                    or row.get("subject") in ("benchmark", "peer", "unknown")):
+                continue
+            value = row.get("weight_pct")
+            level = row.get("evidence_level")
+            if (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+                    or not 0 <= value <= 100 or level not in ("verified", "provisional")):
+                continue
+            if level == "provisional":
+                numbers = re.findall(r'(?<![\d.])(\d+(?:\.\d+)?)\s*%', row.get('excerpt') or '')
+                if len(numbers) != 1 or abs(float(numbers[0]) - value) > 1e-9:
+                    continue
+            label = f"{row['name']} — {value:g}%"
+            source = str(row['source']) + ("; provisional, classification and date require verification"
+                                           if level == "provisional" else "")
+            bars.append(f"<div class='fp-allocation'><div class='fp-allocation-label'><span>{escape(str(row['name']))}</span>"
+                        f"<b>{value:g}%</b></div><div class='fp-allocation-track' role='img' aria-label='{escape(label, quote=True)}'>"
+                        f"<div class='fp-allocation-fill' style='width:{value:g}%'></div></div>"
+                        f"<div class='fp-metric-source'>{escape(source)}</div></div>")
+        if bars:
+            sections.append(f"<h4>{heading}</h4>" + "".join(bars))
+    return "".join(sections)
+
+
 def dashboard_sections(data: dict) -> dict[str, str]:
     """Four saved-result views; building or opening a view never runs an agent."""
     facts = data["facts"]
@@ -398,7 +434,7 @@ def dashboard_sections(data: dict) -> dict[str, str]:
                 exposure_items.append(f"{group.replace('_', ' ').title()}: {row.get('name', '')}{weight}"
                                       + (f" ({row['source']})" if row.get('source') else "")
                                       + (f" — {row['qualification']}" if row.get('qualification') else ""))
-    portfolio += "<div class='fp-card'><h3>Portfolio exposures</h3>" + (_list(exposure_items) or
+    portfolio += "<div class='fp-card'><h3>Portfolio exposures</h3>" + _allocation_bars(exposures) + (_list(exposure_items) or
         "<p class='fp-muted'>Exact portfolio exposures are unavailable; see the strategy description above.</p>") + "</div>"
     sources = []
     for item in research:
