@@ -111,8 +111,8 @@ def test_the_return_check_compares_price_returns_with_the_factsheet(library):
 def test_picking_a_demo_fills_the_quick_inputs_and_runs_offline(library):
     from fund_performance import web
     ui = web.build_ui()
-    cards = next(c for c in ui.blocks.values() if "fp-demo-cards" in (getattr(c, "elem_classes", None) or []))
-    assert [v for _, v in cards.choices] == ["sample", "absent", web.UPLOAD_OWN]     # an uninstalled case stays listed
+    cards = next(c for c in ui.blocks.values() if getattr(c, "label", None) == "Use a test case")
+    assert [v for _, v in cards.choices] == ["sample", "absent"]     # an uninstalled case stays listed
     on_demo = web.on_demo
     price, factsheet, kid, peers, json_files, options, info = on_demo("sample", web.QUICK)
     demo = find_demo("sample")
@@ -167,11 +167,10 @@ def test_without_the_private_files_the_real_cases_are_listed_but_never_replaced_
     from fund_performance import web
     monkeypatch.setenv(lib.DATA_ENV, str(tmp_path / "nothing"))
     ui = web.build_ui()
-    cards = next(c for c in ui.blocks.values() if "fp-demo-cards" in (getattr(c, "elem_classes", None) or []))
-    assert [v for _, v in cards.choices] == ["sample_index_fund", "fidelity_us", "vanguard_global", web.UPLOAD_OWN]
+    cards = next(c for c in ui.blocks.values() if getattr(c, "label", None) == "Use a test case")
+    assert [v for _, v in cards.choices] == ["sample_index_fund", "fidelity_us", "vanguard_global"]
     assert [label.split("\n")[0] for label, _ in cards.choices] == [
-        "Synthetic Demo", "Fidelity Index US P Acc GBP", "Vanguard FTSE Global All Cap Index Fund GBP Acc",
-        "Upload Your Own Fund"]
+        "Synthetic Demo", "Fidelity Index US P Acc GBP", "Vanguard FTSE Global All Cap Index Fund GBP Acc"]
     on_demo = web.on_demo
     price, _, _, _, json_files, _, info = on_demo("sample_index_fund", web.QUICK)
     assert web.run_offline(price, json_files) and "made-up data" in info and "every figure is invented" in info
@@ -190,28 +189,32 @@ def test_upload_your_own_fund_empties_the_boxes_and_a_mode_switch_never_clears_y
     fns = {f.name: f.fn for f in ui.fns.values()}
     out = web.on_demo(web.UPLOAD_OWN, web.QUICK)
     assert out[:5] == (None,) * 5 and "Upload your own fund" in out[6] and "not shared with other users" in out[6]
-    assert all(x == {"__type__": "update"} for x in fns["on_mode"](web.UPLOAD_OWN, web.LIVE))
+    assert "on_mode" not in fns
 
 
 def test_a_real_case_runs_the_live_ai_workflow_by_default_where_ai_runs_are_on(library, monkeypatch):
     from fund_performance import web
     real = lib.Demo(**{**MANIFEST, "id": "sample", "review_date": lib.date(2026, 9, 30)}, folder=library / "sample")
     monkeypatch.setattr(web, "find_demo", lambda demo_id: real if demo_id == "sample" else None)
-    on_case = next(f for f in web.build_ui().fns.values() if f.name == "on_case").fn
+    choose = next(f for f in web.build_ui().fns.values() if f.name == "choose_case").fn
     monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-real")
+    monkeypatch.setenv("AI_RUNS_ENABLED", "true")
     monkeypatch.delenv("PORT", raising=False)
     monkeypatch.delenv(web.OFFLINE_ENV, raising=False)
-    *boxes, mode = on_case("sample", web.QUICK)
-    assert mode == web.LIVE and boxes[1] is not None and boxes[4] is None       # the documents, read by the agents
-    assert not web.run_offline(boxes[0], boxes[4])
+    state, table, picked, mode, status = choose("sample")
+    assert mode == web.LIVE and picked == "sample" and any(e["role"] == "Fund factsheet" for e in state)
+    assert all(e["role"] != "Prevalidated demo input" for e in state)
+    (library / "sample" / "quick" / "peer.json").unlink()
+    state, table, picked, mode, status = choose("sample")
+    assert picked == "sample" and mode == web.LIVE  # live documents do not require quick-mode JSON
+    shutil.copy(SAMPLE / "peer.json", library / "sample" / "quick" / "peer.json")
     monkeypatch.delenv("OPENAI_API_KEY")
-    *boxes, mode = on_case("sample", web.LIVE)
-    assert mode == web.QUICK and boxes[4] is not None                           # AI off: the prevalidated inputs
-    synthetic = lib.Demo(**{**MANIFEST, "id": "sample", "fallback": True, "review_date": lib.date(2026, 9, 30)},
-                         folder=library / "sample")
+    state, table, picked, mode, status = choose("sample")
+    assert not state and picked is None and "unavailable" in status
+    synthetic = lib.Demo(**{**MANIFEST, "id": "sample", "fallback": True, "review_date": lib.date(2026, 9, 30)}, folder=library / "sample")
     monkeypatch.setattr(web, "find_demo", lambda demo_id: synthetic)
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-real")
-    assert on_case("sample", web.LIVE)[-1] == web.QUICK                         # the synthetic demo: no AI by default
+    state, table, picked, mode, status = choose("sample")
+    assert mode == web.QUICK and any(e["role"] == "Prevalidated demo input" for e in state)
 
 
 # The real demos: private files, local only

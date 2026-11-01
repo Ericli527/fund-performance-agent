@@ -127,6 +127,7 @@ REVIEW_TYPES = {      # value: (title, subtitle, the review question it fills in
                     "How has this fund performed against its benchmark, and does it track it closely enough?"),
     "fees_value": ("Fees & Value", "Costs and peer comparison",
                    "Are this fund's fees justified, and does it give investors value compared with similar funds?"),
+    "custom": ("Custom Question", "Ask your own question", "What would you like to know about this fund?"),
 }
 DEFAULT_REVIEW = "overall"
 UI_QUESTION = REVIEW_TYPES[DEFAULT_REVIEW][2]
@@ -446,7 +447,7 @@ def _download(result: RunResult, pdf: Path | None) -> str | None:
 
 async def start_review(question: str, price, factsheet, kid, peer_factsheets, json_files, offline: bool,
                        limits: AiLimits, on_step: Progress | None = None, out_root: Path = RUNS,
-                       runner=run_review, reader=read_documents) -> Outcome:
+                       runner=run_review, reader=read_documents, benchmark_inputs: dict | None = None) -> Outcome:
     """ "Run the review": JSON files run straight away; documents are read, checked by code, then run """
     price, factsheet, kid = map(_one, (price, factsheet, kid))
     peers = _many(peer_factsheets)
@@ -523,6 +524,7 @@ async def start_review(question: str, price, factsheet, kid, peer_factsheets, js
             prepare_inputs([price], folder)
             return await _run_controller(folder, question, False, on_step, out_root, runner,
                                          intake=intake | {"rows": built.rows,
+                                                          "benchmark_inputs": benchmark_inputs or {},
                                                           "flags": intake.get("flags", []) + built.flags})
         finally:
             limits.finish()
@@ -645,7 +647,7 @@ def demo_banner(price, json_files, picked: str | None, mode: str) -> dict | None
     if (demo := matching_demo(price, json_files)):
         return {"label": "Quick Demo", "fund": demo.fund_name, "evidence": EVIDENCE_WORDS[QUICK], "notice": demo.notice}
     demo = find_demo(picked) if picked else None
-    if demo and mode == LIVE and demo.available and _one(price) and \
+    if demo and mode == LIVE and demo.live_files["price"].is_file() and _one(price) and \
             Path(_one(price)).read_bytes() == demo.live_files["price"].read_bytes():
         return {"label": "Live AI Demo", "fund": demo.fund_name, "evidence": EVIDENCE_WORDS[LIVE], "notice": demo.notice}
     return None
@@ -692,7 +694,7 @@ def example_zip() -> str:
 
 
 NAVY_TEXT, BLUE, BLUE_DARK, BORDER, MUTED = NAVY, "#3d6098", "#2f4c7a", "#dde3ea", "#5b6878"
-ICONS = {"overall": "◎", "performance": "↗", "fees_value": "£"}
+ICONS = {"overall": "◎", "performance": "↗", "fees_value": "£", "custom": "?"}
 
 CSS = f"""
 .gradio-container {{ max-width: 1040px !important; margin: 0 auto !important; font-size: 15.5px;
@@ -708,7 +710,7 @@ CSS = f"""
 .fp-bad {{ color: #a33a2f; font-size: 13.5px; font-weight: 500; }}
 
 /* What would you like to analyse: radio buttons drawn as cards (still radio inputs, so keyboard accessible) */
-.fp-cards .wrap {{ display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }}
+.fp-cards .wrap {{ display: grid !important; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }}
 .fp-demo-cards .wrap {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
 .fp-demo-info {{ margin-top: 10px; }} .fp-demo-info h3 {{ margin: 2px 0 4px 0; }}
 .fp-demo-info p {{ margin: 4px 0; font-size: 14px; }} .fp-demo-info summary {{ cursor: pointer; color: {NAVY_TEXT}; font-weight: 600; margin-top: 6px; }}
@@ -815,7 +817,7 @@ def theme() -> gr.themes.Base:
 
 
 DETAILED_LABEL = "Detailed Report (PDF)"
-EXECUTIVE_LABEL = "Executive Report (PDF, 2 pages)"
+EXECUTIVE_LABEL = "Executive Report (PDF)"
 
 
 def download_buttons(data: dict, audience: str) -> tuple[dict, dict]:
@@ -834,157 +836,188 @@ def _card(value: str) -> str:
 
 
 def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
+    from fund_performance.attachments import (BENCHMARK, CONFIRM, DEMO_INPUT, FACTSHEET, KID, PEER, PRICE,
+                                              add_files, apply_roles, engine_inputs, rows, validate)
     limits = limits or AiLimits(load_settings().web)
     web_settings = load_settings().web
     cleanup = (web_settings.cache_cleanup_minutes * 60, int(web_settings.keep_runs_hours * 3600))
     with gr.Blocks(title="Fund Performance Review", delete_cache=cleanup) as ui:
         gr.HTML("<div class='fp-header'><h1>Fund Performance Review</h1>"
-                "<p>Clear insights for better investment oversight.</p></div>")
-
-        # A. What to analyse (fills in the review question; never changes a calculation)
-        gr.HTML("<h2>What would you like to analyse?</h2>", elem_classes="fp-section-title")
-        review_type = gr.Radio([(_card(v), v) for v in REVIEW_TYPES], value=DEFAULT_REVIEW, show_label=False,
-                               container=False, elem_classes="fp-cards", label="What would you like to analyse?")
-        gr.Markdown(REVIEW_HELP, elem_classes="fp-help")
-
-        # B. Review question
-        question = gr.Textbox(label="Review question", value=UI_QUESTION, lines=2,
-                              info="Edit it if you like. The agents use it to decide what to focus on.")
-
-        # C. Choose a test case: the synthetic demo, the real-fund cases (listed even when not installed) or your own
-        cases = selectable_cases()
-        gr.HTML("<h2>Choose a test case</h2>", elem_classes="fp-section-title")
-        demo_choice = gr.Radio([(demo_card(d), d.id) for d in cases] + [(UPLOAD_CARD, UPLOAD_OWN)], value=None,
-                               show_label=False, container=False, elem_classes=["fp-cards", "fp-demo-cards"],
-                               label="Choose a test case")
-        demo_mode = gr.Radio([(label, value) for value, label in DEMO_MODES.items()], value=QUICK,
-                             label="How to run the case", elem_classes="fp-segmented", visible=live_demo_allowed())
-        demo_info = gr.HTML()
-
-        # D. Fund documents
-        gr.HTML("<h2>Fund documents</h2>", elem_classes="fp-section-title")
-        with gr.Row(equal_height=True):
-            with gr.Column(min_width=280):
-                price = gr.File(label="Fund price data · CSV or Excel · Required", file_types=PRICE_TYPES,
-                                type="filepath", height=150)
-                price_status = gr.HTML()
-            with gr.Column(min_width=280):
-                factsheet = gr.File(label=FACTSHEET_LABEL, file_types=DOC_TYPES,
-                                    type="filepath", height=150)
-                factsheet_status_line = gr.HTML()
-
-        # D. Report audience (recorded only in this version)
-        audience = gr.Radio([(label, value) for value, label in AUDIENCES.items()], value="analyst",
-                            label="Report audience", info=AUDIENCE_HELP, elem_classes="fp-segmented")
-
-        # E. Additional options
-        with gr.Accordion("Additional options", open=False) as options:
-            with gr.Row():
-                with gr.Column(min_width=280):
-                    kid = gr.File(label="KID or prospectus · PDF or Word · Optional", file_types=DOC_TYPES,
-                                  type="filepath")
-                    kid_status = gr.HTML()
-                with gr.Column(min_width=280):
-                    peer = gr.File(label="Peer fund factsheets · PDF or Word · Optional (approved peers are built in)",
-                                   file_count="multiple", file_types=DOC_TYPES, type="filepath")
-                    peer_status = gr.HTML()
-            json_files = gr.File(label="Advanced: JSON inputs (fund_profile.json, factsheet_performance.json, "
-                                       "peer.json) · skip the AI reading step", file_count="multiple",
-                                 file_types=[".json"], type="filepath")
-
-        # F. Actions, the privacy note and help
-        run = gr.Button("Run Fund Review", variant="primary", elem_classes="fp-run")
+                "<p>Ask a question about a fund and review the evidence.</p></div>")
         gr.HTML(f"<div class='fp-notice' role='note'>{PUBLIC_DATA_HTML}</div>")
+        review_type = gr.Radio([(_card(v), v) for v in REVIEW_TYPES], value=DEFAULT_REVIEW, show_label=False,
+                               container=False, elem_classes="fp-cards", label="Question type")
+        gr.Markdown(REVIEW_HELP, elem_classes="fp-help")
+        with gr.Row():
+            question = gr.Textbox(label="Review question", value=UI_QUESTION, lines=2, scale=8)
+            add = gr.Button("+ Add", scale=1)
+        with gr.Column(visible=False) as add_menu:
+            upload = gr.UploadButton("Upload your own files", file_count="multiple", file_types=PRICE_TYPES + DOC_TYPES,
+                                     type="filepath")
+            cases = selectable_cases()
+            demo_choice = gr.Dropdown([(demo_card(d), d.id) for d in cases], label="Use a test case", value=None)
+        entries = gr.State([])
+        demo_state = gr.State(None)
+        mode_state = gr.State(QUICK)
+        attachments = gr.Dataframe(headers=["ID", "File", "Role", "Notes", "Document date"], datatype=["str"] * 5,
+                                   value=[], type="array", interactive=True, row_count=0,
+                                   column_count=(5, "fixed"), label="Attachments")
+        gr.Markdown("Edit the Role cell to **Price history**, **Fund factsheet**, **KID/KIID**, or **Peer factsheet**. "
+                    "Set a role to **Benchmark evidence** for a separate series or document. Delete a row to remove it; "
+                    "upload again to replace it. Confirm ambiguous files before running.")
+        with gr.Column(visible=False) as benchmark_fields:
+            gr.Markdown("For a separate benchmark series, confirm its name, currency and pricing time. For benchmark documents, "
+                        "enter each document's publication or as-at date in its row as YYYY-MM-DD for source checks.")
+            benchmark_name = gr.Textbox(label="Benchmark name")
+            benchmark_currency = gr.Textbox(label="Benchmark currency (three-letter code)")
+            benchmark_pricing = gr.Dropdown([('Noon', 'midday'), ('Market close', 'market_close')],
+                                            label="Benchmark series pricing time", value=None)
+            benchmark_confirmed = gr.Checkbox(label="I confirm the benchmark series name, currency and pricing time")
+        case_info = gr.Markdown()
+        attachment_status = gr.Markdown()
+        run = gr.Button("Run Fund Review", variant="primary", interactive=False, elem_classes="fp-run")
         with gr.Accordion("Help & methodology", open=False):
-            gr.Markdown(INSTRUCTIONS)
-            gr.Markdown(FILES_TABLE)
-            gr.DownloadButton("Download example input files (a made-up fund)", value=example_zip(), size="sm")
-            gr.Markdown("### How the agent works")
+            gr.Markdown("Upload the fund price history and factsheet. A KID and peer factsheets are optional. "
+                        "The synthetic case uses prevalidated inputs. All four ratings are always calculated.")
             gr.HTML(how_it_works_html())
-
-        # Results (stage 2): hidden until a review finishes
         progress = gr.Markdown(elem_classes="fp-progress")
         message = gr.Markdown()
-        result_state = gr.State(None)
         with gr.Column(visible=False) as results:
-            gr.HTML("<h2>Results</h2>", elem_classes="fp-section-title")
-            with gr.Row():
-                pdf = gr.DownloadButton(DETAILED_LABEL, variant="primary", elem_classes="fp-download")
-                executive_pdf = gr.DownloadButton(EXECUTIVE_LABEL, variant="secondary", elem_classes="fp-download")
             dashboard = gr.HTML()
+            with gr.Row():
+                executive_pdf = gr.DownloadButton(EXECUTIVE_LABEL, variant="primary", elem_classes="fp-download")
+                pdf = gr.DownloadButton(DETAILED_LABEL, variant="secondary", elem_classes="fp-download")
             with gr.Accordion("Technical details", open=False):
                 technical = gr.HTML()
                 log = gr.File(label="Run log (log.json)", interactive=False)
-                gr.Markdown("**Plain-text summary** (the same results as text, for copying)")
                 plain = gr.Markdown()
 
-        def show(outcome: Outcome, audience_value: str):
-            """ The page's outputs for a finished review, or for a message when it could not run """
-            if outcome.data is None:
-                return (outcome.message, gr.update(visible=False), "", gr.update(value=None), gr.update(value=None),
-                        "", None, "", None)
-            data = outcome.data | {"pdf": outcome.pdf, "executive_pdf": outcome.executive}
-            detailed, executive = download_buttons(data, audience_value)
-            return ("", gr.update(visible=True), dashboard_html(data, audience_value), detailed, executive,
-                    technical_html(data), outcome.log, outcome.message, data)
+        def benchmark_details(selected, name, currency, confirmed, pricing):
+            files = [e for e in selected if e['role'] == BENCHMARK]
+            series = [e['path'] for e in files if Path(e['path']).suffix.lower() in PRICE_TYPES]
+            docs = [{'path': e['path'], 'date': e.get('document_date', '')} for e in files
+                    if Path(e['path']).suffix.lower() in DOC_TYPES]
+            problems = []
+            if series and (not confirmed or not (name or '').strip() or not re.fullmatch(r'[A-Za-z]{3}', (currency or '').strip())
+                           or pricing not in ('midday', 'market_close')):
+                problems.append("Confirm the benchmark series name, three-letter currency and pricing time.")
+            for doc in docs:
+                try:
+                    date.fromisoformat(doc['date'])
+                except ValueError:
+                    problems.append(f"Enter {Path(doc['path']).name}'s document date as YYYY-MM-DD in its row.")
+            return {'series': series[0] if series else None, 'documents': docs, 'name': name,
+                    'currency': currency, 'confirmed': confirmed, 'pricing_point': pricing}, problems
 
-        async def on_run(q, p, f, k, pr, j, audience_value, picked, mode):
-            hidden = gr.update(visible=False)
-            yield "Starting…", "", hidden, "", gr.update(value=None), gr.update(value=None), "", None, "", None
-            offline = run_offline(p, j)
-            banner = demo_banner(p, j, picked, mode)
-            tag = demo_tag(p, j, picked, mode)
-            history: list[str] = []
-            async for kind, item in with_progress(lambda say: start_review(q, p, f, k, pr, j, offline, limits, say)):
+        def update_status(q, state, table, demo_id, name='', currency='', confirmed=False, pricing=None):
+            selected, error = apply_roles(state or [], table)
+            demo = find_demo(demo_id) if demo_id else None
+            synthetic = bool(demo and demo.fallback)
+            issues = ([error] if error else validate(q, selected, synthetic))
+            if not error:
+                _, meta_issues = benchmark_details(selected, name, currency, confirmed, pricing)
+                issues += meta_issues
+            if synthetic and not issues:
+                p, _, _, _, j = engine_inputs(selected)
+                if not uses_demo_files(p, j):
+                    issues.append("The synthetic demo inputs have changed; reload the test case.")
+            if not synthetic and not live_demo_allowed():
+                issues.append("Live AI is unavailable in this environment. The synthetic demo is still available.")
+            info = "\n".join(f"- {x}" for x in issues) if issues else "Files ready. KID and peer factsheets are optional."
+            return info, gr.update(interactive=not issues)
+
+        def upload_files(paths, state, table):
+            existing, error = apply_roles(state or [], table)
+            if error:
+                return state, table, None
+            # Renumber after deletions so every row identifies one server-side file.
+            existing = [e | {'id': str(i)} for i, e in enumerate(existing, 1)]
+            updated = add_files(existing, paths)
+            return updated, rows(updated), None
+
+        def choose_case(demo_id):
+            demo = find_demo(demo_id) if demo_id else None
+            if not demo:
+                return [], [], None, QUICK, "Choose a test case."
+            mode = QUICK if demo.fallback else LIVE
+            files = demo.quick_files if demo.fallback else demo.live_files
+            wanted = [files['price']]
+            if demo.fallback:
+                wanted += files['json']
+            else:
+                wanted += [files['factsheet']] + ([files['kid']] if files['kid'] else []) + files['peers']
+            missing = [str(p.relative_to(demo.folder)) for p in wanted if not p.is_file()]
+            if missing:
+                return [], [], None, mode, f"{demo.title} is unavailable: " + ", ".join(missing)
+            if mode == LIVE and not live_demo_allowed():
+                return [], [], None, mode, f"{demo.title} requires Live AI, which is unavailable here."
+            d = demo_inputs(demo, mode)
+            items = [(d['price'], PRICE), (d['factsheet'], FACTSHEET), (d['kid'], KID)]
+            items += [(p, PEER) for p in d['peer'] or []] + [(p, DEMO_INPUT) for p in d['json'] or []]
+            state = [{'id': str(i), 'path': p, 'role': role, 'issue': ''}
+                     for i, (p, role) in enumerate((x for x in items if x[0]), start=1)]
+            return state, rows(state), demo_id, mode, f"{demo.title} loaded."
+
+        async def on_run(q, state, table, demo_id, mode, name='', currency='', confirmed=False, pricing=None):
+            selected, error = apply_roles(state or [], table)
+            demo = find_demo(demo_id) if demo_id else None
+            synthetic = bool(demo and demo.fallback)
+            issues = [error] if error else validate(q, selected, synthetic)
+            benchmark, meta_issues = benchmark_details(selected, name, currency, confirmed, pricing)
+            issues += meta_issues
+            if synthetic and not issues:
+                price, _, _, _, jsons = engine_inputs(selected)
+                if not uses_demo_files(price, jsons):
+                    issues.append("The synthetic demo inputs have changed; reload the test case.")
+            if issues:
+                yield "", "\n".join(f"- {x}" for x in issues), gr.update(visible=False), "", gr.update(value=None), gr.update(value=None), "", None, ""
+                return
+            price, factsheet, kid, peer, jsons = engine_inputs(selected)
+            offline = run_offline(price, jsons)
+            history = []
+            yield "Starting…", "", gr.update(visible=False), "", gr.update(value=None), gr.update(value=None), "", None, ""
+            def work(say):
+                if benchmark['series'] or benchmark['documents']:
+                    return start_review(q, price, factsheet, kid, peer, jsons, offline, limits, say,
+                                        benchmark_inputs=benchmark)
+                return start_review(q, price, factsheet, kid, peer, jsons, offline, limits, say)
+            async for kind, item in with_progress(work):
                 if kind == "progress":
                     history = progress_history(history, item)
-                    yield (progress_markdown(history),) + (gr.update(),) * 9
+                    yield (progress_markdown(history),) + (gr.update(),) * 8
+                elif item.data is None:
+                    yield progress_markdown(history), item.message, gr.update(visible=False), "", gr.update(value=None), gr.update(value=None), "", None, ""
                 else:
-                    if tag:
-                        item.message = f"{tag}\n\n{item.message}"
-                    if banner and item.data is not None:
-                        item.data = item.data | {"demo": banner}
-                    shown = show(item, audience_value)
-                    done = progress_markdown(history, item.run_info) if history else ""
-                    yield (done,) + shown
+                    banner = demo_banner(price, jsons, demo_id, mode)
+                    data = item.data | {"pdf": item.pdf, "executive_pdf": item.executive}
+                    if banner:
+                        data['demo'] = banner
+                    if not synthetic:
+                        data['attachment_limitations'] = (["No KID was supplied; the objective is taken from the supplied factsheet where available."] if not kid else []) + (
+                            ["No peer factsheet was uploaded; approved peers are used only when available."] if not peer else [])
+                    detailed, executive = download_buttons(data, "analyst")
+                    tech = technical_html(data) + (f"<p>{escape(item.run_info)}</p>" if item.run_info else "")
+                    yield progress_markdown(history), "", gr.update(visible=True), dashboard_html(data, "analyst"), executive, detailed, tech, item.log, item.message
 
-        def on_audience(data, audience_value):
-            """ A new view and a new primary download from the saved results: the review is not run again """
-            if not data:
-                return gr.update(), gr.update(), gr.update()
-            return (dashboard_html(data, audience_value),) + download_buttons(data, audience_value)
+        private = {"api_visibility": "private"}
+        review_type.change(lambda t: REVIEW_TYPES[t][2], review_type, question, **private)
+        add.click(lambda: gr.update(visible=True), outputs=add_menu, **private)
+        upload.upload(upload_files, [upload, entries, attachments], [entries, attachments, demo_state], **private)
+        demo_choice.change(choose_case, demo_choice, [entries, attachments, demo_state, mode_state, case_info], **private)
+        def show_benchmark(state, table):
+            selected, error = apply_roles(state or [], table)
+            return gr.update(visible=not error and any(e['role'] == BENCHMARK for e in selected))
 
-        private = {"api_visibility": "private"}         # the page is the only way in, with its limits
-        review_type.change(question_for, inputs=[review_type, question], outputs=question, **private)
-        for box, status_box, allowed, kinds in ((price, price_status, PRICE_TYPES, "CSV or Excel"),
-                                                (kid, kid_status, DOC_TYPES, "PDF or Word"),
-                                                (peer, peer_status, DOC_TYPES, "PDF or Word")):
-            box.change(lambda v, a=allowed, k=kinds: file_status(v, a, k), inputs=box, outputs=status_box, **private)
-        for box in (factsheet, json_files):         # the factsheet's line depends on the JSON inputs too
-            box.change(factsheet_status, inputs=[factsheet, json_files], outputs=factsheet_status_line, **private)
-
-        def on_case(demo_id, mode):
-            """ A real-fund case runs the full Live AI workflow by default where AI runs are on; the synthetic demo
-            runs its prevalidated inputs. The analyst can still switch the mode """
-            demo = find_demo(demo_id) if demo_id and demo_id != UPLOAD_OWN else None
-            mode = LIVE if demo and not demo.fallback and live_demo_allowed() else QUICK
-            return on_demo(demo_id, mode) + (mode,)
-
-        demo_choice.change(on_case, inputs=[demo_choice, demo_mode],
-                           outputs=[price, factsheet, kid, peer, json_files, options, demo_info, demo_mode], **private)
-        def on_mode(demo_id, mode):
-            """ Switching Quick / Live reloads the chosen case; it never touches your own uploaded files """
-            if not demo_id or demo_id == UPLOAD_OWN:
-                return (gr.update(),) * 7
-            return on_demo(demo_id, mode)
-
-        demo_mode.change(on_mode, inputs=[demo_choice, demo_mode],
-                         outputs=[price, factsheet, kid, peer, json_files, options, demo_info], **private)
-        run.click(on_run, inputs=[question, price, factsheet, kid, peer, json_files, audience, demo_choice, demo_mode],
-                  outputs=[progress, message, results, dashboard, pdf, executive_pdf, technical, log, plain,
-                           result_state], **private)
-        audience.change(on_audience, inputs=[result_state, audience], outputs=[dashboard, pdf, executive_pdf],
-                        **private)
+        for control in (attachments, entries):
+            control.change(show_benchmark, [entries, attachments], benchmark_fields, **private)
+        for control in (question, attachments, entries, demo_state, benchmark_name, benchmark_currency,
+                        benchmark_confirmed, benchmark_pricing):
+            control.change(update_status, [question, entries, attachments, demo_state, benchmark_name,
+                                           benchmark_currency, benchmark_confirmed, benchmark_pricing],
+                           [attachment_status, run], **private)
+        run.click(on_run, [question, entries, attachments, demo_state, mode_state, benchmark_name,
+                           benchmark_currency, benchmark_confirmed, benchmark_pricing],
+                  [progress, message, results, dashboard, executive_pdf, pdf, technical, log, plain], **private)
     return ui
 
 

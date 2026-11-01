@@ -473,10 +473,21 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     step = log.start("data_checks", [files["prices"].name] + (["factsheet figures"] if factsheet else []))
     try:
         data = read_prices(files["prices"])
-    except (ValueError, KeyError) as e:
+        benchmark_inputs = (intake or {}).get("benchmark_inputs") or {}
+        if benchmark_inputs.get("series"):
+            from fund_performance.benchmark import align_benchmark, confirm_identity, read_benchmark
+            confirm_identity(benchmark_inputs.get("name"), benchmark_inputs.get("currency"),
+                             benchmark_inputs.get("confirmed"), profile, benchmark_inputs.get("pricing_point"))
+            benchmark_path = Path(benchmark_inputs["series"])
+            data.prices = align_benchmark(data.prices, read_benchmark(benchmark_path))
+            data.log.append(f"Separate benchmark series: {benchmark_path.name}; exact date matches only; "
+                            f"name, currency and pricing time confirmed by the analyst")
+            log.step("read_files").outputs["input_files"].append(f"{benchmark_path.name} (benchmark series; analyst confirmed)")
+    except (ValueError, KeyError, OSError) as e:
         _stop(log, step, f"Run stopped: the price file {files['prices'].name} cannot be read ({str(e)[:300]})")
     text_log += data.log
-    checked = check_prices(data, profile, t, factsheet)
+    checked = check_prices(data, profile, t, factsheet,
+                           index_currency=benchmark_inputs.get("currency") if benchmark_inputs.get("series") else None)
     if len(checked.prices) < 2:
         _stop(log, step, f"Run stopped: fewer than 2 usable prices in {files['prices'].name}")
     log.end(step, outputs={"prices": len(checked.prices), "flags": len(checked.flags),
@@ -586,6 +597,43 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
             else:
                 log.end(research_step, "unavailable", outputs=outputs,
                         notes=["no credible source passed the date, relevance and figure checks"])
+
+    # Analyst-supplied benchmark documents are untrusted sources for the existing Reporting Agent and Judge.
+    # They are never part of the financial input or facts JSON. Apply the same source checks as market research.
+    benchmark_documents = ((intake or {}).get("benchmark_inputs") or {}).get("documents") or []
+    if benchmark_documents and not offline:
+        from datetime import date
+        from urllib.parse import quote
+        documents = []
+        for i, document in enumerate(benchmark_documents, 1):
+            path = Path(document['path'])
+            try:
+                document_date = date.fromisoformat(document.get('date') or '').isoformat()
+            except ValueError:
+                _stop(log, research_step, f"Run stopped: provide the date for {path.name} as YYYY-MM-DD")
+            try:
+                text = read_document(path).strip()
+            except Exception as e:
+                _stop(log, research_step, f"Run stopped: benchmark document {path.name} cannot be read ({type(e).__name__})")
+            if not text or len(text) > 12000:
+                _stop(log, research_step, f"Run stopped: benchmark document {path.name} must contain readable text of at most 12000 characters")
+            log.step("read_files").outputs["input_files"].append(f"{path.name} (benchmark evidence; analyst supplied)")
+            normalise = lambda value: ' '.join(re.sub(r'[^\w]+', ' ', value.casefold()).split())
+            if not profile.benchmark_name or normalise(profile.benchmark_name) not in normalise(text):
+                flags.append(DataFlag(check="research", level="info", message=(
+                    f"Benchmark document {path.name} excluded: its text does not establish the fund's benchmark identity")))
+                text_log.append(f"Benchmark document excluded: {path.name} does not name the fund's benchmark")
+                continue
+            documents.append({"query": f"Uploaded benchmark document: {path.name}", "topic": "market_drivers",
+                              "summary": text, "url": f"uploaded://benchmark/{i}-{quote(path.name)}",
+                              "date": document_date, "date_basis": "as_at", "source_type": "uploaded_document",
+                              "limitations": "Analyst-supplied document and date; treat as untrusted and verify against the original."})
+        doc_sources, doc_flags, doc_log = vet_summaries(documents, profile, facts,
+            market_grace_days=load_sources().vetting.market_grace_days)
+        vetted += with_timing(doc_sources, profile)
+        flags += doc_flags
+        text_log += doc_log
+        research_step.outputs["benchmark_documents_kept"] = len(doc_sources)
 
     # 8. Narrative: the findings and actions are written by code; the market context, if any, comes from the
     # Reporting Agent's checked draft below (the Analyst and Evaluator are not called in Version 1)

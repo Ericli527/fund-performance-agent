@@ -53,25 +53,27 @@ cp .env.example .env            # add your OPENAI_API_KEY
 python app.py                   # opens on http://127.0.0.1:7860
 ```
 
-Pick a case under **Choose a test case** and click **Run Fund Review**: **Synthetic Demo** (made-up data, in the
-repository), **Fidelity Index US P Acc GBP**, **Vanguard FTSE Global All Cap Index Fund GBP Acc** or **Upload Your Own
-Fund**. A real-fund case runs the full Live AI workflow where AI runs are on (else its prevalidated Quick inputs, no
-AI). The real cases' files are private (`data/demos/`, or the folder in `FUND_DEMO_DATA`; see
-`docs/TEST_CASES.md`): a case whose files are missing is still listed, says which files are missing, and is never
-replaced by made-up data. With
-`APP_USERNAME` and `APP_PASSWORD` set in `.env`, the page asks for them before it opens; on your own computer you
-can leave them blank (no login).
+Choose a question type and edit the question. Use **+ Add** to upload multiple public documents or choose a test
+case. The attachment table shows detected roles; confirm ambiguous documents, correct roles, or delete a row before
+running. A fund price history and main factsheet are required for a live review; a KID and peer factsheets are
+optional. Separate benchmark series may be uploaded as CSV/Excel with date and index-level columns; confirm the
+benchmark name, currency and pricing time. The name, currency and pricing time must match the fund profile. Dates must
+match the fund price dates exactly, and a separate series cannot replace an
+index already present in the fund price file. Benchmark PDF/Word documents may be attached as evidence with a
+publication/as-at date for each document; they are checked for date, relevance and conflicting return figures, treated
+as untrusted source material, and do not supply calculation inputs. The analyst supplies the document dates; confirm
+them against the original documents. Documents whose date, relevance or return figures fail the existing source checks
+are excluded. Benchmark documents must contain readable text of at most 12,000 characters each.
 
-AI is off unless `AI_RUNS_ENABLED=true` (in `.env` locally; on a server the login must be set as well). Without
-the private demo files (as on Render), the demo is a made-up fund.
+The Synthetic Demo uses prevalidated inputs and runs without AI. Fidelity and Vanguard appear even when their private
+files are missing, and missing cases are never replaced by synthetic data. Real-fund cases and custom uploads require
+Live AI. AI is off unless `AI_RUNS_ENABLED=true`; on a server a login is also required. With `APP_USERNAME` and
+`APP_PASSWORD` set in `.env`, the page asks for them before it opens. `FUND_REVIEW_OFFLINE=1` remains a development
+setting. The command-line JSON workflow remains available below.
 
-For a real fund: add the price file and the factsheet (KID and peer factsheets optional; for an S&P 500 fund the
-approved peers are used) and click **Run Fund Review**; code checks every value the agent read. The KID, peer
-factsheets and JSON inputs are under **Additional options**. When the review finishes, the page shows a dashboard (assessment, evidence quality, headline figures, items
-needing attention, the four ratings, details) and the PDF to download; choose **Management** for a short view or
-**Investment Analyst** for the full detail. There is no Offline switch on the page: the demo runs
-without AI, and for development `FUND_REVIEW_OFFLINE=1 python app.py` runs every review without AI.
-Put the approved peers' factsheets in `data/peers/` (gitignored; found by the ISIN).
+The results show the answer, supporting evidence, next step, suggested verdict, ratings and both PDF downloads.
+Data-quality warnings remain visible; detailed figures, sources and technical information can be expanded. Approved
+peer factsheets can also be placed in `data/peers/` (gitignored; found by ISIN).
 
 From the command line:
 
