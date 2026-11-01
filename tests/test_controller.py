@@ -75,8 +75,8 @@ def test_test1_offline_run_logs_every_step(tmp_path):
     result = asyncio.run(run_review(TEST1, out_root=tmp_path, offline=True))
     log = json.loads((result.run_dir / "log.json").read_text())
     assert [(s["step"], s["status"]) for s in log["steps"]] == [
-        ("read_files", "ok"), ("extractor", "skipped"), ("peers", "skipped"), ("plan", "skipped"), ("data_checks", "ok"),
-        ("mandate", "skipped"), ("research", "skipped"), ("calculator", "ok"), ("scorecard", "ok"),
+        ("read_files", "ok"), ("extractor", "skipped"), ("peers", "skipped"), ("data_checks", "ok"),
+        ("mandate", "skipped"), ("plan", "skipped"), ("research", "skipped"), ("calculator", "ok"), ("scorecard", "ok"),
         ("drafts", "skipped"), ("report", "ok"), ("email", "skipped")]
     assert log["run"]["status"] == "ok" and all(s["ended"] for s in log["steps"])
     assert log["steps"][8]["outputs"]["verdict"] == "Monitor until a peer is added"
