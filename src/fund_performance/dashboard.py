@@ -35,11 +35,13 @@ def dashboard_data(result) -> dict:
     output = narrative.output if narrative else None
     log = getattr(result, "log", None)
     flags = flag_dicts(getattr(result, "flags", []))
+    source_reader = getattr(log, "report_sources", None)
+    sources = source_reader()[1] if callable(source_reader) else (list(narrative.sources) if narrative else [])
     return {"facts": result.facts or {}, "reasons": dict(getattr(result, "reasons", {}) or {}),
             "findings": list(output.key_findings) if output else [],
             "actions": list(output.action_texts) if output else [],
             "market_context": output.market_context if output else None,
-            "sources": list(narrative.sources) if narrative else [],
+            "sources": sources,
             "flags": flags or [dict(f) for f in (result.facts or {}).get("data_flags", [])],
             "offline": bool(log.run.get("offline")) if log is not None else False}
 
@@ -108,7 +110,7 @@ def _summary(data: dict, quality: EvidenceQuality) -> str:
         body = (f"<p class='fp-concern-title'>Answer</p><p class='fp-conclusion'>{escape(answer)}</p>"
                 + (f"<p class='fp-concern-title'>Supporting evidence</p>" + _list(evidence, "fp-evidence") if evidence else ""))
     else:
-        body = f"<p class='fp-conclusion'>{escape(concl.get('text', ''))}</p>"
+        body = f"<p class='fp-concern-title'>Answer</p><p class='fp-conclusion'>{escape(concl.get('text', ''))}</p>"
     step = next_step(facts)
     if step:
         body += f"<p class='fp-concern-title'>Recommended next step</p><p>{escape(step)}</p>"
@@ -159,6 +161,7 @@ def _attention(data: dict, quality: EvidenceQuality, analyst: bool) -> str:
                   + [f"Reviewer check: {m}" for m in manual])
     if quality.ai_read and quality.level != "check":
         data_items.append("Figures were read from the documents by AI: check them against the factsheet.")
+    data_items += list(data.get("attachment_limitations") or [])
     actions = [report_action(a) for a in data.get("actions") or []]
     body = ""
     if data_items:
@@ -273,11 +276,13 @@ def _findings(data: dict) -> str:
         notes = [UNRELIABLE_WHY + ". The notes are kept in the Detailed Report (Appendix B), marked."]
     if notes:
         body += "<h4>Below the surface</h4>" + _list(notes)
+    sources = [f"[{s['number']}] {s.get('query', '')} ({s.get('date', '')}) {s.get('url', '')}"
+               for s in data.get("sources", [])]
     if data.get("market_context"):
-        sources = [f"[{s['number']}] {s.get('query', '')} ({s.get('date', '')}) {s.get('url', '')}"
-                   for s in data.get("sources", [])]
         body += (f"<h4>Market context (AI, checked)</h4><p>{escape(data['market_context'])}</p>"
                  + _list(sources, "fp-sources"))
+    elif sources:
+        body += "<h4>Research sources</h4>" + _list(sources, "fp-sources")
     return body
 
 
@@ -319,10 +324,11 @@ def dashboard_html(data: dict, audience: str = "analyst") -> str:
     facts = data["facts"]
     quality = evidence_quality(data)
     detail = _risk_rows(facts) + _statistics(facts) + _peers(facts) + _findings(data)
-    parts = [_header(data, quality), _summary(data, quality), "<div class='fp-card'>" + _returns_table(facts) + "</div>"]
+    parts = [_summary(data, quality), _header(data, quality), _ratings(data, analyst)]
     if not analyst:
         parts.append(_decisions(data, quality))
-    parts += [_metrics(facts), _attention(data, quality, analyst), _ratings(data, analyst)]
+    parts += [_attention(data, quality, analyst)]
+    detail = "<div class='fp-card'>" + _returns_table(facts) + "</div>" + _metrics(facts) + detail
     if analyst:
         parts.append(_details("Points for your judgement and questions for the manager", _judgement(facts), True))
         parts.append(_details("Detailed performance statistics and findings", detail, True))

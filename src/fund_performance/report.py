@@ -745,7 +745,8 @@ def _appendix(inp: ReportInputs, compact: bool, main_text: str = "") -> str:
                     + "</li>")
     sources += "".join(
         f"<li>[{s['number']}] {escape(s['query'])} · {'as at' if s.get('date_basis') == 'as_at' else 'published'} "
-        f"{s['date']} · {escape(s['url'])}</li>"
+        f"{s['date']} · {escape(s['url'])}"
+        f"{' · uploaded document and date supplied by analyst; verify against original' if s.get('source_type') == 'uploaded_document' else ''}</li>"
         for s in (inp.web_sources if inp.web_sources is not None else inp.narrative.sources))
     excl = ("".join(f"<li>{escape(f.message)}</li>" for f in excluded) or "<li>None.</li>")
     thresholds = "".join(f"<li>{escape(line)}</li>" for line in _threshold_lines(inp.thresholds)[: 4 if compact else None])
