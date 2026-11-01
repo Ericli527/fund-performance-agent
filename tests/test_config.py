@@ -72,7 +72,7 @@ def test_one_agent_can_reason_harder_than_its_model_default(tmp_path):
     from fund_performance.config import load_models
     data = yaml.safe_load(open(Path(__file__).resolve().parents[1] / "config" / "models.yaml"))
     m = load_models()
-    assert m.reasoning == {"reporter": "medium"}
+    assert m.reasoning == {"extractor": "medium", "mandate": "medium", "task_planner": "medium", "reporter": "medium"}
     assert m.for_agent("reporter")[1].reasoning_effort == "medium" and m.for_agent("judge")[1].reasoning_effort == "low"
     data["reasoning"] = {}
     (tmp_path / "models.yaml").write_text(yaml.safe_dump(data))
