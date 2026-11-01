@@ -801,11 +801,10 @@ CSS = f"""
 
 
 def theme() -> gr.themes.Base:
-    """ Light neutral background, navy text, a muted blue for actions and selections; Inter if the browser can load
-    it, else the system's sans-serif font """
+    """ Light neutral background, navy text, and locally available sans-serif fonts. """
     return gr.themes.Default(
         primary_hue=gr.themes.colors.blue, neutral_hue=gr.themes.colors.slate, radius_size=gr.themes.sizes.radius_lg,
-        font=[gr.themes.GoogleFont("Inter"), "ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto",
+        font=["Inter", "ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto",
               "Helvetica Neue", "Arial", "sans-serif"],
     ).set(
         body_background_fill="#f7f8fa", body_text_color="#1d2733", block_border_color=BORDER, block_shadow="none",

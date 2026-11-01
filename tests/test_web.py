@@ -442,3 +442,11 @@ def test_the_private_case_folder_is_the_only_extra_folder_the_page_may_serve(tmp
     assert seen["allowed_paths"] == [str(disk.resolve())]
     monkeypatch.setenv("FUND_DEMO_DATA", str(tmp_path / "missing"))
     assert web.case_paths() == []                                       # no folder: nothing extra is allowed
+
+
+def test_theme_does_not_require_external_fonts():
+    from fund_performance.web import theme
+
+    css = theme()._get_theme_css().lower()
+    assert "fonts.googleapis.com" not in css
+    assert "fonts.gstatic.com" not in css
