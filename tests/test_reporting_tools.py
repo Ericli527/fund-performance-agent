@@ -74,6 +74,17 @@ def test_the_scorecard_and_peer_tools():
     assert "no peer fund" in peer_comparison(FACTS | {"peers": []})["missing"]
 
 
+def test_scorecard_and_peer_evidence_distinguish_verdict_verification_and_eligibility():
+    facts = json.loads(json.dumps(FACTS))
+    facts['figures'][0]['source'] = 'ai_extracted'
+    facts['peers'][0].update(investor_type='institutional', minimum_investment='GBP 1,000,000')
+    card, peers = oversight_scorecard(facts), peer_comparison(facts)
+    assert card['verdict_code'] == 'Retain' and 'Suggested verdict' in card['verdict_sentence']
+    assert 'reader-facing' in card['verdict_explanation'] and 'before sign-off' in card['source_verification']
+    assert peers['peers'][0]['investor_type'] == 'institutional'
+    assert peers['peers'][0]['minimum_investment'] == 'GBP 1,000,000'
+
+
 # 2. The run context: this review's facts only, a private copy, and a call budget
 def test_the_context_is_a_private_copy_with_a_call_budget():
     ctx = ReviewContext.of(FACTS, max_calls=2)
@@ -217,6 +228,21 @@ def test_investment_analyst_invokes_existing_tools_in_sdk_loop(sdk_with):
     assert result['tool_calls'] == ['get_oversight_scorecard', 'get_research_sources']
     outputs = [item['output'] for item in model.inputs[1] if isinstance(item, dict) and item.get('type') == 'function_call_output']
     assert 'Retain' in outputs[0] and 'No vetted market research' in outputs[1]
+
+
+def test_analyst_revision_has_fresh_tool_budget_with_full_call_log(sdk_with):
+    from fund_performance.agents.investment_analyst import assess
+    from test_investment_analyst import BASE, PASS
+    from conftest import FakeRun
+    profile = FundProfile.model_validate(json.loads((Path(__file__).parent / 'fixtures' / 'fund_profile_sample.json').read_text()))
+    model = sdk_with(ScriptedModel([[('get_oversight_scorecard', {})] * 6, BASE,
+                                    [('get_peer_comparison', {})], BASE]))
+    review = FakeRun({'material_issue': True, 'security_issue': False, 'feedback': 'Qualify peer eligibility.'}, PASS)
+    result = asyncio.run(assess(FACTS, profile, [], 'Review', review_run=review))
+    outputs = [item['output'] for item in model.inputs[3]
+               if isinstance(item, dict) and item.get('type') == 'function_call_output']
+    assert result['status'] == 'available' and len(result['tool_calls']) == 7
+    assert outputs and LIMIT_REACHED not in outputs[-1] and 'Sample World Index Tracker B' in outputs[-1]
 
 
 def test_planner_receives_only_current_run_source_matched_exposures(sdk_with):

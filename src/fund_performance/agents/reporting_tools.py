@@ -98,6 +98,14 @@ def oversight_scorecard(facts: dict) -> dict:
     card = facts.get("scorecard") or {}
     return {
         "verdict_code": card.get("verdict"), "verdict_sentence": verdict_sentence(facts),
+        "verdict_explanation": ("verdict_code is the deterministic scorecard verdict; verdict_sentence is the "
+                                "suggested conclusion's reader-facing wording, not a separate scorecard verdict"),
+        "suggested_conclusion": copy.deepcopy(facts.get("suggested_conclusion")),
+        "signoff_actions": [copy.deepcopy(a) for a in facts.get("candidate_actions", [])
+                            if a.get("required") or "before signing off" in (a.get("when") or "")],
+        "source_verification": ("AI-extracted figures require verification against source documents before sign-off"
+                                if any(f.get("source") in ("ai_extracted", "calculated_provisional")
+                                       for f in facts.get("figures", [])) else None),
         "verdict_reason": card.get("verdict_reason"),
         "ratings": [{"question": p["name"], "rating": p["rating"], "reason": p.get("reason"),
                      "sub_ratings": [{"name": s["name"], "rating": s["rating"], "reason": s.get("reason")}
@@ -117,6 +125,7 @@ def peer_comparison(facts: dict) -> dict:
     pillars = {p["name"]: p for p in (facts.get("scorecard") or {}).get("pillars", [])}
     peers = [{"name": p.get("name"), "isin": p.get("isin"), "share_class": p.get("share_class"),
               "currency": p.get("currency"), "ongoing_charge_pct": p.get("ocf_pct"),
+              "investor_type": p.get("investor_type"), "minimum_investment": p.get("minimum_investment"),
               "returns_pct_a_year": p.get("returns_pct_a_year"), "used_for_returns": p.get("used_for_returns"),
               "returns_left_out_because": p.get("excluded") or None, "basis": p.get("basis"),
               "comparability_notes": list(p.get("notes") or [])} for p in facts.get("peers", [])]

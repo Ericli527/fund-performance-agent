@@ -67,6 +67,37 @@ def test_reviewer_can_request_one_revision_and_security_failure_is_not_published
     assert output['status'] == 'unavailable' and 'security' in output['reason']
 
 
+def test_revision_qualifies_retention_and_institutional_peer_without_changing_judgement():
+    facts = copy.deepcopy(FACTS)
+    facts['figures'][0]['source'] = 'ai_extracted'
+    facts['peers'][0].update(name='HSBC peer', investor_type='institutional',
+                             minimum_investment='GBP 1,000,000',
+                             notes=['Institutional share class; availability to retail investors may be limited.'])
+    first = BASE | {'investment_thesis': 'The scorecard recommends Satisfied, no action needed.',
+                    'evidence_references': ['scorecard', 'peers']}
+    fixed = first | {'investment_thesis': 'Retain is the scorecard verdict, subject to source verification before sign-off.',
+                     'uncertainties': ['The institutional peer has a GBP 1,000,000 minimum and may not be accessible.',
+                                       'Market research is unavailable.'],
+                     'recommended_actions': ['Verify the source documents before sign-off.']}
+    analyst = FakeRun(first, fixed)
+    reviewer = FakeRun({'material_issue': True, 'security_issue': False,
+                        'feedback': 'Correct verdict attribution and qualify source verification and peer eligibility.'}, PASS)
+    result = asyncio.run(assess(facts, PROFILE, [], 'Review', analyst, reviewer))
+    assert result['status'] == 'available' and result['assessment'] == fixed
+    assert 'smallest correction' in analyst.prompts[1] and 'peer eligibility' in analyst.prompts[1]
+    assert '"verdict_code": "Retain"' in analyst.prompts[0]
+    assert '"minimum_investment": "GBP 1,000,000"' in analyst.prompts[0]
+    assert 'source_verification' in reviewer.prompts[0] and 'institutional' in reviewer.prompts[0]
+    assert result['evidence']['peers']['peers'][0]['investor_type'] == 'institutional'
+
+
+def test_missing_research_is_reported_without_forcing_an_empty_uncertainty_revision():
+    result = asyncio.run(assess(FACTS, PROFILE, [], 'Review',
+                                FakeRun(BASE | {'uncertainties': []}), FakeRun(PASS)))
+    assert result['status'] == 'available'
+    assert result['limitations'] == ['No vetted market research is available.']
+
+
 def test_reviewer_rejects_unsupported_disagreement_after_one_revision():
     invented = BASE | {'recommendation': 'monitor', 'scorecard_agreement': False,
                        'scorecard_disagreement_reason': 'An unverified holding creates a material risk.'}
