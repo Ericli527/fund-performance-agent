@@ -34,9 +34,9 @@ class FundProfile(_Strict):
     secondary_objective: str | None = None
     ocf_pct: float | None = None
     transaction_cost_pct: float | None = None
-    # Whether the fund charges a performance fee. null = not established in the documents (must still be given):
+    # Whether the fund charges a performance fee. null or omitted = not established in the documents:
     # never taken as no fee; Fees is then not rated Green (scorecard)
-    performance_fee: bool | None
+    performance_fee: bool | None = None
     performance_fee_justification: str | None = None   # written by a person only, never by an AI agent
     fund_size_gbp_m: float | None = None
     risk_indicator: int | None = Field(default=None, ge=1, le=7)
