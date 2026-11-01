@@ -202,6 +202,7 @@ class RunResult:
     flags: list[DataFlag] = field(default_factory=list)       # every flag of the run, as in the report's appendix
     executive_pdf: Path | None = None          # report_executive.pdf (2 pages), or None if it could not fit
     investment_assessment: dict | None = None
+    presentation_context: dict | None = None
 
 
 def new_run_dir(root: Path) -> Path:
@@ -691,6 +692,9 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                 outputs={"status": assessment["status"], "tool_calls": assessment.get("tool_calls", [])},
                 notes=[assessment.get("reason", "") ] if assessment["status"] != "available" else [])
     (run_dir / "investment_assessment.json").write_text(json.dumps(assessment, indent=1, ensure_ascii=False), encoding="utf-8")
+    # One read-only presentation package for the dashboard and both reports.
+    presentation_context = {"question": question, "fund_context": context_brief,
+                            "investment_assessment": assessment, "research": vetted}
 
     # 8. Narrative: the findings and actions are written by code; the market context, if any, comes from the
     # Reporting Agent's checked draft below (the Analyst and Evaluator are not called in Version 1)
@@ -722,6 +726,8 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                                                   "next_step": chosen.draft.next_step,
                                                   "executive": [] if chosen.draft.executive_problems else
                                                   chosen.draft.executive,
+                                                  "detailed_analysis": chosen.draft.detailed_analysis,
+                                                  "research_narrative": chosen.draft.research_narrative,
                                                   "source": "ai", "angle": chosen.draft.angle,
                                                   "revised": REVISED in chosen.issues}
                 if not facts["suggested_conclusion"]["executive"]:
@@ -729,7 +735,8 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                         "Executive commentary left out: " + ("it did not pass code's checks"
                                                              if chosen.draft.executive else "the AI draft had none")
                         + "; the PDF shows the dashboard answer")))
-                if vetted and ("[" in chosen.draft.text or "[" in " ".join(chosen.draft.executive)):
+                if vetted and ("[" in chosen.draft.text or "[" in " ".join(chosen.draft.executive +
+                                       chosen.draft.detailed_analysis + chosen.draft.research_narrative)):
                     step.outputs["sources"] = numbered_sources(vetted)      # cited commentary needs a source list
                 context = chosen.draft.market_context if not chosen.draft.context_problems else None
                 if context:
@@ -792,4 +799,5 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     text_log.append(line)
     log.end(step, "ok" if line.startswith("Email: sent") else "failed" if s.email.enabled else "skipped", notes=[line])
     return RunResult(pdf, run_dir, log, narrative, facts, {name: plain_reason(inputs, name) for name in card.pillars},
-                     list({(f.level, f.message): f for f in flags}.values()), executive_pdf, assessment)
+                     list({(f.level, f.message): f for f in flags}.values()), executive_pdf, assessment,
+                     presentation_context)

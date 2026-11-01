@@ -318,6 +318,14 @@ def test_the_executive_pdf_shows_the_formal_commentary_not_the_dashboard_answer(
     assert "Yes, it met its objective." not in page1                 # the dashboard answer stays on the dashboard
 
 
+def test_detailed_pdf_includes_checked_analytical_narrative(tmp_path):
+    inp = made_up_inputs()
+    inp.facts['suggested_conclusion']['detailed_analysis'] = ['The benchmark relationship warrants continued monitoring.']
+    report_text = ' '.join(' '.join(page_texts(build_report(inp, tmp_path))).split())
+    assert 'Investment analysis' in report_text
+    assert 'The benchmark relationship warrants continued monitoring.' in report_text
+
+
 def test_executive_actions_include_both_document_and_historical_price_checks(tmp_path):
     inp = made_up_inputs()
     inp.facts["figures"][0]["source"] = "ai_extracted"

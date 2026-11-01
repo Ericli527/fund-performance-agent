@@ -37,7 +37,7 @@ import zipfile
 from html import escape
 import gradio as gr
 from fund_performance.config import WebSettings, load_settings
-from fund_performance.dashboard import dashboard_data, dashboard_html, technical_html
+from fund_performance.dashboard import dashboard_data, dashboard_html, dashboard_sections, technical_html
 from fund_performance.controller import (DEFAULT_QUESTION, DOCUMENTS_STAGE, RunResult, RunStopped, progress_line,
                                          run_review)
 from fund_performance.plain import verdict_meaning, verdict_name
@@ -122,11 +122,14 @@ def how_it_works_html() -> str:
 
 REVIEW_TYPES = {      # value: (title, subtitle, the review question it fills in)
     "overall": ("Overall Review", "Complete fund analysis",
-                "Is this fund meeting its investment objective, and are its fees justified?"),
+                "Is the fund meeting its mandate and delivering value? Assess benchmark performance, material risks, "
+                "fees and relevant peers, and identify the key evidence gaps and next steps."),
     "performance": ("Performance", "Returns and benchmark tracking",
-                    "How has this fund performed against its benchmark, and does it track it closely enough?"),
+                    "How has the fund performed against its benchmark in light of its mandate, portfolio and risks? "
+                    "Explain material trends, evidence limitations and oversight priorities."),
     "fees_value": ("Fees & Value", "Costs and peer comparison",
-                   "Are this fund's fees justified, and does it give investors value compared with similar funds?"),
+                   "Do the fund's fees represent value given its strategy, outcomes and comparable peers? "
+                   "Explain relevant eligibility limits, uncertainties and follow-up actions."),
     "custom": ("Custom Question", "Ask your own question", "What would you like to know about this fund?"),
 }
 DEFAULT_REVIEW = "overall"
@@ -408,7 +411,7 @@ async def _run_controller(folder: Path, question: str, offline: bool, on_step: P
     if on_server():                                   # a server keeps reports for a day, not for ever
         prune_runs(out_root, load_settings().web.keep_runs_hours)
     try:
-        result = await runner(folder, (question or "").strip() or DEFAULT_QUESTION, out_root, offline,
+        result = await runner(folder, question if question and question.strip() else DEFAULT_QUESTION, out_root, offline,
                               intake=intake, on_step=on_step)
     except RunStopped as e:
         return Outcome(f"**{e}**")
@@ -762,6 +765,10 @@ CSS = f"""
 .fp-status-main {{ font-size: 20px; font-weight: 600; margin: 2px 0; }}
 .fp-status-sub {{ color: #3c4857; font-size: 13.5px; }}
 .fp-conclusion {{ font-size: 15.5px; }}
+.fp-answer {{ border-top: 3px solid {BLUE}; }}
+.fp-question {{ color: {MUTED}; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }}
+.fp-verdict {{ color: {NAVY_TEXT}; font-size: 21px; font-weight: 650; }}
+.fp-dashboard {{ overflow-wrap: anywhere; }}
 .fp-concern-title, .fp-group {{ font-weight: 600; color: {NAVY_TEXT}; margin-top: 10px !important; }}
 .fp-metrics {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }}
 .fp-metric {{ background: #fff; border: 1px solid {BORDER}; border-radius: 12px; padding: 14px 16px; }}
@@ -894,7 +901,15 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
         progress = gr.Markdown(elem_classes="fp-progress")
         message = gr.Markdown()
         with gr.Column(visible=False) as results:
-            dashboard = gr.HTML()
+            with gr.Tabs():
+                with gr.Tab("Overview"):
+                    overview = gr.HTML()
+                with gr.Tab("Performance & Risk"):
+                    performance = gr.HTML()
+                with gr.Tab("Portfolio & Research"):
+                    portfolio = gr.HTML()
+                with gr.Tab("Evidence & Actions"):
+                    evidence = gr.HTML()
             with gr.Row():
                 executive_pdf = gr.DownloadButton(EXECUTIVE_LABEL, variant="primary", elem_classes="fp-download")
                 pdf = gr.DownloadButton(DETAILED_LABEL, variant="secondary", elem_classes="fp-download")
@@ -1008,13 +1023,13 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                 if not uses_demo_files(price, jsons):
                     issues.append("The synthetic demo inputs have changed; reload the test case.")
             if issues:
-                yield "", "\n".join(f"- {x}" for x in issues), gr.update(visible=False), "", gr.update(value=None), gr.update(value=None), "", None, ""
+                yield "", "\n".join(f"- {x}" for x in issues), gr.update(visible=False), "", "", "", "", gr.update(value=None), gr.update(value=None), "", None, ""
                 return
             price, factsheet, kid, peer, jsons = engine_inputs(selected)
             supporting = supporting_inputs(selected)
             offline = run_offline(price, jsons)
             history = []
-            yield "Starting…", "", gr.update(visible=False), "", gr.update(value=None), gr.update(value=None), "", None, ""
+            yield "Starting…", "", gr.update(visible=False), "", "", "", "", gr.update(value=None), gr.update(value=None), "", None, ""
             def work(say):
                 kwargs = {}
                 if benchmark['series'] or benchmark['documents']:
@@ -1025,9 +1040,9 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             async for kind, item in with_progress(work):
                 if kind == "progress":
                     history = progress_history(history, item)
-                    yield (progress_markdown(history),) + (gr.update(),) * 8
+                    yield (progress_markdown(history),) + (gr.update(),) * 11
                 elif item.data is None:
-                    yield progress_markdown(history), item.message, gr.update(visible=False), "", gr.update(value=None), gr.update(value=None), "", None, ""
+                    yield progress_markdown(history), item.message, gr.update(visible=False), "", "", "", "", gr.update(value=None), gr.update(value=None), "", None, ""
                 else:
                     banner = demo_banner(price, jsons, demo_id, mode)
                     data = item.data | {"pdf": item.pdf, "executive_pdf": item.executive}
@@ -1038,7 +1053,11 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                             ["No peer factsheet was uploaded; approved peers are used only when available."] if not peer else [])
                     detailed, executive = download_buttons(data, "analyst")
                     tech = technical_html(data) + (f"<p>{escape(item.run_info)}</p>" if item.run_info else "")
-                    yield progress_markdown(history), "", gr.update(visible=True), dashboard_html(data, "analyst"), executive, detailed, tech, item.log, item.message
+                    sections = dashboard_sections(data)
+                    views = ["<div class='fp-dashboard'>" + sections[k] + "</div>"
+                             for k in ("overview", "performance", "portfolio", "evidence")]
+                    yield (progress_markdown(history), "", gr.update(visible=True), *views,
+                           executive, detailed, tech, item.log, item.message)
 
         private = {"api_visibility": "private"}
         mutation = {"concurrency_id": "attachment-mutations", "concurrency_limit": 1}
@@ -1107,7 +1126,8 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                            [attachment_status, run], trigger_mode="always_last", **private)
         run.click(on_run, [question, entries, attachments, demo_state, mode_state, benchmark_name,
                            benchmark_currency, benchmark_confirmed, benchmark_pricing],
-                  [progress, message, results, dashboard, executive_pdf, pdf, technical, log, plain], **private)
+                  [progress, message, results, overview, performance, portfolio, evidence,
+                   executive_pdf, pdf, technical, log, plain], **private)
     return ui
 
 

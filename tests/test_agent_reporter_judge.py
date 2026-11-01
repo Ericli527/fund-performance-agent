@@ -92,6 +92,29 @@ def test_reporting_and_judge_receive_assessment_and_fund_context():
     assert 'A qualified independent view' in judge.prompts[0] and 'Index strategy in fund.pdf' in judge.prompts[0]
 
 
+def test_reporter_retains_checked_detailed_and_research_narratives():
+    from fund_performance.agents.reporter import write_draft
+    answer = {'answer': 'The fund tracks its index.', 'evidence': [],
+              'detailed_analysis': ['The fund follows its stated benchmark.'],
+              'research_narrative': ['The benchmark provider updated its methodology [1].']}
+    source = {'summary': 'The benchmark provider updated its methodology.', 'date': '2026-09-01'}
+    runner = FakeRun(answer)
+    draft = asyncio.run(write_draft(facts(), 'board', ['Mandate'], runner, sources=[source],
+                                    question='How does it track?\nPlease explain.'))
+    assert not draft.additional_problems
+    assert draft.detailed_analysis and '[1]' in draft.research_narrative[0]
+    assert 'How does it track?\nPlease explain.' in runner.prompts[0]
+
+
+def test_unsupported_detailed_narrative_is_not_shown_to_the_judge():
+    draft = {'answer': 'The fund tracks its index.', 'evidence': [],
+             'detailed_analysis': ['The fund returned 999.9%.']}
+    judge = FakeRun(review())
+    result = asyncio.run(draft_and_judge(facts(), ['board'], ['Mandate'], FakeRun(draft), judge))
+    assert result.chosen and not result.chosen.draft.detailed_analysis
+    assert '999.9%' not in judge.prompts[0]
+
+
 def test_a_factual_issue_gets_one_targeted_rewrite_with_the_feedback():
     texts = []
 

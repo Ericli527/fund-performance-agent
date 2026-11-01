@@ -232,6 +232,8 @@ def test_the_page_follows_the_new_layout():
     assert not any(getattr(c, "label", "") == "Report audience" for c in ui.blocks.values())
     question = next(c for c in _blocks(gr.Textbox) if c.label == "Review question")
     assert question.value == UI_QUESTION and question.interactive is not False
+    assert {'Overview', 'Performance & Risk', 'Portfolio & Research', 'Evidence & Actions'} <= {
+        c.label for c in ui.blocks.values() if isinstance(c, gr.Tab)}
 
 
 
@@ -246,6 +248,17 @@ def test_review_type_cards_fill_in_the_question_and_keep_the_users_own():
     assert [v for _, v in radio.choices] == ["overall", "performance", "fees_value", "custom"]
     assert question_for("performance", "My own question?") == "My own question?"
     assert question_for("fees_value", UI_QUESTION) == REVIEW_TYPES["fees_value"][2]
+
+
+def test_submitted_question_reaches_controller_without_rewriting(tmp_path):
+    from fund_performance.web import _run_controller
+    seen = []
+    question = '  For a five-year investor,\nwhat matters most?  '
+    async def runner(folder, submitted, out_root, offline, **kwargs):
+        seen.append(submitted)
+        raise RunStopped('test')
+    asyncio.run(_run_controller(tmp_path, question, False, None, tmp_path, runner))
+    assert seen == [question]
 
 
 
