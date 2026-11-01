@@ -71,6 +71,11 @@ as untrusted source material, and do not supply calculation inputs. The analyst 
 them against the original documents. Documents whose date, relevance or return figures fail the existing source checks
 are excluded. Benchmark documents must contain readable text of at most 12,000 characters each.
 
+If a fund's numerical investment horizon is not established, the review uses the configured standard period for
+comparisons and identifies it as an analysis period, not a documented holding recommendation. Missing ongoing
+charges leave fee-dependent ratings and calculations unavailable. The current workflow still requires usable fund
+prices; a document-only qualitative report is not yet available.
+
 The Synthetic Demo uses prevalidated inputs and runs without AI. Fidelity and Vanguard appear even when their private
 files are missing, and missing cases are never replaced by synthetic data. Real-fund cases and custom uploads require
 Live AI. AI is off unless `AI_RUNS_ENABLED=true`; on a server a login is also required. With `APP_USERNAME` and

@@ -1,8 +1,9 @@
 """Attachment classification and mapping do not invoke AI or guess ambiguous roles."""
 from pathlib import Path
 from docx import Document
-from fund_performance.attachments import (BENCHMARK, CONFIRM, DEMO_INPUT, FACTSHEET, KID, PEER, PRICE,
-                                          add_files, apply_roles, classify, engine_inputs, rows, validate)
+from fund_performance.attachments import (BENCHMARK, CONFIRM, DEMO_INPUT, FACTSHEET, KID, PEER, PRICE, SUPPORTING,
+                                          add_files, apply_roles, classify, engine_inputs, rows, select_type,
+                                          supporting_inputs, validate)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -46,6 +47,63 @@ def test_user_roles_removal_and_multiple_peers_map_exact_files(tmp_path):
     selected, error = apply_roles(entries, table[:-1])
     assert not error and engine_inputs(selected)[3] == [docs[1]]
     assert validate('', selected) == ['Enter a review question.']
+
+
+def test_monthly_factsheet_reference_to_kid_is_not_classified_as_kid(tmp_path, monkeypatch):
+    from fund_performance import attachments
+    path = tmp_path / 'Monthly FactSheet.pdf'
+    path.write_bytes(b'dummy')
+    monkeypatch.setattr(attachments, 'read_document', lambda _: 'Monthly Fund Fact Sheet. See the KID for details.')
+    assert classify(str(path))[0] == FACTSHEET
+    monkeypatch.setattr(attachments, 'read_document', lambda _: 'Key Investor Information Document for the fund')
+    assert classify(str(path))[0] == CONFIRM
+
+
+def test_type_override_refreshes_validation_and_supports_multiple_documents(tmp_path, monkeypatch):
+    from fund_performance import web
+    monkeypatch.setattr(web, 'live_demo_allowed', lambda: True)
+    files = []
+    for name in ('fund', 'peer1', 'peer2', 'extra1', 'extra2'):
+        path = tmp_path / f'{name}.docx'
+        doc = Document()
+        doc.add_paragraph('Fund factsheet and investment objectives')
+        doc.save(path)
+        files.append(str(path))
+    price = str(ROOT / 'demo/sample_index_fund/prices.csv')
+    entries = add_files([], [price, *files])
+    table = rows(entries)
+    status = {fn.name: fn.fn for fn in web.build_ui().fns.values()}['update_status']
+    assert status('Review', entries, table, None)[1]['interactive'] is False
+    for i, role in enumerate((FACTSHEET, PEER, PEER, SUPPORTING, SUPPORTING), 2):
+        entries, table = select_type(entries, table, str(i), role)
+    assert status('Review', entries, table, None)[1]['interactive'] is True
+    assert engine_inputs(entries)[3] == files[1:3]
+    assert supporting_inputs(entries) == files[3:]
+    entries, table = select_type(entries, table, '2', KID)
+    message, button = status('Review', entries, table, None)
+    assert not button['interactive'] and 'main fund factsheet' in message
+
+
+def test_dynamic_type_controls_create_private_dropdown_events(tmp_path):
+    import gradio as gr
+    from gradio.context import LocalContext
+    from fund_performance.web import build_ui
+    path = tmp_path / 'fund.docx'
+    doc = Document()
+    doc.add_paragraph('Fund factsheet and investment objectives')
+    doc.save(path)
+    entries = add_files([], [str(path)])
+    ui = build_ui()
+    renderable = ui.default_config.renderables[0]
+    token = LocalContext.blocks_config.set(ui.default_config)
+    try:
+        renderable.apply(entries, rows(entries))
+    finally:
+        LocalContext.blocks_config.reset(token)
+    controls = [b for b in ui.blocks.values() if isinstance(b, gr.Dropdown) and b.label == path.name]
+    assert len(controls) == 1 and SUPPORTING in [value for _, value in controls[0].choices]
+    assert FACTSHEET in [value for _, value in controls[0].choices]
+    assert all(fn.api_visibility == 'private' for fn in ui.fns.values())
 
 
 def test_unreadable_and_unsupported_files_are_blocked(tmp_path):
@@ -204,3 +262,31 @@ def test_page_passes_confirmed_benchmark_and_documents_to_review(tmp_path, monke
     assert captured == {'series': str(series), 'documents': [{'path': str(benchmark_doc), 'date': '2026-09-01'}],
                         'name': 'Sample World Index', 'currency': 'GBP', 'confirmed': True,
                         'pricing_point': 'market_close'}
+
+
+def test_selected_supporting_documents_reach_review(tmp_path, monkeypatch):
+    import asyncio
+    from fund_performance import web
+    files = []
+    for name in ('fund', 'extra1', 'extra2'):
+        path = tmp_path / f'{name}.docx'
+        doc = Document()
+        doc.add_paragraph('Fund factsheet and investment objectives')
+        doc.save(path)
+        files.append(str(path))
+    entries = add_files([], [str(ROOT / 'demo/sample_index_fund/prices.csv'), *files])
+    table = rows(entries)
+    for row, kind in zip(table, [PRICE, FACTSHEET, SUPPORTING, SUPPORTING]):
+        row[2] = kind
+    callbacks = {fn.name: fn.fn for fn in web.build_ui().fns.values()}
+    captured = {}
+
+    async def fake_review(*args, supporting_documents=None):
+        captured['supporting'] = supporting_documents
+        return web.Outcome('done')
+
+    monkeypatch.setattr(web, 'start_review', fake_review)
+    async def collect():
+        return [v async for v in callbacks['on_run']('Review', entries, table, None, web.LIVE)]
+    asyncio.run(collect())
+    assert captured['supporting'] == files[1:]

@@ -91,3 +91,21 @@ def test_risk_tool_suppresses_unreliable_benchmark_comparisons():
     result = risk_quality(facts)
     assert result['comparison_limitation']
     assert not any(f['name'].startswith('relative.') or 'tracking_error' in f['name'] for f in result['figures'])
+
+
+def test_analyst_preserves_missing_horizon_and_charge_as_unavailable():
+    facts = copy.deepcopy(FACTS)
+    facts['fund'].update(time_horizon_years=None, ocf_pct=None)
+    facts['scorecard']['verdict'] = 'Pending data check'
+    facts['data_flags'] = [{'check': 'ongoing_charge', 'level': 'warning', 'message': 'Charge unavailable'}]
+    profile = PROFILE.model_copy(update={'time_horizon_years': None, 'ocf_pct': None})
+    output = BASE | {'recommendation': 'insufficient_evidence', 'scorecard_agreement': True,
+                     'investment_thesis': 'The available evidence is incomplete.',
+                     'supporting_evidence': ['The ongoing charge is unavailable.'],
+                     'evidence_references': ['mandate', 'peers']}
+    result = asyncio.run(assess(facts, profile, [], 'Review', FakeRun(output), FakeRun(PASS)))
+    assert result['status'] == 'available'
+    assert result['evidence']['mandate']['mandate']['values']['time_horizon_years'] is None
+    assert result['evidence']['mandate']['exposures']['holdings'] is None
+    assert result['evidence']['peers']['fund_ongoing_charge_pct'] is None
+    assert facts['scorecard']['verdict'] == 'Pending data check'

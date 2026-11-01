@@ -1,7 +1,7 @@
 """ Data shapes shared by every step (spec Sections 1 and 2), validated with Pydantic """
 from datetime import date
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 Source = Literal["factsheet", "calculated", "ai_extracted", "user", "web"]   # "user": corrected on the page
 ObjectiveType = Literal["index_tracker", "active_target", "active_comparator", "active_constraint",
@@ -30,13 +30,13 @@ class FundProfile(_Strict):
     objective_type: ObjectiveType
     benchmark_name: str
     benchmark_role: BenchmarkRole
-    time_horizon_years: int = Field(gt=0)
+    time_horizon_years: int | None = Field(default=None, gt=0)
     secondary_objective: str | None = None
-    ocf_pct: float
+    ocf_pct: float | None = None
     transaction_cost_pct: float | None = None
-    # Whether the fund charges a performance fee. null = not established in the documents (must still be given):
+    # Whether the fund charges a performance fee. null or omitted = not established in the documents:
     # never taken as no fee; Fees is then not rated Green (scorecard)
-    performance_fee: bool | None
+    performance_fee: bool | None = None
     performance_fee_justification: str | None = None   # written by a person only, never by an AI agent
     fund_size_gbp_m: float | None = None
     risk_indicator: int | None = Field(default=None, ge=1, le=7)
@@ -47,6 +47,17 @@ class FundProfile(_Strict):
     asset_class: str = "equity"
     # Documents route (step 11 update): who gave each field, e.g. {"ocf_pct": "user", "isin": "ai_extracted"}
     field_sources: dict[str, Literal["ai_extracted", "user", "code"]] = Field(default_factory=dict)
+    _analysis_period_override: int | None = PrivateAttr(default=None)
+
+    @property
+    def analysis_period_years(self) -> int:
+        """The comparison period; a configured fallback is not a documented fund horizon."""
+        if self.time_horizon_years is not None:
+            return self.time_horizon_years
+        if self._analysis_period_override is not None:
+            return self._analysis_period_override
+        from fund_performance.config import load_thresholds
+        return load_thresholds().decision_tree.default_time_horizon_years
 
 
 class SeriesReturns(_Strict):

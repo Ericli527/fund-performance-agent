@@ -71,7 +71,7 @@ def _header(data: dict, quality: EvidenceQuality) -> str:
     fund, card = facts.get("fund", {}), facts.get("scorecard", {})
     code = card.get("verdict", "")
     colour = next((c for k, c in VERDICT_STYLE.items() if code.startswith(k)), NAVY)
-    n = fund.get("time_horizon_years", 5)
+    n = (fund.get("time_horizon_years") or fund.get("analysis_period_years", 5))
     caveat = assessment_caveat(quality)
     q_colour = {"check": "#6d4c9f", "warnings": "#b7791f", "clear": "#4c5966"}[quality.level]
     offline = " · Run without AI (offline)" if data.get("offline") else ""
@@ -237,12 +237,13 @@ def _statistics(facts: dict) -> str:
     if comparison_invalid(facts):
         return "<h4>Statistics (calculated from the factsheet)</h4>" + _list([UNRELIABLE_WHY + "."])
     years = list(ev["gaps"])
-    hits = ev.get("hit_rate") or [0, 0]
+    hits = ev.get("hit_rate")
     test = ev.get("test") or {}
     lines = [f"Yearly gap to the index, {years[0]}–{years[-1]}: average {ev['average']:+.2f} pp; best "
              f"{ev['best'][0]} ({ev['best'][1]:+.2f} pp); worst {ev['worst'][0]} ({ev['worst'][1]:+.2f} pp).",
-             f"Hit rate: {hits[0]} of {hits[1]} calendar years" + (f" within {ev['hit_margin_pp']:.2f} pp (fee + margin)."
-                                                                   if ev.get("hit_margin_pp") is not None else "."),
+             (f"Hit rate: {hits[0]} of {hits[1]} calendar years" + (f" within {ev['hit_margin_pp']:.2f} pp (fee + margin)."
+              if ev.get("hit_margin_pp") is not None else ".")) if hits is not None else
+             "Hit rate: Not available; ongoing charge not established.",
              f"Significance test ({test.get('what', '')}): {test.get('result', 'not run')}."]
     if ev.get("percentile"):
         q = ev["percentile"]

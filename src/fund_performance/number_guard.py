@@ -305,7 +305,8 @@ def _period_hint(candidates: list[TypedFact], match: TypedFact, facts: dict) -> 
     figure's own period """
     same = [f for f in candidates if f.period and abs(abs(f.value) - abs(match.value)) < 1e-9]
     periods = [f.period for f in same]
-    main = f"{facts.get('fund', {}).get('time_horizon_years', '')}y"
+    fund = facts.get('fund', {})
+    main = f"{fund.get('time_horizon_years') or fund.get('analysis_period_years', '')}y"
     period = main if main in periods else (match.period or (periods[0] if periods else main))
     years = period[:-1]
     return f"over {years} year{'' if years == '1' else 's'}"

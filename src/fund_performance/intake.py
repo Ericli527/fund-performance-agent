@@ -51,8 +51,8 @@ PROFILE_FIELDS = (
     FieldSpec("objective_type", "Objective type", "choice",
               choices=("index_tracker", "active_target", "active_comparator", "active_constraint", "income_target",
                        "absolute_return")),
-    FieldSpec("time_horizon_years", "Time horizon (years)", "int"),
-    FieldSpec("ocf_pct", "Ongoing charge (OCF), % a year", "number"),
+    FieldSpec("time_horizon_years", "Time horizon (years)", "int", False),
+    FieldSpec("ocf_pct", "Ongoing charge (OCF), % a year", "number", False),
     FieldSpec("as_of_date", "Figures to (YYYY-MM-DD)", "date"),
     FieldSpec("launch_date", "Share class launch date (YYYY-MM-DD)", "date"),
     FieldSpec("pricing_point", "Pricing point", "choice", False, choices=("midday", "market_close")),
@@ -62,7 +62,7 @@ PROFILE_FIELDS = (
     FieldSpec("performance_fee", "Performance fee (yes / no)", "bool", False),   # may be not established
     FieldSpec("objective_text", "Objective (as written)", "text"),
 )
-SERIES = (("fund_nav", "Fund (NAV)", True), ("fund_pnav", "Fund (PNAV, market close)", False), ("index", "Index", True))
+SERIES = (("fund_nav", "Fund (NAV)", False), ("fund_pnav", "Fund (PNAV, market close)", False), ("index", "Index", False))
 RETURN_FIELDS = tuple(FieldSpec(f"series.{name}.{p}", f"{label}: {p[:-1]}-year return, cumulative %", "number", required)
                       for name, label, required in SERIES for p in ("1y", "3y", "5y"))
 PEER_FIELDS = (                # one set per peer; the key "peer.<field>" becomes "peer1.<field>", "peer2.<field>", ...
@@ -253,11 +253,18 @@ async def read_peer(path: Path, run: RunFn | None = None) -> tuple[dict, Extract
 
 async def read_documents(factsheet: Path, kid: Path | None = None, peer_factsheets: list[Path] | Path | None = None,
                          run_extractor: RunFn | None = None, run_mandate: RunFn | None = None,
-                         run_peer: RunFn | None = None, peers_config: PeersConfig | None = None) -> dict:
+                         run_peer: RunFn | None = None, peers_config: PeersConfig | None = None,
+                         supporting_documents: list[Path] | None = None) -> dict:
     """ Read the documents with the Extractor and Mandate agents; return the table to confirm and what else the run
     needs (a plain dict, so the page can keep it between the two clicks). Without peer factsheets, the approved
     peers for the fund's benchmark (config/peers.yaml) are read """
-    docs = {p.name: read_document_pages(p) for p in (factsheet, kid) if p}
+    paths = [p for p in (factsheet, kid) if p] + list(supporting_documents or [])
+    docs = {}
+    for path in paths:
+        name = path.name
+        if name in docs:
+            raise ValueError(f"Duplicate document name: {name}; rename the files to preserve source references")
+        docs[name] = read_document_pages(path)
     text = "\n\n".join(f"=== Document: {name} ===\n" + "\n".join(pages) for name, pages in docs.items())
     extracted: ExtractionResult = await extract(text, run_extractor)
     fs = extracted.factsheet
@@ -366,6 +373,14 @@ def self_check(intake: dict) -> Built:
     """ The documents route without a person checking the table: code takes the values as read, checks each one
     against the documents, and flags what it could not confirm. A required value nobody could read stops the run """
     built = build_inputs(intake, [r["value"] for r in intake["rows"]])
+    horizon = next((r for r in intake["rows"] if r["key"] == "time_horizon_years"), None)
+    if horizon is not None and not horizon["value"]:
+        from fund_performance.availability import HORIZON_MISSING
+        built.flags.append({"check": "fund_horizon", "level": "warning", "message": HORIZON_MISSING})
+    fee = next((r for r in intake["rows"] if r["key"] == "ocf_pct"), None)
+    if fee is not None and not fee["value"]:
+        built.flags.append({"check": "ongoing_charge", "level": "warning",
+                            "message": "Ongoing charge not established; fee-dependent comparisons are unavailable."})
     for r in intake["rows"]:
         if not r["value"]:
             continue

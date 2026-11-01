@@ -21,7 +21,7 @@ def portfolio_exposures(exposures: dict | None = None) -> dict:
     if exposures is not None:
         return copy.deepcopy(exposures)
     return {"holdings": None, "sectors": None, "regions": None, "currencies": None,
-            "concentration": None, "unavailable": "Portfolio exposures are not available in the current input model."}
+            "concentration": None, "unavailable": "Portfolio exposures are not available for this review."}
 
 
 @dataclass
@@ -35,7 +35,8 @@ class PlanningContext:
     def of(cls, profile: FundProfile, flags: list[DataFlag] | None = None,
            exposures: dict | None = None) -> "PlanningContext":
         return cls(profile.model_copy(deep=True),
-                   [{"level": f.level, "message": f.message} for f in flags or [] if f.check == "mandate_agent"],
+                   [{"level": f.level, "message": f.message} for f in flags or []
+                    if f.check in ("mandate_agent", "fund_horizon", "ongoing_charge")],
                    exposures=copy.deepcopy(exposures))
 
     def allow(self, name: str) -> bool:

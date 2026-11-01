@@ -237,7 +237,7 @@ def _comparison(out: ReportedFigures, calculated: CalcResult, profile: FundProfi
                 factsheet: FactsheetPerformance | None, comparison: ComparisonBasis | None) -> None:
     """ Fund vs index on a fair basis: excess, tracking difference (+ cost-adjusted) and the index-fund hit rate """
     fund = comparison.fund_series if comparison else PRICE_SERIES
-    n_h = profile.time_horizon_years
+    n_h = profile.analysis_period_years
     if "index.ann.1y" in out.figures or "index.ann.5y" in out.figures:
         out.log.append(f"Fund vs index comparison uses {fund}" +
                        (f" (tolerance widened by {comparison.extra_tolerance_pp:.2f} pp)"
@@ -250,7 +250,8 @@ def _comparison(out: ReportedFigures, calculated: CalcResult, profile: FundProfi
         if f_ann and i_ann:
             td = f_ann.exact - i_ann.exact
             out.figures[f"comparison.td.{n}y"] = _derived(td, "pp", f"{n}y", fund)
-            out.figures[f"comparison.td_ex_cost.{n}y"] = _derived(td + profile.ocf_pct, "pp", f"{n}y", fund)
+            if profile.ocf_pct is not None:
+                out.figures[f"comparison.td_ex_cost.{n}y"] = _derived(td + profile.ocf_pct, "pp", f"{n}y", fund)
 
     # Index fund on price data only: a large gap is more likely a data problem (spec 3.4)
     td = calculated.figures.get(f"relative.td.{n_h}y")
@@ -259,7 +260,7 @@ def _comparison(out: ReportedFigures, calculated: CalcResult, profile: FundProfi
                                                     thresholds.data_checks.implausible_tracker_gap_pct)
 
     # Hit rate (spec 4.4), index funds: windows where abs(TD) <= OCF + margin
-    if profile.objective_type == "index_tracker":
+    if profile.objective_type == "index_tracker" and profile.ocf_pct is not None:
         fund_12m = {k.rsplit(".", 1)[1]: f.exact for k, f in out.figures.items() if k.startswith(f"{fund}.discrete_12m.")}
         index_12m = {k.rsplit(".", 1)[1]: f.exact for k, f in out.figures.items() if k.startswith("index.discrete_12m.")}
         tolerance = profile.ocf_pct + thresholds.performance_index.hit_rate_td_margin_over_ocf_pp

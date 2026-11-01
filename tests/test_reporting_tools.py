@@ -231,3 +231,23 @@ def test_planner_receives_only_current_run_source_matched_exposures(sdk_with):
     outputs = [item['output'] for item in model.inputs[1] if isinstance(item, dict) and item.get('type') == 'function_call_output']
     assert not flags and calls == ['get_portfolio_exposures'] and plan.source == 'planner'
     assert 'Example Corp' in outputs[0] and 'fund.pdf, page 1' in outputs[0]
+
+
+def test_planner_receives_missing_data_flags_and_isolated_exposures(sdk_with):
+    import ast
+    profile = FundProfile.model_validate(json.loads((Path(__file__).parent / "fixtures" / "fund_profile_sample.json").read_text()))
+    profile = profile.model_copy(update={"time_horizon_years": None, "ocf_pct": None})
+    answer = {"report_type": "quarterly_review", "focus": ["Mandate"], "market_context": True,
+              "manager_questions": True, "angles": ["board"], "searches": [], "reason": "Review evidence."}
+    model = sdk_with(ScriptedModel([[('get_fund_mandate', {}), ('get_portfolio_exposures', {})], answer]))
+    exposures = {'holdings': [{'name': 'Example Corp', 'weight_pct': 4.2, 'source': 'fund.pdf, page 1'}]}
+    warnings = [DataFlag(check='fund_horizon', level='warning', message='Horizon unavailable'),
+                DataFlag(check='ongoing_charge', level='warning', message='Charge unavailable')]
+    calls = []
+    _, flags = asyncio.run(plan_tasks('Review', profile, tool_calls=calls, mandate_flags=warnings, exposures=exposures))
+    outputs = [ast.literal_eval(item['output']) for item in model.inputs[1]
+               if isinstance(item, dict) and item.get('type') == 'function_call_output']
+    assert not flags and calls == ['get_fund_mandate', 'get_portfolio_exposures']
+    assert outputs[0]['values']['time_horizon_years'] is None
+    assert {item['message'] for item in outputs[0]['mandate_checks']} == {'Horizon unavailable', 'Charge unavailable'}
+    assert outputs[1]['holdings'][0]['name'] == 'Example Corp'

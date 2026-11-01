@@ -447,14 +447,17 @@ def _download(result: RunResult, pdf: Path | None) -> str | None:
 
 async def start_review(question: str, price, factsheet, kid, peer_factsheets, json_files, offline: bool,
                        limits: AiLimits, on_step: Progress | None = None, out_root: Path = RUNS,
-                       runner=run_review, reader=read_documents, benchmark_inputs: dict | None = None) -> Outcome:
+                       runner=run_review, reader=read_documents, benchmark_inputs: dict | None = None,
+                       supporting_documents: list[str] | None = None) -> Outcome:
     """ "Run the review": JSON files run straight away; documents are read, checked by code, then run """
     price, factsheet, kid = map(_one, (price, factsheet, kid))
     peers = _many(peer_factsheets)
+    supporting = _many(supporting_documents)
     json_files = [p for p in (json_files or []) if p]
     for path, allowed, what in ((price, PRICE_TYPES, "price file"), (factsheet, DOC_TYPES, "factsheet"),
                                 (kid, DOC_TYPES, "KID or prospectus"),
-                                *((p, DOC_TYPES, "peer factsheet") for p in peers)):
+                                *((p, DOC_TYPES, "peer factsheet") for p in peers),
+                                *((p, DOC_TYPES, "supporting document") for p in supporting)):
         if (wrong := _wrong_type(path, allowed, what)):
             return Outcome(wrong)
 
@@ -495,7 +498,8 @@ async def start_review(question: str, price, factsheet, kid, peer_factsheets, js
             calls: list[dict] = []
             token = AI_CALLS.set(calls)             # the reading agents' calls count towards this review
             try:
-                intake = await reader(Path(factsheet), Path(kid) if kid else None, [Path(p) for p in peers])
+                kwargs = {"supporting_documents": [Path(p) for p in supporting]} if supporting else {}
+                intake = await reader(Path(factsheet), Path(kid) if kid else None, [Path(p) for p in peers], **kwargs)
             except Exception as e:                   # noqa: BLE001
                 traceback.print_exc()
                 return Outcome(f"**Step 1 of 5 failed: the documents could not be read** ({type(e).__name__}). Check "
@@ -836,8 +840,9 @@ def _card(value: str) -> str:
 
 
 def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
-    from fund_performance.attachments import (BENCHMARK, CONFIRM, DEMO_INPUT, FACTSHEET, KID, PEER, PRICE,
-                                              add_files, apply_roles, engine_inputs, rows, validate)
+    from fund_performance.attachments import (BENCHMARK, CONFIRM, DEMO_INPUT, FACTSHEET, KID, PEER, PRICE, ROLES,
+                                              add_files, apply_roles, engine_inputs, rows, select_type,
+                                              supporting_inputs, validate)
     limits = limits or AiLimits(load_settings().web)
     web_settings = load_settings().web
     cleanup = (web_settings.cache_cleanup_minutes * 60, int(web_settings.keep_runs_hours * 3600))
@@ -859,12 +864,13 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
         entries = gr.State([])
         demo_state = gr.State(None)
         mode_state = gr.State(QUICK)
-        attachments = gr.Dataframe(headers=["ID", "File", "Role", "Notes", "Document date"], datatype=["str"] * 5,
+        attachments = gr.Dataframe(headers=["ID", "File", "Type", "Notes", "Document date"], datatype=["str"] * 5,
                                    value=[], type="array", interactive=True, row_count=0,
                                    column_count=(5, "fixed"), label="Attachments")
-        gr.Markdown("Edit the Role cell to **Price history**, **Fund factsheet**, **KID/KIID**, or **Peer factsheet**. "
-                    "Set a role to **Benchmark evidence** for a separate series or document. Delete a row to remove it; "
-                    "upload again to replace it. Confirm ambiguous files before running.")
+        gr.Markdown("Choose a type for each file below. Delete a table row to remove it; upload again to replace it. "
+                    "Confirm ambiguous files before running.")
+        with gr.Column() as type_selectors:
+            pass
         with gr.Column(visible=False) as benchmark_fields:
             gr.Markdown("For a separate benchmark series, confirm its name, currency and pricing time. For benchmark documents, "
                         "enter each document's publication or as-at date in its row as YYYY-MM-DD for source checks.")
@@ -973,14 +979,17 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                 yield "", "\n".join(f"- {x}" for x in issues), gr.update(visible=False), "", gr.update(value=None), gr.update(value=None), "", None, ""
                 return
             price, factsheet, kid, peer, jsons = engine_inputs(selected)
+            supporting = supporting_inputs(selected)
             offline = run_offline(price, jsons)
             history = []
             yield "Starting…", "", gr.update(visible=False), "", gr.update(value=None), gr.update(value=None), "", None, ""
             def work(say):
+                kwargs = {}
                 if benchmark['series'] or benchmark['documents']:
-                    return start_review(q, price, factsheet, kid, peer, jsons, offline, limits, say,
-                                        benchmark_inputs=benchmark)
-                return start_review(q, price, factsheet, kid, peer, jsons, offline, limits, say)
+                    kwargs['benchmark_inputs'] = benchmark
+                if supporting:
+                    kwargs['supporting_documents'] = supporting
+                return start_review(q, price, factsheet, kid, peer, jsons, offline, limits, say, **kwargs)
             async for kind, item in with_progress(work):
                 if kind == "progress":
                     history = progress_history(history, item)
@@ -1007,6 +1016,31 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
         def show_benchmark(state, table):
             selected, error = apply_roles(state or [], table)
             return gr.update(visible=not error and any(e['role'] == BENCHMARK for e in selected))
+
+        with type_selectors:
+            @gr.render(inputs=[entries, attachments])
+            def render_types(state, table):
+                selected, error = apply_roles(state or [], table)
+                if error:
+                    return
+                for item in selected:
+                    if item['role'] == DEMO_INPUT:
+                        continue
+                    selector = gr.Dropdown(choices=list(ROLES), value=item['role'],
+                                           label=Path(item['path']).name, interactive=True,
+                                           key=f"attachment-type-{item['id']}", preserved_by_key=[])
+                    def change_type(value, current, current_table, item_id=item['id']):
+                        return select_type(current, current_table, item_id, value)
+                    event = selector.input(change_type, [selector, entries, attachments], [entries, attachments], **private)
+                    event.then(update_status, [question, entries, attachments, demo_state, benchmark_name,
+                                               benchmark_currency, benchmark_confirmed, benchmark_pricing],
+                               [attachment_status, run], **private)
+                    event.then(show_benchmark, [entries, attachments], benchmark_fields, **private)
+
+        # Gradio registers the render trigger as "undocumented" by default; keep it private like the other events.
+        for fn in ui.fns.values():
+            if fn.renderable is not None:
+                fn.api_visibility = "private"
 
         for control in (attachments, entries):
             control.change(show_benchmark, [entries, attachments], benchmark_fields, **private)

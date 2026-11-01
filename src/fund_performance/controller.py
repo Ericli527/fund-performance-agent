@@ -398,6 +398,13 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         peers: list[Peer] = read_peers(files["peer"]) if "peer" in files else []
     except ValueError as e:
         _stop(log, step, f"Run stopped: an input file does not match its schema ({str(e)[:300]})")
+    profile._analysis_period_override = t.decision_tree.default_time_horizon_years
+    if profile.time_horizon_years is None and not any(f.check == "fund_horizon" for f in flags):
+        from fund_performance.availability import HORIZON_MISSING
+        flags.append(DataFlag(check="fund_horizon", level="warning", message=HORIZON_MISSING))
+    if profile.ocf_pct is None and not any(f.check == "ongoing_charge" for f in flags):
+        flags.append(DataFlag(check="ongoing_charge", level="warning", message=
+                              "Ongoing charge not established; fee-dependent comparisons are unavailable."))
     structured = [p.name for k, p in files.items() if k != "documents"]
     documents_read = factsheet is None and bool(files["documents"]) and not offline
     input_files = structured + [p.name if documents_read else f"{p.name} {NOT_READ}" for p in files["documents"]]

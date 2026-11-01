@@ -110,7 +110,7 @@ def _f(inp: ReportInputs, name: str) -> Figure | None:
 
 
 def _years(inp: ReportInputs) -> int:
-    return inp.profile.time_horizon_years
+    return inp.profile.analysis_period_years
 
 
 # --- Plain-English one-line reasons for page 1 ---------------------------------------------------------------
@@ -392,12 +392,12 @@ def _dashboard_charts(inp: ReportInputs, out_dir: Path) -> list[tuple[Path | Non
         years = list(ev.gaps)
         pi = inp.thresholds.performance_index
         kwargs = ({"ocf": p.ocf_pct, "green": p.ocf_pct + pi.green_td_margin_over_ocf_pp,
-                   "amber": p.ocf_pct + pi.amber_td_margin_over_ocf_pp} if index_fund else {})
+                   "amber": p.ocf_pct + pi.amber_td_margin_over_ocf_pp} if index_fund and p.ocf_pct is not None else {})
         what = "Yearly tracking difference" if index_fund else "Yearly excess return"
         chart = charts.yearly_gap_chart(years, list(ev.gaps.values()), out_dir / "dash_gaps.png",
                                         f"{what}, {years[0]}–{years[-1]}", **kwargs)
         bands = (f" Bands: Performance limits for the size of the gap (fee + {pi.green_td_margin_over_ocf_pp:.2f} "
-                 f"and + {pi.amber_td_margin_over_ocf_pp:.2f} pp); dashed line: the fee." if index_fund else "")
+                 f"and + {pi.amber_td_margin_over_ocf_pp:.2f} pp); dashed line: the fee." if index_fund and p.ocf_pct is not None else "")
         out.append((chart, f"Fund {SERIES_WORDS[ev.series]} minus index, each calendar year {years[0]}–{years[-1]}. "
                            f"Source: factsheet; gaps calculated.{bands}"))
     else:
@@ -449,9 +449,12 @@ def _statistics(inp: ReportInputs) -> str:
     if ev is None or not ev.gaps:
         return "<p class='small'>No statistics: the factsheet has no calendar-year returns.</p>"
     years = f"{list(ev.gaps)[0]}–{list(ev.gaps)[-1]}"
-    hits, total = ev.hit_rate
-    hit_text = (f"{hits} of {total} years within {ev.hit_margin_pp:.2f} pp (fee + margin)" if ev.hit_margin_pp is not None
-                else f"{hits} of {total} years at or above the benchmark")
+    if ev.hit_rate is None:
+        hit_text = "Not available: ongoing charge not established"
+    else:
+        hits, total = ev.hit_rate
+        hit_text = (f"{hits} of {total} years within {ev.hit_margin_pp:.2f} pp (fee + margin)" if ev.hit_margin_pp is not None
+                    else f"{hits} of {total} years at or above the benchmark")
     twelve = _f(inp, "comparison.hit_rate")
     rows = [("Hit rate, calendar years", hit_text),
             *([("Hit rate, 12-month windows", fmt("comparison.hit_rate", twelve, False))] if twelve else []),
@@ -551,12 +554,13 @@ def _aov_rows(inp: ReportInputs) -> list[tuple[str, str, str]]:
            else "performance fee: not established in the documents (missing evidence)")
     size = f"fund size £{p.fund_size_gbp_m:,.0f}m" if p.fund_size_gbp_m else "fund size not given"
     fees = pillars["Fees"]
+    ocf = f"{p.ocf_pct:.2f}%" if p.ocf_pct is not None else "not established"
     return [
         ("1. Quality of service", "Not public: requires internal data.", "Not assessed"),
         ("2. Performance", f"Mandate {RATING_WORDS[pillars['Mandate'].rating]}, Performance "
                            f"{RATING_WORDS[pillars['Performance'].rating]} (page 3).", "Covered"),
-        ("3. AFM costs", f"Ongoing charge (OCF) {p.ocf_pct:.2f}%; {tx}; {fee}.",
-         "Partly" if p.transaction_cost_pct is None else "Covered"),
+        ("3. AFM costs", f"Ongoing charge (OCF) {ocf}; {tx}; {fee}.",
+         "Partly" if p.transaction_cost_pct is None or p.ocf_pct is None else "Covered"),
         ("4. Economies of scale", f"{size.capitalize()}; requires OCF history.", "Partly"),
         ("5. Comparable market rates", "No comparable peer." if fees.summary == "Add peer"
          else f"Fees {RATING_WORDS[fees.rating]}: {plain_reason(inp, 'Fees')}",
@@ -584,7 +588,7 @@ def _peers_table(inp: ReportInputs) -> str:
             "</th><th>Fee (OCF)</th><th>1 year</th><th>3 years, a year</th><th>5 years, a year</th>"
             "<th class='l'>Used for</th></tr>")
     rows = (f"<tr class='total'><td class='l'>{escape(p.fund_name)}</td><td class='l'>{escape(p.share_class)}, "
-            f"{p.distribution}</td><td class='l'>{p.currency}, {PRICING_TIME.get(p.pricing_point, 'pricing time not stated')}</td><td>{p.ocf_pct:.2f}%</td>"
+            f"{p.distribution}</td><td class='l'>{p.currency}, {PRICING_TIME.get(p.pricing_point, 'pricing time not stated')}</td><td>{_pct(p.ocf_pct, 2)}</td>"
             + "".join(f"<td>{f.display(percent_decimals=2).replace('-', '−') if f else '–'}</td>" for f in fund)
             + "<td class='l'>This fund (NAV)</td></tr>")
     notes = []
@@ -628,8 +632,9 @@ ORIGIN_WORDS = {"approved": "approved peers, config/peers.yaml, read by the Extr
 def _page3(inp: ReportInputs) -> str:
     p = inp.profile
     peer = _peers_table(inp)
+    ocf = f"{p.ocf_pct:.2f}% a year" if p.ocf_pct is not None else "Not available"
     fees = (f"<table class='grid'><tr><th class='l'>Charge</th><th class='l'>This fund</th><th class='l'>Source</th></tr>"
-            f"<tr><td class='l'>Ongoing charge (OCF)</td><td class='l'>{p.ocf_pct:.2f}% a year</td><td class='l src'>"
+            f"<tr><td class='l'>Ongoing charge (OCF)</td><td class='l'>{ocf}</td><td class='l src'>"
             f"{_profile_source(p, 'ocf_pct', 'Factsheet / KID (profile)')}</td></tr>"
             f"<tr><td class='l'>Transaction costs</td><td class='l'>"
             f"{'Not disclosed in the documents provided' if p.transaction_cost_pct is None else f'{p.transaction_cost_pct:.2f}%'}"
