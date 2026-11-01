@@ -13,6 +13,9 @@ from fund_performance.agents.base import run_with_fresh_client as REAL_RUN    # 
 from fund_performance.agents.reporter import reporter_input, verdict_sentence, write_draft
 from fund_performance.agents.reporting_tools import (LIMIT_REACHED, NOT_IN_FACTS, NOT_RELIABLE, TOOLS, ReviewContext,
                                                      fund_performance, oversight_scorecard, peer_comparison)
+from fund_performance.agents.planning_tools import PlanningContext, fund_mandate, portfolio_exposures
+from fund_performance.agents.task_planner import plan_tasks
+from fund_performance.models import DataFlag, FundProfile
 
 FACTS = json.loads((Path(__file__).parent / "golden" / "demo_facts.json").read_text())   # the made-up fund
 
@@ -169,3 +172,35 @@ def test_the_tools_are_read_only_function_tools_with_strict_arguments():
     schema = TOOLS[0].params_json_schema
     assert schema["properties"]["period"]["enum"] == ["1y", "3y", "5y", "since_launch"] and schema["additionalProperties"] is False
     assert all(t.strict_json_schema for t in TOOLS)
+
+
+def test_planning_evidence_is_isolated_and_missing_exposures_are_explicit():
+    profile = FundProfile.model_validate(json.loads((Path(__file__).parent / "fixtures" / "fund_profile_sample.json").read_text()))
+    first, second = PlanningContext.of(profile), PlanningContext.of(profile)
+    first.profile.objective_text = "changed"
+    assert fund_mandate(second.profile)["values"]["objective_text"] == profile.objective_text
+    assert all(portfolio_exposures()[key] is None for key in ("holdings", "sectors", "regions", "currencies"))
+    assert all(first.allow("tool") for _ in range(6)) and not first.allow("tool")
+
+
+def test_planning_context_keeps_only_mandate_flags():
+    profile = FundProfile.model_validate(json.loads((Path(__file__).parent / "fixtures" / "fund_profile_sample.json").read_text()))
+    flags = [DataFlag(check="mandate_agent", level="warning", message="Objective conflicts"),
+             DataFlag(check="other", level="warning", message="Unrelated")]
+    context = PlanningContext.of(profile, flags)
+    assert context.mandate_flags == [{"level": "warning", "message": "Objective conflicts"}]
+
+
+def test_planner_calls_scoped_evidence_tools_through_sdk(sdk_with):
+    profile = FundProfile.model_validate(json.loads((Path(__file__).parent / "fixtures" / "fund_profile_sample.json").read_text()))
+    answer = {"report_type": "quarterly_review", "focus": ["Mandate"], "market_context": True,
+              "manager_questions": True, "angles": ["board"], "searches": [], "reason": "Review mandate."}
+    model = sdk_with(ScriptedModel([[('get_fund_mandate', {}), ('get_portfolio_exposures', {})], answer]))
+    calls = []
+    mandate_flags = [DataFlag(check="mandate_agent", level="warning", message="Objective conflict")]
+    plan, flags = asyncio.run(plan_tasks("Review the mandate", profile, tool_calls=calls, mandate_flags=mandate_flags))
+    outputs = [item["output"] for item in model.inputs[1] if isinstance(item, dict) and item.get("type") == "function_call_output"]
+    assert calls == ["get_fund_mandate", "get_portfolio_exposures"] and not flags
+    assert profile.objective_text in outputs[0] and "Objective conflict" in outputs[0]
+    assert "not available" in outputs[1]
+    assert len(plan.focus) == 4

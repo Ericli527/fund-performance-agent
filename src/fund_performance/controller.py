@@ -1,8 +1,8 @@
 """ Workflow controller (spec Section 8.5): a plain Python function, not an AI agent, that runs one review
 
 read files -> extractor (only if there is no factsheet_performance.json) -> approved peers (only if there is no
-peer.json: the Extractor reads their factsheets) -> task plan (Task Planner Agent: focus, angles and up to
-limits.max_web_searches web searches; default plan offline) -> data checks -> mandate -> web research (Search Agent:
+peer.json: the Extractor reads their factsheets) -> data checks -> mandate -> task plan (Task Planner Agent: focus,
+angles and up to limits.max_web_searches web searches; default plan offline) -> web research (Search Agent:
 approved pages and the planned searches, started as a background task) alongside the calculator and scorecard ->
 code vets the research -> Reporting Agent (summary and cited market context) -> code's checks and the Judge Agent
 -> report -> email (off by default). The financial review never depends on the research.
@@ -450,25 +450,6 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                             if any(n.endswith(path.name) for n in notes)]
             log.step("read_files").outputs["input_files"] = input_files
 
-    # 2a. Task plan (Step 2 of 5): the Task Planner Agent turns the request into tasks (menu choices only, checked by code)
-    step = log.start("plan", ["question", "fund_profile.json: public details"], announce=not offline)
-    if offline:
-        plan = TaskPlan(reason="Default plan: offline run", source="default (offline)")
-        log.end(step, "skipped", outputs=plan.to_dict(), notes=["offline run: default plan"])
-    else:
-        budget = t.limits.max_web_searches if s.research.enabled else 0
-        planned = await _timed(plan_tasks(question, profile, r.task_planner, budget), s.timeouts_seconds.task_planner)
-        if planned is None:
-            plan = TaskPlan(reason="Default plan: the Task Planner did not answer in time")
-            flags.append(DataFlag(check="task_planner", level="info", message=(
-                f"The Task Planner Agent {_why(s.timeouts_seconds.task_planner)}; default plan used")))
-            log.end(step, _status(), outputs=plan.to_dict(), notes=[_why(s.timeouts_seconds.task_planner)])
-        else:
-            plan, plan_flags = planned
-            flags += plan_flags
-            log.end(step, "ok" if plan.source == "planner" else "failed", outputs=plan.to_dict())
-    text_log.append(f"Plan ({plan.source}): {plan.report_type}; focus {', '.join(plan.focus)}; " + " -> ".join(plan.tasks))
-
     # 3. Data checks
     step = log.start("data_checks", [files["prices"].name] + (["factsheet figures"] if factsheet else []))
     try:
@@ -513,6 +494,28 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
             profile, promises = mandate.profile, mandate.promises
             flags += mandate.flags
             log.end(step, outputs={"promises": len(promises), "flags": [f.message for f in mandate.flags]})
+
+    # Plan after mandate interpretation so both document and structured-input routes use the same mandate.
+    step = log.start("plan", ["question", "fund_profile.json: public details"], announce=not offline)
+    if offline:
+        plan = TaskPlan(reason="Default plan: offline run", source="default (offline)")
+        log.end(step, "skipped", outputs=plan.to_dict(), notes=["offline run: default plan"])
+    else:
+        budget = t.limits.max_web_searches if s.research.enabled else 0
+        planning_calls: list[str] = []
+        planned = await _timed(plan_tasks(question, profile, r.task_planner, budget, tool_calls=planning_calls,
+                                          mandate_flags=flags), s.timeouts_seconds.task_planner)
+        if planned is None:
+            plan = TaskPlan(reason="Default plan: the Task Planner did not answer in time")
+            flags.append(DataFlag(check="task_planner", level="info", message=(
+                f"The Task Planner Agent {_why(s.timeouts_seconds.task_planner)}; default plan used")))
+            log.end(step, _status(), outputs=plan.to_dict() | {"tool_calls": planning_calls},
+                    notes=[_why(s.timeouts_seconds.task_planner)])
+        else:
+            plan, plan_flags = planned
+            flags += plan_flags
+            log.end(step, "ok" if plan.source == "planner" else "failed", outputs=plan.to_dict() | {"tool_calls": planning_calls})
+    text_log.append(f"Plan ({plan.source}): {plan.report_type}; focus {', '.join(plan.focus)}; " + " -> ".join(plan.tasks))
 
     # 5. Web research (Search Agent) starts now and runs alongside the calculations: it needs only the public fund
     # details and the plan, never a figure. The calculations never wait for it or depend on it
