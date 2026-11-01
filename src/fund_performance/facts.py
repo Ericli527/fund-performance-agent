@@ -53,7 +53,7 @@ def data_notes(profile: FundProfile, reported: ReportedFigures, flags: list[Data
     which figure each note explains (and which it does not), e.g. the fee explains the yearly tracking
     difference, not the noon-price gap """
     notes = []
-    n = profile.time_horizon_years
+    n = profile.analysis_period_years
     value = reported.value
     pricing = next((f for f in flags if f.check == "pricing_point"), None)
 
@@ -136,6 +136,8 @@ def build_facts(profile: FundProfile, reported: ReportedFigures, card: Scorecard
                        if f.level in ("warning", "blocking")],
         "figures": [_figure(name, f) for name, f in reported.figures.items()],
     }
+    if profile.time_horizon_years is None:
+        facts["fund"]["analysis_period_years"] = profile.analysis_period_years
     facts["peers"] = peer_rows(peer_comparison)
     facts["evidence"] = evidence.to_dict() if evidence is not None else None
     facts["candidate_actions"] = candidate_actions(facts)     # the only actions the Analyst may choose (code)

@@ -113,7 +113,7 @@ def headline_metrics(facts: dict) -> list[Metric]:
     """ Three headline figures from the facts, with their period, unit and source; missing ones say so """
     fund = facts.get("fund", {})
     figs = _figures(facts)
-    n = fund.get("time_horizon_years", 5)
+    n = (fund.get("time_horizon_years") or fund.get("analysis_period_years", 5))
     as_of = _date(fund.get("as_of_date"))
     td = figs.get(f"comparison.td.{n}y")
     series = (td or {}).get("basis") or "fund_nav"
@@ -272,7 +272,7 @@ def chart_choice(facts: dict) -> str | None:
 def risk_measures(facts: dict) -> list[tuple[str, str, str]]:
     """ (label, value, source) for the risk and tracking figures the facts hold, in a fixed order """
     figs = _figures(facts)
-    n = facts.get("fund", {}).get("time_horizon_years", 5)
+    n = (facts.get("fund", {}).get("time_horizon_years") or facts.get("fund", {}).get("analysis_period_years", 5))
     wanted = [(f"Tracking error, {n} years", f"relative.tracking_error.{n}y"), ("Tracking error, 3 years",
               "risk.pnav.tracking_error.3y"), (f"R², {n} years", f"relative.r2.{n}y"), ("R², 3 years", "risk.pnav.r2.3y"),
               (f"Beta, {n} years", f"relative.beta.{n}y"), ("Beta, 3 years", "risk.pnav.beta.3y"),

@@ -193,7 +193,7 @@ def _basis(peer: Peer, profile: FundProfile, reported: ReportedFigures, years: i
 
 
 def compare_peers(peers: list[Peer], profile: FundProfile, reported: ReportedFigures) -> PeerComparison:
-    years = profile.time_horizon_years
+    years = profile.analysis_period_years
     out = PeerComparison([], years)
     for peer in peers:
         series, basis, notes = _basis(peer, profile, reported, years)

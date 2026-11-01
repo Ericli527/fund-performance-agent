@@ -47,7 +47,7 @@ def _aim(fund: dict) -> str:
 def _result(facts: dict) -> str | None:
     """ Whether it did it: the main figure over the main period """
     fund = facts["fund"]
-    n = fund.get("time_horizon_years", 5)
+    n = (fund.get("time_horizon_years") or fund.get("analysis_period_years", 5))
     if fund.get("objective_type") == "index_tracker":
         td = _figure(facts, f"comparison.td.{n}y")
         if td is None:
@@ -234,7 +234,7 @@ def judgement_points(facts: dict) -> list[str]:
 def manager_questions(facts: dict) -> list[str]:
     """ 2 to 4 questions for the fund manager, built from the findings """
     pillars = _pillars(facts)
-    n = facts["fund"].get("time_horizon_years", 5)
+    n = (facts["fund"].get("time_horizon_years") or facts["fund"].get("analysis_period_years", 5))
     index_fund = facts["fund"].get("objective_type") == "index_tracker"
     found: list[str] = []
     perf = pillars.get("Performance", {}).get("rating")

@@ -138,7 +138,7 @@ def _plain(text: str) -> str:
 def ratings_finding(facts: dict) -> str:
     """ Finding 1, written by code: the Mandate and Performance ratings with their reasons, in plain English """
     pillars = {p["name"]: p for p in facts["scorecard"]["pillars"]}
-    n = facts.get("fund", {}).get("time_horizon_years", 5)
+    n = (facts.get("fund", {}).get("time_horizon_years") or facts.get("fund", {}).get("analysis_period_years", 5))
     index_fund = facts.get("fund", {}).get("objective_type") == "index_tracker"
     parts = []
     mandate = pillars.get("Mandate")
@@ -200,7 +200,7 @@ def define_first(findings: list[str], term: re.Pattern, definition: str) -> list
 def code_findings(facts: dict) -> list[str]:
     """ All the findings, written by code: finding 1 (ratings with reasons), then one per data note (fixed
     wording); if there are fewer than 2 data-note findings, the other ratings. "pp" is defined at first use """
-    years = facts.get("fund", {}).get("time_horizon_years", 5)
+    years = (facts.get("fund", {}).get("time_horizon_years") or facts.get("fund", {}).get("analysis_period_years", 5))
     pillars = {p["name"]: p for p in facts["scorecard"]["pillars"]}
     if comparison_invalid(facts):     # a currency or benchmark mismatch: the notes rest on an invalid comparison
         notes = [COMPARISON_FINDING]

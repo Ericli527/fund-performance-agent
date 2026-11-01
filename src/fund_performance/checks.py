@@ -231,7 +231,7 @@ def repeated_price_scope(flag: DataFlag, prices: pd.DataFrame) -> DataFlag:
 # --- History length -----------------------------------------------------------------------------------------
 
 def history_length(prices: pd.DataFrame, time_horizon_years: int,
-                   launch_date: date | None = None) -> tuple[bool, list[DataFlag]]:
+                   launch_date: date | None = None, documented_horizon: bool = True) -> tuple[bool, list[DataFlag]]:
     """ short_history is true when there are fewer months of (post-launch) data than the fund's horizon """
     data = post_launch(prices, launch_date) if launch_date else prices
     if len(data) < 2:
@@ -241,8 +241,9 @@ def history_length(prices: pd.DataFrame, time_horizon_years: int,
     needed = time_horizon_years * 12
     if months >= needed:
         return False, []
+    label = "the fund's horizon" if documented_horizon else "the standard analysis period"
     return True, [DataFlag(check="history_length", level="info",
-                           message=f"Short history: {months} months of data, the fund's horizon is {needed} months; "
+                           message=f"Short history: {months} months of data, {label} is {needed} months; "
                                    "since-launch figures are used")]
 
 
@@ -304,6 +305,7 @@ def check_prices(data: PriceData, profile: FundProfile, thresholds: Thresholds,
     flags += gaps(prices, t.max_gap_days_monthly, t.max_gap_business_days_daily)
     flags += pre_launch(prices, profile.launch_date)
     flags += repeated_prices(prices, t.repeated_price_window_periods, profile.asset_class, profile.launch_date)
-    short, history = history_length(prices, profile.time_horizon_years, profile.launch_date)
+    short, history = history_length(prices, profile.analysis_period_years, profile.launch_date,
+                                    documented_horizon=profile.time_horizon_years is not None)
     flags += history
     return PriceCheckResult(prices=prices, flags=flags, short_history=short, comparison=comparison)

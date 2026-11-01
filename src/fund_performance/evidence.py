@@ -159,11 +159,11 @@ def build_evidence(reported: ReportedFigures, profile: FundProfile, t: Threshold
     best = max(gaps, key=gaps.get)
     worst = min(gaps, key=gaps.get)
     ev.best, ev.worst = (best, gaps[best]), (worst, gaps[worst])
-    if profile.objective_type == "index_tracker":
+    if profile.objective_type == "index_tracker" and profile.ocf_pct is not None:
         ev.hit_margin_pp = profile.ocf_pct + t.performance_index.hit_rate_td_margin_over_ocf_pp
         ev.hit_rate = (sum(1 for v in values if abs(round(v, 2)) <= round(ev.hit_margin_pp, 2)), len(values))
         ev.test = t_test([v + profile.ocf_pct for v in values], "fee-adjusted yearly gap (gap + OCF)", stats)
-    else:
+    elif profile.objective_type != "index_tracker":
         ev.hit_rate = (sum(1 for v in values if v >= 0), len(values))
         ev.test = t_test(values, "yearly excess return over the benchmark", stats)
     return ev

@@ -289,7 +289,7 @@ def calculate(prices: pd.DataFrame, profile: FundProfile, thresholds: Thresholds
                 result.figures[f"{name}.since_launch.ann"] = _figure(ann, "%", period, d)
 
         # 4.3 risk over the horizon, and over 3 years to cross-check the factsheet; post-launch prices only
-        for years in sorted({CROSS_CHECK_RISK_YEARS, profile.time_horizon_years}):
+        for years in sorted({CROSS_CHECK_RISK_YEARS, profile.analysis_period_years}):
             start = start_price(lv, years, as_of)
             if start is None:
                 result.not_available[f"{name}.vol.{years}y"] = "not available: price history shorter than the period"
@@ -309,7 +309,7 @@ def _relative(result: CalcResult, levels: pd.Series, index: pd.Series | None, pr
               ppy: int, rf: float, as_of: pd.Timestamp, launch: pd.Timestamp,
               factsheet: FactsheetPerformance | None, d: int) -> None:
     """ 4.2 and the benchmark-relative part of 4.3 """
-    n = profile.time_horizon_years
+    n = profile.analysis_period_years
     if index is None:
         for key in [f"relative.{k}.{n}y" for k in ("excess_cum", "td", "td_ex_cost", *RELATIVE_RISK)] + \
                    [f"relative.relative_vol.{n}y"]:
@@ -337,7 +337,8 @@ def _relative(result: CalcResult, levels: pd.Series, index: pd.Series | None, pr
         result.figures[f"relative.excess_cum.{k}y"] = _figure(excess_return(
             cumulative_return(levels, k, as_of), cumulative_return(index, k, as_of)), "pp", f"{k}y", d)
         result.figures[f"relative.td.{k}y"] = _figure(td, "pp", f"{k}y", d)
-        result.figures[f"relative.td_ex_cost.{k}y"] = _figure(tracking_difference_ex_cost(td, profile.ocf_pct), "pp", f"{k}y", d)
+        if profile.ocf_pct is not None:
+            result.figures[f"relative.td_ex_cost.{k}y"] = _figure(tracking_difference_ex_cost(td, profile.ocf_pct), "pp", f"{k}y", d)
     start = start_price(levels, n, as_of)
     if start is None:
         return
