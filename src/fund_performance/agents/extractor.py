@@ -35,7 +35,8 @@ hypothetical market-close NAV used to compare with the index ("Fund PNAV"); "ind
 - risk: one entry per basis of the risk table ("nav" or "pnav" as labelled, else null).
 - profile: the fund facts as printed; dates as YYYY-MM-DD; ocf_pct as a number (0.06 for 0.06%);
   minimum_investment as printed (e.g. "GBP 10,000,000"); transaction_cost_pct only if printed;
-  fund_size_gbp_m only if the size is in GBP millions.
+  fund_size_gbp_m only if the size is in GBP millions. pricing_point is the fund's own NAV pricing time,
+  not the benchmark's or a hypothetical PNAV pricing time; use null if the fund's time is not stated.
 - performance_fee: false only if the documents say there is none ("None", "N/A", "Nil", "0%"); true only if they
   say one is charged; else null. "Excludes performance fees (where applicable)" says neither.
 - exposures: only explicitly reported fund holdings, sector, geographic or currency allocations, not benchmark
@@ -46,6 +47,14 @@ hypothetical market-close NAV used to compare with the index ("Fund PNAV"); "ind
 - return_evidence: also list directly quoted fund or benchmark returns that may have been missed in series,
   identifying period, basis, currency, and an exact source quotation. Never estimate or calculate.
 All returns and percentages as plain numbers in percent (17.5 for 17.5%).
+"""
+
+PEER_INSTRUCTIONS = """
+This is a peer factsheet. Extract only what is needed for peer comparison: share class identity, ISIN, currency,
+distribution, minimum investment, pricing time, ongoing charge, benchmark, as-of date, fund NAV returns at available
+1, 3 and 5 year periods and their basis, and 3-year fund volatility when stated. Leave other profile values null.
+Return empty calendar_years, discrete_12m, exposures and return_evidence lists and an empty document_summary.
+Do not generate a fund context brief. Keep the same exact-copy and no-guessing rules above.
 """
 
 
@@ -148,8 +157,9 @@ class ExtractionResult:
     return_evidence: list[ExtractedReturnEvidence] = field(default_factory=list)
 
 
-def extractor_agent() -> Agent:
-    return Agent(name="Extractor Agent", instructions=INSTRUCTIONS, output_type=ExtractorOutput,
+def extractor_agent(*, peer: bool = False) -> Agent:
+    return Agent(name="Peer Extractor Agent" if peer else "Extractor Agent",
+                 instructions=INSTRUCTIONS + (PEER_INSTRUCTIONS if peer else ""), output_type=ExtractorOutput,
                  **model_kwargs("extractor"))
 
 
@@ -256,7 +266,7 @@ def unfound_numbers(out: ExtractorOutput, text: str) -> list[str]:
     return missing
 
 
-async def extract(document_text: str, run: RunFn | None = None) -> ExtractionResult:
+async def extract(document_text: str, run: RunFn | None = None, *, peer: bool = False) -> ExtractionResult:
     """ Ask the Extractor Agent, validate, retry once on invalid output, then CHECK DATA """
     holder: dict = {}
 
@@ -264,7 +274,7 @@ async def extract(document_text: str, run: RunFn | None = None) -> ExtractionRes
         holder["raw"] = out
         return to_factsheet(out)
 
-    result = await run_structured(extractor_agent(), document_text, ExtractorOutput, convert=convert, run=run)
+    result = await run_structured(extractor_agent(peer=peer), document_text, ExtractorOutput, convert=convert, run=run)
     if not result.ok:
         return ExtractionResult(None, flags=[DataFlag(
             check="extractor_agent", level="blocking",

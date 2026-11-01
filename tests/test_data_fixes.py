@@ -201,7 +201,6 @@ def test_an_inferred_day_month_order_is_never_silent(tmp_path):
 # --- Optional pricing point (approved): null = not stated, never guessed ---------------------------------------------
 
 def test_a_pricing_time_not_stated_is_recorded_and_flagged_not_guessed():
-    from pydantic import ValidationError
     from fund_performance.checks import pricing_point
     from fund_performance.config import load_thresholds
     from fund_performance.io import read_json
@@ -209,8 +208,8 @@ def test_a_pricing_time_not_stated_is_recorded_and_flagged_not_guessed():
     from fund_performance.peers import _basis
     base = json.loads((PORTABLE / "fund_profile.json").read_text())
     profile = FundProfile.model_validate(base | {"pricing_point": None})
-    with pytest.raises(ValidationError):                                    # it must still be stated, even as null
-        FundProfile.model_validate({k: v for k, v in base.items() if k != "pricing_point"})
+    omitted = FundProfile.model_validate({k: v for k, v in base.items() if k != "pricing_point"})
+    assert omitted.pricing_point is None
     fs = read_json(PORTABLE / "factsheet_performance.json")
     basis = pricing_point(profile, fs, load_thresholds().data_checks.timing_difference_extra_tolerance_pp)
     assert basis.fund_series == "fund_nav" and [f.level for f in basis.flags] == ["info"]

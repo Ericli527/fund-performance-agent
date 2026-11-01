@@ -91,6 +91,52 @@ def test_missing_documented_horizon_and_returns_do_not_block_intake(tmp_path):
     assert any(flag['check'] == 'fund_horizon' for flag in built.flags)
 
 
+def test_optional_intake_profile_fields_can_be_omitted_from_model():
+    from fund_performance.intake import PROFILE_FIELDS
+    assert all(not FundProfile.model_fields[spec.key].is_required()
+               for spec in PROFILE_FIELDS if not spec.required)
+
+
+@pytest.mark.parametrize('explicit_null', [False, True])
+def test_missing_pricing_point_does_not_block_intake_or_hide_comparability(tmp_path, explicit_null):
+    from fund_performance.checks import pricing_point
+    from fund_performance.intake import self_check
+    factsheet, _ = docs(tmp_path)
+    answer = extractor_answer(pricing_point=None)
+    for series in answer['series']:
+        series['pricing'] = 'market_close' if series['name'] == 'index' else None
+    intake = asyncio.run(read_documents(factsheet, run_extractor=FakeRun(answer), run_mandate=FakeRun(MANDATE)))
+    built = self_check(intake)
+    assert not built.problems and 'pricing_point' not in built.profile
+    data = built.profile | ({'pricing_point': None} if explicit_null else {})
+    profile = FundProfile.model_validate(data)
+    assert profile.pricing_point is None
+    basis = pricing_point(profile, FactsheetPerformance.model_validate(built.factsheet), 0.2)
+    assert any('timing difference cannot be ruled out' in flag.message for flag in basis.flags)
+
+
+def test_peer_extraction_uses_lightweight_mode(tmp_path):
+    from types import SimpleNamespace
+    factsheet, peer = docs(tmp_path)
+    agents = []
+    async def peer_run(agent, prompt):
+        agents.append(agent)
+        return SimpleNamespace(final_output=peer_answer())
+    intake = asyncio.run(read_documents(factsheet, peer_factsheets=[peer],
+        run_extractor=FakeRun(extractor_answer()), run_mandate=FakeRun(MANDATE), run_peer=peer_run))
+    assert len(agents) == 1 and agents[0].name == 'Peer Extractor Agent'
+    assert 'empty document_summary' in agents[0].instructions
+    assert by_key(intake)['peer1.5y']['value'] == '8.16'
+
+
+def test_peer_benchmark_pricing_does_not_supply_peer_pricing():
+    from fund_performance.agents.extractor import ExtractionResult
+    from fund_performance.intake import peer_values
+    fs = FactsheetPerformance.model_validate({'as_of_date': '2026-09-30', 'currency': 'GBP',
+        'source': 'ai_extracted', 'series': {'index': {'basis': 'cumulative', 'pricing': 'market_close'}}})
+    assert peer_values(ExtractionResult(fs))['pricing_point'] is None
+
+
 def test_supporting_documents_are_included_with_source_names(tmp_path):
     factsheet, _ = docs(tmp_path)
     first, second = tmp_path / 'policy.txt', tmp_path / 'charges.txt'
