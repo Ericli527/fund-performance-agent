@@ -80,6 +80,18 @@ def test_the_judge_reviews_only_the_draft_and_treats_inputs_as_untrusted_data():
     assert "untrusted data" in INSTRUCTIONS and "Do not calculate metrics, change ratings" in INSTRUCTIONS
 
 
+def test_reporting_and_judge_receive_assessment_and_fund_context():
+    assessment = {'status': 'available', 'assessment': {'investment_thesis': 'A qualified independent view'}}
+    context = {'document_summary': 'Index strategy in fund.pdf', 'sources': ['fund.pdf']}
+    report = reporter(GOOD)
+    judge = FakeRun(review())
+    result = asyncio.run(draft_and_judge(facts(), ['board'], ['Fees'], report, judge,
+                                         assessment=assessment, fund_context=context))
+    assert result.chosen
+    assert 'A qualified independent view' in report.prompts[0] and 'Index strategy in fund.pdf' in report.prompts[0]
+    assert 'A qualified independent view' in judge.prompts[0] and 'Index strategy in fund.pdf' in judge.prompts[0]
+
+
 def test_a_factual_issue_gets_one_targeted_rewrite_with_the_feedback():
     texts = []
 
@@ -125,7 +137,7 @@ def test_a_draft_with_a_wrong_figure_is_not_sent_to_the_judge():
     assert result.chosen is None and board.reason.startswith("code's checks: check:")
 
 
-def test_with_rejudge_the_rewrite_is_reviewed_again_then_code_text_is_used():
+def test_material_issue_gets_one_code_checked_rewrite_even_if_rejudge_configured():
     bad = "Not good. " + ENDING
     rewrites = {"n": 0}
 
@@ -135,8 +147,8 @@ def test_with_rejudge_the_rewrite_is_reviewed_again_then_code_text_is_used():
     no = review(approved=False, conclusion_reasonable=False, feedback="Unclear conclusion.")
     judge = FakeRun(no, no)
     result = asyncio.run(draft_and_judge(facts(), ["board"], ["Fees"], FakeRunBy(run), judge, max_rewrites=1))
-    assert rewrites["n"] == 1 and len(judge.prompts) == 2 and result.chosen is None
-    assert result.flags[0].message.startswith(AI_DRAFTS_FAILED) and "Unclear conclusion" in result.flags[0].message
+    assert rewrites["n"] == 1 and len(judge.prompts) == 1 and result.chosen is not None
+    assert "not judged again" in result.reason
 
 
 def test_an_unreachable_judge_means_code_text_with_a_flag():
@@ -155,21 +167,19 @@ def test_the_judge_is_told_code_verdict_sentence_and_its_reader_wording():
     assert "Never flag that" in INSTRUCTIONS and "not to reject it" in INSTRUCTIONS
 
 
-def test_style_points_become_improvements_and_the_improved_draft_is_used():
+def test_optional_improvements_do_not_trigger_rewrite():
     prompts = []
 
     def run(prompt):
         prompts.append(prompt)
         return {"text": GOOD["analyst"] if len(prompts) > 1 else GOOD["board"]}
-    judge = FakeRun(review(approved=False, clear_for_analysts=False, feedback="Accurate but brief.",
+    judge = FakeRun(review(approved=True, clear_for_analysts=False, feedback="Accurate but brief.",
                            improvements=["say that the 5-year returns are annualised"]))
     result = asyncio.run(draft_and_judge(facts(), ["board"], ["Fees"], FakeRunBy(run), judge, max_rewrites=1,
                                          rejudge=False))
-    assert len(judge.prompts) == 1 and len(prompts) == 2                    # one Judge pass, one enhancing rewrite
-    assert "improve: say that the 5-year returns are annualised" in prompts[1]
-    assert "Always end the Executive commentary with the verdict sentence given above, word for word" in prompts[1]
-    assert result.chosen.draft.text == GOOD["analyst"] and result.chosen.draft.rewritten and not result.flags
-    assert "improved once with the Judge's suggestions" in result.reason
+    assert len(judge.prompts) == 1 and len(prompts) == 1
+    assert result.chosen.draft.text == GOOD["board"] and not result.chosen.draft.rewritten and not result.flags
+    assert result.chosen.improvements == ["say that the 5-year returns are annualised"]
 
 
 def test_an_improvement_that_breaks_codes_checks_keeps_the_approved_draft_never_code_text():
@@ -181,8 +191,8 @@ def test_an_improvement_that_breaks_codes_checks_keeps_the_approved_draft_never_
     judge = FakeRun(review(improvements=["use the verdict code Retain"]))
     result = asyncio.run(draft_and_judge(facts(), ["board"], ["Fees"], FakeRunBy(run), judge, max_rewrites=1,
                                          rejudge=False))
-    assert calls["n"] == 2 and result.chosen.draft.text == GOOD["board"] and not result.chosen.draft.rewritten
-    assert not result.flags and any("approved draft is kept" in line for line in result.log)
+    assert calls["n"] == 1 and result.chosen.draft.text == GOOD["board"] and not result.chosen.draft.rewritten
+    assert not result.flags
 
 
 def test_no_improvements_means_no_extra_call_and_a_real_factual_error_is_still_fixed_or_falls_back():
@@ -341,8 +351,8 @@ def test_a_commentary_that_fails_codes_checks_is_left_out_but_the_dashboard_answ
         return two_part(executive=["Too short. " + ENDING])                     # one paragraph: fails, also after the rewrite
     result = asyncio.run(draft_and_judge(facts(), ["analyst"], ["Fees"], FakeRunBy(run), FakeRun(review()),
                                          max_rewrites=1, rejudge=False))
-    assert calls["n"] == 2 and result.chosen is not None and result.chosen.draft.executive == []
-    assert result.chosen.draft.answer and any("Executive commentary still fails" in line for line in result.log)
+    assert calls["n"] == 1 and result.chosen is not None and result.chosen.draft.executive == []
+    assert result.chosen.draft.answer and result.chosen.issues
 
 
 def test_missing_evidence_is_never_treated_as_poor_performance():
@@ -401,6 +411,6 @@ def test_unresolved_executive_citation_triggers_a_rewrite_and_is_omitted_if_unfi
     judge = FakeRun(review())
     result = asyncio.run(draft_and_judge(facts(), ["analyst"], ["Fees"], reporter_run, judge,
                                          sources=[], rejudge=False))
-    assert "[1] does not match a source" in reporter_run.prompts[1]
+    assert len(reporter_run.prompts) == 1
     assert "Shares rose [1]." not in judge.prompts[0]
     assert result.chosen and not result.chosen.draft.executive

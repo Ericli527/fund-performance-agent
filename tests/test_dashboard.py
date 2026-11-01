@@ -50,6 +50,22 @@ def test_ai_read_figures_are_noted_but_do_not_raise_a_warning():
     assert q.level == "clear" and "read from the documents by AI" in q.detail
 
 
+def test_historical_repeated_prices_are_grouped_consistently_in_dashboard_and_report():
+    from fund_performance.executive import material_issues
+    entries = [{'check': 'repeated_prices', 'level': 'warning', 'message':
+                f'Suspicious repeated price {value}; flagged dates are outside the five-year price window'}
+               for value in ('0.95', '1.01')]
+    d = data(flags=entries)
+    d['facts']['data_flags'] = entries
+    d['facts']['figures'][0]['source'] = 'ai_extracted'
+    q = evidence_quality(d)
+    assert q.level == 'clear' and len(q.warnings) == 1
+    for output in (text(dashboard_html(d)), text(material_issues(d))):
+        assert output.count('Historical repeated prices fall outside') == 1
+        assert 'Evidence note' in output and '0.95' not in output and '1.01' not in output
+    assert d['facts']['data_flags'] == entries
+
+
 def test_a_suggested_satisfied_with_open_data_issues_is_never_shown_as_final():
     html = text(dashboard_html(data(flags=[{"check": "x", "level": "warning", "message": "Gap in prices"}])))
     assert "Satisfied" in html and "Not final: review the data warnings first." in html

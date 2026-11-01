@@ -50,6 +50,26 @@ def test_each_candidate_has_its_own_fixed_timing():
     assert all(c["when"] in c["action"] for c in cands.values())
 
 
+def test_repeated_prices_grouped_by_scope_without_copying_details():
+    from fund_performance.presentation import evidence_quality, signoff_checks
+    historical = [{'check': 'repeated_prices', 'level': 'warning', 'message':
+                   f'Suspicious repeated price {value}; flagged dates are outside the five-year price window; '
+                   'their effect on longer historical calculations remains to be reviewed'} for value in ('0.95', '1.01')]
+    active = {'check': 'repeated_prices', 'level': 'warning', 'message':
+              'Suspicious repeated price 1.20; at least one flagged date falls within the five-year price window'}
+    data = facts_with(flags=historical + [active, {'check': 'provisional_returns', 'level': 'warning',
+                                                   'message': 'Returns recovered are provisional'}])
+    data['figures'] = [{'source': 'ai_extracted'}]
+    quality = evidence_quality({'facts': data, 'flags': data['data_flags']})
+    assert len(quality.warnings) == 2 and 'current' in quality.warnings[0] and 'Historical' in quality.warnings[1]
+    actions = candidate_actions(data)
+    assert [a['id'] for a in actions[:3]] == ['warning_repeated_prices', 'record_decision', 'warning_historical_prices']
+    assert all('Suspicious repeated price' not in a['action'] for a in actions)
+    assert len(data['data_flags']) == 4 and signoff_checks(data)
+    data['data_flags'] = historical
+    assert signoff_checks(data) is None
+
+
 def test_the_ai_never_writes_actions():
     """ The AI's output has no actions field; the report's actions are code's, word for word """
     assert "actions" not in AnalystDraft.model_fields

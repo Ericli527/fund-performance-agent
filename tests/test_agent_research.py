@@ -87,10 +87,14 @@ def test_never_more_searches_than_the_limit():
     assert len(out.plan) == MAX == len(search.prompts) == 5
 
 
-def test_search_prompt_holds_only_the_query_and_reason():
+def test_search_prompt_includes_question_dates_and_fund_context():
     fake = FakeRunBy(summary_for)
-    asyncio.run(research(profile(), planned(1), MAX, run_search=fake))
-    assert fake.prompts == ["Search query: Sample World Index Fund question A\nReason: context"]
+    asyncio.run(research(profile(), planned(1), MAX, run_search=fake,
+                         question="What risks matter?", fund_context={"document_summary": "Global equity strategy"}))
+    prompt = fake.prompts[0]
+    assert "Sample World Index Fund question A\nReason: context" in prompt
+    assert "What risks matter?" in prompt and "2025-09-30 to 2026-09-30" in prompt
+    assert "Global equity strategy" in prompt and "untrusted" in prompt
 
 
 def test_a_failed_search_is_not_retried_and_is_left_out():

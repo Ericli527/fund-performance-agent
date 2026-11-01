@@ -53,13 +53,25 @@ def missing_evidence(facts: dict) -> dict[str, str]:
     return out
 
 
+def historical_price_warning(flag: dict) -> bool:
+    """Only classify a repeated-price warning as historical when the data check says so explicitly."""
+    return (flag.get("check") == "repeated_prices" and
+            "flagged dates are outside the five-year price window" in flag.get("message", ""))
+
+
 def evidence_quality(data: dict) -> EvidenceQuality:
     """ From code's data checks and the run's flags only. "clear" means no check raised an issue; it is not a
     verification of the source documents """
     facts = data["facts"]
     flags = data.get("flags", [])
     blocking = list(dict.fromkeys(f["message"] for f in flags if f["level"] == "blocking"))
-    warnings = list(dict.fromkeys(f["message"] for f in flags if f["level"] == "warning"))
+    warnings = list(dict.fromkeys(f["message"] for f in flags if f["level"] == "warning"
+                                   and f.get("check") not in ("repeated_prices", "provisional_returns")))
+    prices = [f for f in flags if f["level"] == "warning" and f.get("check") == "repeated_prices"]
+    if any(not historical_price_warning(f) for f in prices):
+        warnings.append("Repeated prices may affect the current five-year review; investigate the underlying price data.")
+    if any(historical_price_warning(f) for f in prices):
+        warnings.append("Historical repeated prices fall outside the five-year review; check their effect on longer-period analysis.")
     checks = [p["name"] for p in facts.get("scorecard", {}).get("pillars", []) if p["rating"] == "CHECK DATA"]
     ai_read = any(f.get("source") == "ai_extracted" for f in facts.get("figures", []))
     missing = missing_evidence(facts)
@@ -72,6 +84,10 @@ def evidence_quality(data: dict) -> EvidenceQuality:
         return EvidenceQuality("check", "Data check needed",
                                f"{n} issue{'s' if n != 1 else ''} must be resolved before the ratings can be relied "
                                "on" + (f" ({', '.join(checks)})" if checks else ""), blocking, warnings, ai_read)
+    if warnings and prices and all(historical_price_warning(f) for f in prices) and len(warnings) == 1:
+        return EvidenceQuality("clear", "Historical observations",
+                               "Historical price observations may affect longer-period analysis.",
+                               blocking, warnings, ai_read)
     if warnings:
         return EvidenceQuality("warnings", "Warnings to review",
                                f"{len(warnings)} data warning{'s' if len(warnings) != 1 else ''} to check before signing",
@@ -178,6 +194,7 @@ def signoff_checks(facts: dict) -> str | None:
     """ A shared sign-off action when both extracted figures and repeated-price warnings need checking. """
     ai_read = any(f.get("source") == "ai_extracted" for f in facts.get("figures", []))
     price_warning = any(f.get("check") == "repeated_prices" and f.get("level") == "warning"
+                        and not historical_price_warning(f)
                         for f in facts.get("data_flags", []))
     if ai_read and price_warning:
         return "Verify the AI-extracted figures against the documents and check the flagged historical prices before sign-off."

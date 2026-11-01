@@ -571,7 +571,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         async def do_research():
             pages = await fetch_pages(approved_pages, sources_config.fetch, r.http_get)
             found = await research(profile, planned_searches, t.limits.max_web_searches, pages, r.search, r.page,
-                                   fund_context=context_brief)
+                                   fund_context=context_brief, question=question)
             return found, _FAILURE.get()
 
         async def timed_research():
@@ -705,7 +705,8 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                                                s.drafting.max_rewrites, s.drafting.max_summary_chars,
                                                s.drafting.max_drafts, s.drafting.rejudge_after_rewrite, vetted,
                                                s.drafting.reporter_tools, plan.to_dict(),
-                                               s.drafting.reporter_max_turns, question),
+                                               s.drafting.reporter_max_turns, question,
+                                               fund_context=context_brief, assessment=assessment),
                                s.timeouts_seconds.drafting)
         if drafted is None:
             flags.append(DataFlag(check="judge", level="info", message=(
