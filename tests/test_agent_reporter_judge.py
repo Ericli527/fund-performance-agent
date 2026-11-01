@@ -1,6 +1,7 @@
 """ Reporting Agent and the Judge Agent: code's checks, the Judge's review (facts, reasoning, security, clarity),
 code's decision (pass, one targeted revision or fallback) and code's conclusion as the fallback """
 import asyncio
+import pytest
 from fund_performance.agents.judge import AI_DRAFTS_FAILED, INSTRUCTIONS, draft_and_judge
 from fund_performance.agents.reporter import draft_problems, verdict_sentence
 from conftest import FakeRun, FakeRunBy
@@ -101,7 +102,7 @@ def test_reporter_retains_checked_detailed_and_research_narratives():
     runner = FakeRun(answer)
     draft = asyncio.run(write_draft(facts(), 'board', ['Mandate'], runner, sources=[source],
                                     question='How does it track?\nPlease explain.'))
-    assert not draft.additional_problems
+    assert not draft.detailed_problems and not draft.research_problems
     assert draft.detailed_analysis and '[1]' in draft.research_narrative[0]
     assert 'How does it track?\nPlease explain.' in runner.prompts[0]
 
@@ -113,6 +114,21 @@ def test_unsupported_detailed_narrative_is_not_shown_to_the_judge():
     result = asyncio.run(draft_and_judge(facts(), ['board'], ['Mandate'], FakeRun(draft), judge))
     assert result.chosen and not result.chosen.draft.detailed_analysis
     assert '999.9%' not in judge.prompts[0]
+
+
+@pytest.mark.parametrize('invalid_section', ['detailed_analysis', 'research_narrative'])
+def test_narrative_sections_are_checked_independently(invalid_section):
+    source = {'summary': 'The benchmark provider updated its methodology.', 'date': '2026-09-01'}
+    valid = {'detailed_analysis': ['The fund follows its stated benchmark.'],
+             'research_narrative': ['The benchmark provider updated its methodology [1].']}
+    answer = {'answer': 'The fund tracks its index.', 'evidence': [], **valid}
+    answer[invalid_section] = ['Unsupported return 999.9% [2].']
+    judge = FakeRun(review())
+    result = asyncio.run(draft_and_judge(facts(), ['board'], ['Mandate'], FakeRun(answer), judge, sources=[source]))
+    other = 'research_narrative' if invalid_section == 'detailed_analysis' else 'detailed_analysis'
+    assert result.chosen and getattr(result.chosen.draft, invalid_section) == []
+    assert getattr(result.chosen.draft, other) == valid[other]
+    assert valid[other][0] in judge.prompts[0] and '999.9%' not in judge.prompts[0]
 
 
 def test_a_factual_issue_gets_one_targeted_rewrite_with_the_feedback():

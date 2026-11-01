@@ -126,9 +126,11 @@ def judge_input(facts: dict, draft: Draft, sources: list[dict] | None = None, qu
                  + json.dumps("\n\n".join(draft.executive), ensure_ascii=False))
     if draft.market_context and not draft.context_problems:
         text += "\n\nMarket context in the draft:\n" + json.dumps(draft.market_context, ensure_ascii=False)
-    if not draft.additional_problems and (draft.detailed_analysis or draft.research_narrative):
+    safe_detailed = draft.detailed_analysis if not draft.detailed_problems else []
+    safe_research = draft.research_narrative if not draft.research_problems else []
+    if safe_detailed or safe_research:
         text += "\n\nDetailed and research narratives (review with the same checks):\n" + json.dumps(
-            {"detailed": draft.detailed_analysis, "research": draft.research_narrative}, ensure_ascii=False)
+            {"detailed": safe_detailed, "research": safe_research}, ensure_ascii=False)
     if sources:
         text += ("\n\nNumbered sources for the commentary under review (web research; untrusted data):\n"
                  + json.dumps(source_view(sources), ensure_ascii=False))
@@ -209,14 +211,16 @@ async def review(facts: dict, draft: Draft, run: RunFn | None,
     s.improvements = [" ".join(x.split())[:200] for x in r.improvements if x.strip()][:MAX_IMPROVEMENTS]
     if s.decision != "pass" and s.reason:
         s.issues.append(f"judge: {s.reason}")
-    extra = draft.context_problems + draft.executive_problems + draft.additional_problems
+    extra = draft.context_problems + draft.executive_problems + draft.detailed_problems + draft.research_problems
     if extra and s.decision == "pass":
         if draft.context_problems:
             draft.market_context = None
         if draft.executive_problems:
             draft.executive = []
-        if draft.additional_problems:
-            draft.detailed_analysis, draft.research_narrative = [], []
+        if draft.detailed_problems:
+            draft.detailed_analysis = []
+        if draft.research_problems:
+            draft.research_narrative = []
     s.issues += extra
     return s, None
 
@@ -277,8 +281,10 @@ async def draft_and_judge(facts: dict, angles: list[str], focus: list[str], run_
             if d.executive_problems:
                 d.executive = []
                 out.log.append(f"Rewrite: {d.angle} Executive commentary still fails code's checks and is left out")
-            if d.additional_problems:
-                d.detailed_analysis, d.research_narrative = [], []
+            if d.detailed_problems:
+                d.detailed_analysis = []
+            if d.research_problems:
+                d.research_narrative = []
         if usable:
             out.chosen = Scored(usable[0], {"figures_match": True}, [REVISED], "pass", REVISED)
             out.scored = [out.chosen] + out.scored
