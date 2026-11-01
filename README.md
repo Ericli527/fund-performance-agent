@@ -60,8 +60,8 @@ python app.py                   # opens on http://127.0.0.1:7860
 ```
 
 Choose a question type and edit the question. Use **+ Add** to upload multiple public documents or choose a test
-case. The attachment table shows detected roles; confirm ambiguous documents, correct roles, or delete a row before
-running. A fund price history and main factsheet are required for a live review; a KID and peer factsheets are
+case. The attachment table shows detected types; wait for processing to finish, confirm ambiguous documents, and use
+the per-file **Remove** button or **Clear all attachments** to remove them. A fund price history and main factsheet are required for a live review; a KID and peer factsheets are
 optional. Separate benchmark series may be uploaded as CSV/Excel with date and index-level columns; confirm the
 benchmark name, currency and pricing time. The name, currency and pricing time must match the fund profile. Dates must
 match the fund price dates exactly, and a separate series cannot replace an

@@ -1,6 +1,8 @@
 """Deterministic attachment identification for the review input page."""
 from pathlib import Path
+import logging
 import re
+import uuid
 import pandas as pd
 from fund_performance.io import read_document, read_prices
 
@@ -15,9 +17,18 @@ DEMO_INPUT = 'Prevalidated demo input'
 ROLES = (PRICE, FACTSHEET, KID, PEER, SUPPORTING, BENCHMARK, CONFIRM)
 PRICE_TYPES = {'.csv', '.xlsx', '.xls'}
 DOC_TYPES = {'.pdf', '.docx'}
+LOGGER = logging.getLogger(__name__)
 
 
-def classify(path: str) -> tuple[str, str]:
+def _signature(path: Path) -> tuple[int, int, int] | None:
+    try:
+        stat = path.stat()
+        return stat.st_ino, stat.st_size, stat.st_mtime_ns
+    except OSError:
+        return None
+
+
+def classify(path: str, *, details: dict | None = None) -> tuple[str, str]:
     """Only assign a role where file structure or document text supports it."""
     p = Path(path)
     try:
@@ -36,7 +47,10 @@ def classify(path: str) -> tuple[str, str]:
                 return CONFIRM, 'Price history needs at least two observations.'
             return PRICE, ''
         if p.suffix.lower() in DOC_TYPES:
-            text = ' '.join(read_document(p).lower().split())
+            raw = read_document(p)
+            if details is not None:
+                details['document_length'] = len(raw.strip())
+            text = ' '.join(raw.lower().split())
             if not text:
                 return CONFIRM, 'No readable text found.'
             kid = re.search(r'\b(key investor information|key information document|kiid|kid)\b', text)
@@ -60,15 +74,34 @@ def classify(path: str) -> tuple[str, str]:
             return CONFIRM, 'Document role needs confirmation.'
         return CONFIRM, 'Unsupported file type.'
     except Exception:
+        LOGGER.exception('Attachment classification failed for %s', p.name)
         return CONFIRM, 'File could not be read; replace it or check its format.'
 
 
 def add_files(entries: list[dict] | None, paths: list[str] | None) -> list[dict]:
     result = list(entries or [])
     for path in paths or []:
-        role, issue = classify(path)
-        result.append({'id': str(len(result) + 1), 'path': str(path), 'role': role, 'issue': issue})
+        details = {}
+        try:
+            role, issue = classify(path, details=details)
+        except Exception:
+            LOGGER.exception('Unexpected attachment processing failure')
+            role, issue = CONFIRM, 'File could not be processed; remove it and try again.'
+        result.append({'id': uuid.uuid4().hex[:12], 'path': str(path), 'role': role, 'issue': issue,
+                       'inspection': details | {'signature': _signature(Path(path)), 'role': role, 'issue': issue}})
     return result
+
+
+def _inspection(entry: dict) -> dict:
+    """Reuse only this session's inspection while the underlying file is unchanged."""
+    path = Path(entry['path'])
+    cached = entry.get('inspection') or {}
+    signature = _signature(path)
+    if signature is not None and tuple(cached.get('signature') or ()) == signature:
+        return cached
+    details = {}
+    role, issue = classify(str(path), details=details)
+    return details | {'signature': signature, 'role': role, 'issue': issue}
 
 
 def rows(entries: list[dict]) -> list[list[str]]:
@@ -94,6 +127,15 @@ def apply_roles(entries: list[dict], table) -> tuple[list[dict], str]:
     return selected, ''
 
 
+def reconcile_roles(entries: list[dict], table) -> tuple[list[dict], str]:
+    """Apply visible edits without losing files added after an overlapping event was queued."""
+    selected, error = apply_roles(entries, table)
+    if error:
+        return [], error
+    chosen = {entry['id']: entry for entry in selected}
+    return [chosen.get(entry['id'], entry) for entry in entries], ''
+
+
 def validate(question: str, entries: list[dict], synthetic: bool = False) -> list[str]:
     issues = []
     if not (question or '').strip():
@@ -115,16 +157,18 @@ def validate(question: str, entries: list[dict], synthetic: bool = False) -> lis
                 except Exception:
                     issues.append(f'{path.name}: benchmark series needs readable dates and positive index levels.')
             elif path.suffix.lower() in DOC_TYPES:
-                detected, issue = classify(str(path))
-                if 'could not be read' in issue or 'No readable' in issue:
+                inspection = _inspection(e)
+                issue = inspection['issue']
+                if 'could not' in issue.lower() or 'no readable' in issue.lower():
                     issues.append(f'{path.name}: {issue}')
-                elif len(read_document(path).strip()) > 12000:
+                elif inspection.get('document_length', 0) > 12000:
                     issues.append(f'{path.name}: benchmark evidence must contain at most 12000 characters of text.')
             else:
                 issues.append(f'{path.name}: benchmark evidence must be CSV, Excel, PDF or Word.')
         elif role != DEMO_INPUT:
-            detected, issue = classify(str(path))
-            if issue and ('could not be read' in issue or 'Unsupported' in issue or 'No readable' in issue):
+            inspection = _inspection(e)
+            detected, issue = inspection['role'], inspection['issue']
+            if issue and ('could not' in issue.lower() or 'unsupported' in issue.lower() or 'no readable' in issue.lower()):
                 issues.append(f'{path.name}: {issue}')
             if role == PRICE and detected != PRICE:
                 issues.append(f'{path.name}: select a readable price history.')
@@ -167,10 +211,21 @@ def supporting_inputs(entries: list[dict]) -> list[str]:
 
 def select_type(entries: list[dict], table, attachment_id: str, selected_type: str):
     """Apply a per-file selection to the authoritative table and server-side state."""
-    selected, error = apply_roles(entries or [], table)
-    if error or selected_type not in ROLES:
-        return entries, table
+    selected, error = reconcile_roles(entries or [], table)
+    if error:
+        return entries, rows(entries or [])
+    if selected_type not in ROLES:
+        return entries, rows(entries or [])
     if not any(e['id'] == attachment_id and e['role'] != DEMO_INPUT for e in selected):
-        return entries, table
+        return entries, rows(entries or [])
     selected = [e | {'role': selected_type, 'issue': ''} if e['id'] == attachment_id else e for e in selected]
+    return selected, rows(selected)
+
+
+def remove_attachment(entries: list[dict], table, attachment_id: str) -> tuple[list[dict], list[list[str]]]:
+    """Remove one current-session entry; never delete or replace the uploaded file."""
+    selected, error = reconcile_roles(entries or [], table)
+    if error:
+        return entries, rows(entries or [])
+    selected = [entry for entry in selected if entry['id'] != attachment_id]
     return selected, rows(selected)

@@ -841,7 +841,8 @@ def _card(value: str) -> str:
 
 def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
     from fund_performance.attachments import (BENCHMARK, CONFIRM, DEMO_INPUT, FACTSHEET, KID, PEER, PRICE, ROLES,
-                                              add_files, apply_roles, engine_inputs, rows, select_type,
+                                              add_files, apply_roles, engine_inputs, reconcile_roles, remove_attachment,
+                                              rows, select_type,
                                               supporting_inputs, validate)
     limits = limits or AiLimits(load_settings().web)
     web_settings = load_settings().web
@@ -859,16 +860,20 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
         with gr.Column(visible=False) as add_menu:
             upload = gr.UploadButton("Upload your own files", file_count="multiple", file_types=PRICE_TYPES + DOC_TYPES,
                                      type="filepath")
+            gr.Markdown("Files upload first, then are checked. Please keep this page open while processing completes.")
             cases = selectable_cases()
             demo_choice = gr.Dropdown([(demo_card(d), d.id) for d in cases], label="Use a test case", value=None)
+        upload_status = gr.Markdown()
         entries = gr.State([])
+        upload_busy = gr.State(False)
         demo_state = gr.State(None)
         mode_state = gr.State(QUICK)
         attachments = gr.Dataframe(headers=["ID", "File", "Type", "Notes", "Document date"], datatype=["str"] * 5,
                                    value=[], type="array", interactive=True, row_count=0,
                                    column_count=(5, "fixed"), label="Attachments")
-        gr.Markdown("Choose a type for each file below. Delete a table row to remove it; upload again to replace it. "
+        gr.Markdown("Choose a type for each file below. Use **Remove** beside a file, or **Clear all attachments**. "
                     "Confirm ambiguous files before running.")
+        clear_attachments = gr.Button("Clear all attachments", size="sm")
         with gr.Column() as type_selectors:
             pass
         with gr.Column(visible=False) as benchmark_fields:
@@ -915,7 +920,9 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             return {'series': series[0] if series else None, 'documents': docs, 'name': name,
                     'currency': currency, 'confirmed': confirmed, 'pricing_point': pricing}, problems
 
-        def update_status(q, state, table, demo_id, name='', currency='', confirmed=False, pricing=None):
+        def update_status(q, state, table, demo_id, name='', currency='', confirmed=False, pricing=None, busy=False):
+            if busy:
+                return "Files are being processed. Please wait.", gr.update(interactive=False)
             selected, error = apply_roles(state or [], table)
             demo = find_demo(demo_id) if demo_id else None
             synthetic = bool(demo and demo.fallback)
@@ -933,15 +940,40 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             return info, gr.update(interactive=not issues)
 
         def upload_files(paths, state, table):
-            existing, error = apply_roles(state or [], table)
-            if error:
-                return state, table, None
-            # Renumber after deletions so every row identifies one server-side file.
-            existing = [e | {'id': str(i)} for i, e in enumerate(existing, 1)]
-            updated = add_files(existing, paths)
-            return updated, rows(updated), None
+            """Stream immediate feedback, then inspect files; keep existing state on unexpected failures."""
+            yield (gr.skip(), gr.update(interactive=False), gr.skip(), gr.update(interactive=False),
+                   gr.update(interactive=False), gr.update(interactive=False), gr.update(interactive=False),
+                   gr.update(visible=False), "Processing uploaded files…", gr.update(interactive=False), True)
+            processed = False
+            try:
+                existing, error = reconcile_roles(state or [], table)
+                if error:
+                    existing = list(state or [])
+                updated = add_files(existing, paths)
+                failed = sum(bool(e.get('issue')) and ('could not' in e['issue'].lower())
+                             for e in updated[len(existing):])
+                message = f"Processed {len(updated) - len(existing)} file(s)."
+                if failed:
+                    message += f" {failed} could not be read; remove or replace them."
+                if error:
+                    message += " Some table edits could not be applied; please check the types."
+                result = updated, rows(updated), None, message
+                processed = True
+            except Exception:
+                traceback.print_exc()
+                result = list(state or []), rows(state or []), gr.skip(), "Files could not be processed. Existing attachments were kept; please try again."
+            current, table_rows, demo, message = result
+            yield (current, gr.update(value=table_rows, interactive=True), demo, gr.update(interactive=True),
+                   gr.update(interactive=True), gr.update(value=None, interactive=True) if processed else gr.update(interactive=True),
+                   gr.update(interactive=True),
+                   gr.update(visible=True), message, gr.update(interactive=False), False)
+
+        def clear_files():
+            return [], [], None, QUICK, gr.update(value=None), "All attachments removed.", ""
 
         def choose_case(demo_id):
+            if not demo_id:
+                return gr.skip(), gr.skip(), gr.skip(), gr.skip(), "Choose a test case."
             demo = find_demo(demo_id) if demo_id else None
             if not demo:
                 return [], [], None, QUICK, "Choose a test case."
@@ -1009,46 +1041,70 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                     yield progress_markdown(history), "", gr.update(visible=True), dashboard_html(data, "analyst"), executive, detailed, tech, item.log, item.message
 
         private = {"api_visibility": "private"}
+        mutation = {"concurrency_id": "attachment-mutations", "concurrency_limit": 1}
         review_type.change(lambda t: REVIEW_TYPES[t][2], review_type, question, **private)
         add.click(lambda: gr.update(visible=True), outputs=add_menu, **private)
-        upload.upload(upload_files, [upload, entries, attachments], [entries, attachments, demo_state], **private)
-        demo_choice.change(choose_case, demo_choice, [entries, attachments, demo_state, mode_state, case_info], **private)
+        upload_event = upload.upload(upload_files, [upload, entries, attachments],
+            [entries, attachments, demo_state, upload, add, demo_choice, clear_attachments, type_selectors,
+             upload_status, run, upload_busy], trigger_mode="multiple", **mutation, **private)
+        upload_event.then(update_status, [question, entries, attachments, demo_state, benchmark_name,
+                                         benchmark_currency, benchmark_confirmed, benchmark_pricing, upload_busy],
+                          [attachment_status, run], **private)
+        demo_choice.change(choose_case, demo_choice, [entries, attachments, demo_state, mode_state, case_info],
+                           **mutation, **private)
+        clear_attachments.click(clear_files, outputs=[entries, attachments, demo_state, mode_state, demo_choice,
+                                                       upload_status, case_info],
+                                **mutation, **private)
         def show_benchmark(state, table):
             selected, error = apply_roles(state or [], table)
             return gr.update(visible=not error and any(e['role'] == BENCHMARK for e in selected))
 
+        def render_type_rows(state, table):
+            selected, error = apply_roles(state or [], table)
+            if error:
+                return
+            for item in selected:
+                with gr.Row():
+                    if item['role'] != DEMO_INPUT:
+                        selector = gr.Dropdown(choices=list(ROLES), value=item['role'],
+                                               label=Path(item['path']).name, interactive=True,
+                                               key=f"attachment-type-{item['id']}", preserved_by_key=[])
+                        def change_type(value, current, current_table, item_id=item['id']):
+                            return select_type(current, current_table, item_id, value)
+                        selector.input(change_type, [selector, entries, attachments], [entries, attachments],
+                                       **mutation, **private)
+                    else:
+                        gr.Markdown(f"Prevalidated demo input: {escape(Path(item['path']).name)}")
+                    remove = gr.Button("Remove", size="sm", scale=0, min_width=90,
+                                       key=f"attachment-remove-{item['id']}")
+                    def remove_file(current, current_table, item_id=item['id']):
+                        updated, table_rows = remove_attachment(current, current_table, item_id)
+                        message = "Attachment removed." if len(updated) < len(current or []) else "Attachment could not be removed; check the table and try again."
+                        return updated, table_rows, message
+                    remove.click(remove_file, [entries, attachments], [entries, attachments, upload_status],
+                                 **mutation, **private)
         with type_selectors:
-            @gr.render(inputs=[entries, attachments])
+            @gr.render(inputs=[entries, attachments], triggers=[ui.load, attachments.change],
+                       concurrency_id="attachment-render", concurrency_limit=1)
             def render_types(state, table):
-                selected, error = apply_roles(state or [], table)
-                if error:
-                    return
-                for item in selected:
-                    if item['role'] == DEMO_INPUT:
-                        continue
-                    selector = gr.Dropdown(choices=list(ROLES), value=item['role'],
-                                           label=Path(item['path']).name, interactive=True,
-                                           key=f"attachment-type-{item['id']}", preserved_by_key=[])
-                    def change_type(value, current, current_table, item_id=item['id']):
-                        return select_type(current, current_table, item_id, value)
-                    event = selector.input(change_type, [selector, entries, attachments], [entries, attachments], **private)
-                    event.then(update_status, [question, entries, attachments, demo_state, benchmark_name,
-                                               benchmark_currency, benchmark_confirmed, benchmark_pricing],
-                               [attachment_status, run], **private)
-                    event.then(show_benchmark, [entries, attachments], benchmark_fields, **private)
+                try:
+                    render_type_rows(state, table)
+                except Exception:
+                    traceback.print_exc()
+                    gr.Markdown("Attachment controls could not be displayed. Your files are still listed; "
+                                "try reloading the page or clearing the attachments.")
 
         # Gradio registers the render trigger as "undocumented" by default; keep it private like the other events.
         for fn in ui.fns.values():
             if fn.renderable is not None:
                 fn.api_visibility = "private"
 
-        for control in (attachments, entries):
-            control.change(show_benchmark, [entries, attachments], benchmark_fields, **private)
-        for control in (question, attachments, entries, demo_state, benchmark_name, benchmark_currency,
+        attachments.change(show_benchmark, [entries, attachments], benchmark_fields, **private)
+        for control in (question, attachments, demo_state, benchmark_name, benchmark_currency,
                         benchmark_confirmed, benchmark_pricing):
             control.change(update_status, [question, entries, attachments, demo_state, benchmark_name,
-                                           benchmark_currency, benchmark_confirmed, benchmark_pricing],
-                           [attachment_status, run], **private)
+                                           benchmark_currency, benchmark_confirmed, benchmark_pricing, upload_busy],
+                           [attachment_status, run], trigger_mode="always_last", **private)
         run.click(on_run, [question, entries, attachments, demo_state, mode_state, benchmark_name,
                            benchmark_currency, benchmark_confirmed, benchmark_pricing],
                   [progress, message, results, dashboard, executive_pdf, pdf, technical, log, plain], **private)
