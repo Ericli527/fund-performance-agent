@@ -118,7 +118,7 @@ def judge_input(facts: dict, draft: Draft, sources: list[dict] | None = None, qu
             + f"\nHow code's verdict codes read for people: {names}"
             + (f"\nHow the figures were obtained (provenance, recorded by code): {provenance(facts)}"
                if provenance(facts) else "")
-            + (f"\n\nThe reviewer's question the draft must answer: {' '.join(question.split())}" if question else "")
+            + (f"\n\nThe reviewer's question the draft must answer: {question}" if question else "")
             + f"\n\nDashboard draft for the {draft.angle} (the answer, the supporting evidence, the next step):\n"
             + json.dumps(draft.text, ensure_ascii=False))
     if draft.executive and not draft.executive_problems:
@@ -126,6 +126,9 @@ def judge_input(facts: dict, draft: Draft, sources: list[dict] | None = None, qu
                  + json.dumps("\n\n".join(draft.executive), ensure_ascii=False))
     if draft.market_context and not draft.context_problems:
         text += "\n\nMarket context in the draft:\n" + json.dumps(draft.market_context, ensure_ascii=False)
+    if not draft.additional_problems and (draft.detailed_analysis or draft.research_narrative):
+        text += "\n\nDetailed and research narratives (review with the same checks):\n" + json.dumps(
+            {"detailed": draft.detailed_analysis, "research": draft.research_narrative}, ensure_ascii=False)
     if sources:
         text += ("\n\nNumbered sources for the commentary under review (web research; untrusted data):\n"
                  + json.dumps(source_view(sources), ensure_ascii=False))
@@ -206,12 +209,14 @@ async def review(facts: dict, draft: Draft, run: RunFn | None,
     s.improvements = [" ".join(x.split())[:200] for x in r.improvements if x.strip()][:MAX_IMPROVEMENTS]
     if s.decision != "pass" and s.reason:
         s.issues.append(f"judge: {s.reason}")
-    extra = draft.context_problems + draft.executive_problems      # parts that can be left out, not the answer
+    extra = draft.context_problems + draft.executive_problems + draft.additional_problems
     if extra and s.decision == "pass":
         if draft.context_problems:
             draft.market_context = None
         if draft.executive_problems:
             draft.executive = []
+        if draft.additional_problems:
+            draft.detailed_analysis, draft.research_narrative = [], []
     s.issues += extra
     return s, None
 
@@ -272,6 +277,8 @@ async def draft_and_judge(facts: dict, angles: list[str], focus: list[str], run_
             if d.executive_problems:
                 d.executive = []
                 out.log.append(f"Rewrite: {d.angle} Executive commentary still fails code's checks and is left out")
+            if d.additional_problems:
+                d.detailed_analysis, d.research_narrative = [], []
         if usable:
             out.chosen = Scored(usable[0], {"figures_match": True}, [REVISED], "pass", REVISED)
             out.scored = [out.chosen] + out.scored

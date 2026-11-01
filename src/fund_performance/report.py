@@ -644,6 +644,9 @@ def _page3(inp: ReportInputs) -> str:
     aov = "".join(f"<tr><td class='l'><b>{a}</b></td><td class='l'>{escape(b)}</td>"
                   f"<td class='chip' style='background-color:{STATUS_COLOURS[c]}'>{c}</td></tr>" for a, b, c in _aov_rows(inp))
     context = inp.narrative.output.market_context
+    analytical = (inp.facts.get("suggested_conclusion") or {}).get("detailed_analysis") or []
+    analytical_html = ("<h3>Investment analysis</h3>" + "".join(f"<p>{escape(p)}</p>" for p in analytical)
+                       if analytical else "")
     market = (f"<p>{escape(context)}</p><p class='small'>Written by AI from the cited sources; sources [n] are listed "
               "in the appendix.</p>" if context else
               "<p class='small'>No market context: " + (
@@ -652,6 +655,7 @@ def _page3(inp: ReportInputs) -> str:
                   "no web source passed the date, relevance and figure checks.") + "</p>")
     return f"""
 <h1>Appendix C: Value, fees and Assessment of Value</h1>
+{analytical_html}
 <h3>Comparison with peer funds</h3>{peer}
 <h3>Fees</h3>{fees}
 <h3>Assessment of Value: the 7 FCA factors (COLL 6.6.20R)</h3>

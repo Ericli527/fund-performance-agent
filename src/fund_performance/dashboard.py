@@ -14,6 +14,7 @@ Two things are kept apart on purpose:
 The audience changes only how much is shown: the Investment Analyst view opens the detail; the Management view
 leads with the summary and the decisions. Both show the same facts and ratings.
 """
+import base64
 from html import escape
 from fund_performance.plain import verdict_meaning, verdict_name
 from fund_performance.presentation import (NAVY, NOT_AVAILABLE, QUESTIONS, RATING_STYLE,  # noqa: F401
@@ -37,11 +38,20 @@ def dashboard_data(result) -> dict:
     flags = flag_dicts(getattr(result, "flags", []))
     source_reader = getattr(log, "report_sources", None)
     sources = source_reader()[1] if callable(source_reader) else (list(narrative.sources) if narrative else [])
+    chart = None
+    chart_path = getattr(result, "run_dir", None)
+    if chart_path and not comparison_invalid(result.facts or {}):
+        try:
+            image = (chart_path / "exec_chart.png").read_bytes()
+            chart = base64.b64encode(image).decode("ascii")
+        except OSError:
+            pass
     return {"facts": result.facts or {}, "reasons": dict(getattr(result, "reasons", {}) or {}),
             "findings": list(output.key_findings) if output else [],
             "actions": list(output.action_texts) if output else [],
             "market_context": output.market_context if output else None,
-            "sources": sources,
+            "sources": sources, "performance_chart": chart,
+            "presentation_context": getattr(result, "presentation_context", None) or {},
             "flags": flags or [dict(f) for f in (result.facts or {}).get("data_flags", [])],
             "offline": bool(log.run.get("offline")) if log is not None else False}
 
@@ -66,7 +76,7 @@ def _details(title: str, body: str, open_: bool = False, cls: str = "") -> str:
             f"<div class='fp-details-body'>{body}</div></details>")
 
 
-def _header(data: dict, quality: EvidenceQuality) -> str:
+def _header(data: dict, quality: EvidenceQuality, institutional: bool = False) -> str:
     facts = data["facts"]
     fund, card = facts.get("fund", {}), facts.get("scorecard", {})
     code = card.get("verdict", "")
@@ -81,13 +91,13 @@ def _header(data: dict, quality: EvidenceQuality) -> str:
     return f"""{banner}
 <div class='fp-result-head'>
   <div class='fp-fund'><h2>{escape(fund.get('fund_name', 'Fund'))}</h2>
-    <p>ISIN {escape(fund.get('isin', '–'))} · {escape(fund.get('share_class', ''))} · Benchmark:
+    <p>ISIN {escape(fund.get('isin', '–'))} · {escape(fund.get('share_class', ''))} · {escape(fund.get('currency', '–'))} · Benchmark:
     {escape(fund.get('benchmark_name', '–'))}</p>
     <p>Reporting period: {n} years to {escape(_date(fund.get('as_of_date')))}{offline}</p></div>
   <div class='fp-status-row'>
     <div class='fp-status fp-assessment' style='border-left-color:{colour}'>
-      <div class='fp-kicker'>Investment assessment (suggested)</div>
-      <div class='fp-status-main' style='color:{colour}'>{escape(verdict_name(code))}</div>
+      <div class='fp-kicker'>{'Deterministic scorecard' if institutional else 'Investment assessment (suggested)'}</div>
+      <div class='fp-status-main' style='color:{colour}'>{escape(code if institutional else verdict_name(code))}</div>
       <div class='fp-status-sub'>{escape(assessment_meaning(code, quality, verdict_meaning(code)))}. From fixed rules on the four ratings; the analyst
       decides and signs.{(' <b>' + escape(caveat) + '</b>') if caveat else ''}</div></div>
     <div class='fp-status fp-quality' style='border-left-color:{q_colour}'>
@@ -98,7 +108,7 @@ def _header(data: dict, quality: EvidenceQuality) -> str:
 </div>"""
 
 
-def _summary(data: dict, quality: EvidenceQuality) -> str:
+def _summary(data: dict, quality: EvidenceQuality, title: str = "Summary") -> str:
     """ The analyst's answer: Answer, Supporting evidence and Recommended next step. The verdict and ratings are shown
     in their own sections; data-quality items are listed once, in a collapsible section """
     facts = data["facts"]
@@ -124,7 +134,9 @@ def _summary(data: dict, quality: EvidenceQuality) -> str:
     details_html = (f"<details class='fp-details'><summary>Data quality and missing evidence ({count})</summary>"
                     f"{details}</details>" if details else
                     "<p class='fp-muted'>No rating is Amber, Red or waiting for a data check.</p>")
-    return (f"<div class='fp-card'><h3>Summary</h3>{body}"
+    question = (data.get("presentation_context") or {}).get("question") or concl.get("question")
+    question_html = f"<p class='fp-question'>{escape(question)}</p>" if question else ""
+    return (f"<div class='fp-card fp-answer'><h3>{escape(title)}</h3>{question_html}{body}"
             f"<p class='fp-muted'>{escape(who)}; a draft for the analyst.</p>{details_html}</div>")
 
 
@@ -338,3 +350,71 @@ def dashboard_html(data: dict, audience: str = "analyst") -> str:
     view = "Investment Analyst view: full detail" if analyst else "Management view: summary and decisions"
     return (f"<div class='fp-dashboard' data-audience='{'analyst' if analyst else 'management'}'>"
             f"<p class='fp-view'>{view}. Both views use the same figures and ratings.</p>{''.join(parts)}</div>")
+
+
+def dashboard_sections(data: dict) -> dict[str, str]:
+    """Four saved-result views; building or opening a view never runs an agent."""
+    facts = data["facts"]
+    shared = data.get("presentation_context") or {}
+    fund_context = shared.get("fund_context") or {}
+    assessment = shared.get("investment_assessment") or {}
+    research = shared.get("research") or data.get("sources") or []
+    quality = evidence_quality(data)
+    if assessment.get("status") == "available":
+        ai = assessment.get("assessment") or {}
+        label = str(ai.get("recommendation", "insufficient_evidence")).replace("_", " ").capitalize()
+        details = f"<p class='fp-verdict'>{escape(label)}</p><p>{escape(ai.get('investment_thesis') or '')}</p>"
+        for heading, key in (("Strengths", "strengths"), ("Material risks", "material_risks"),
+                             ("Uncertainties", "uncertainties"), ("Monitoring actions", "recommended_actions")):
+            if ai.get(key):
+                details += f"<p class='fp-group'>{heading}</p>" + _list(ai[key])
+        if not ai.get("scorecard_agreement", True) and ai.get("scorecard_disagreement_reason"):
+            details += f"<p><b>Difference from scorecard:</b> {escape(ai['scorecard_disagreement_reason'])}</p>"
+    else:
+        details = "<p class='fp-muted'>Independent assessment unavailable; use the scorecard and evidence below.</p>"
+    ai_card = "<div class='fp-card'><h3>AI Investment Analyst</h3>" + details + "</div>"
+    overview = _header(data, quality, True) + _summary(data, quality, "Answer to your question") + _ratings(data, True) + ai_card + _metrics(facts)
+    chart = ("<figure><img style='width:100%;max-width:720px' alt='Performance chart from the review' "
+             f"src='data:image/png;base64,{escape(data['performance_chart'], quote=True)}'><figcaption>"
+             "Review-period chart; see labels and source in the report.</figcaption></figure>"
+             if data.get("performance_chart") else "")
+    financial_detail = chart + _returns_table(facts) + _risk_rows(facts) + _statistics(facts)
+    performance = ("<div class='fp-card'><h3>Performance &amp; risk</h3>" + (financial_detail or
+                   "<p class='fp-muted'>Performance and risk figures are unavailable for this review.</p>")
+                   + "</div>" + _peers(facts))
+    narrative = (fund_context.get("document_summary") or (facts.get("fund") or {}).get("objective_text")
+                 or "Fund strategy details are unavailable.")
+    mandate = fund_context.get("mandate_interpretation") or "Mandate interpretation is unavailable."
+    note = ("<p class='fp-muted'>AI-extracted descriptions are provisional and require verification.</p>"
+            if fund_context.get("document_summary") or fund_context.get("mandate_interpretation") else "")
+    portfolio = ("<div class='fp-card'><h3>Fund strategy &amp; mandate</h3>"
+                 f"<p>{escape(narrative)}</p><p>{escape(mandate)}</p>{note}</div>")
+    exposures = fund_context.get("portfolio_exposures") or {}
+    exposure_items = []
+    for group in ("holdings", "sectors", "regions", "currencies", "asset_classes", "concentration", "portfolio_description"):
+        for row in exposures.get(group) or []:
+            if isinstance(row, dict):
+                weight = f" — {row['weight_pct']:g}%" if isinstance(row.get("weight_pct"), (float, int)) else ""
+                exposure_items.append(f"{group.replace('_', ' ').title()}: {row.get('name', '')}{weight}"
+                                      + (f" ({row['source']})" if row.get('source') else "")
+                                      + (f" — {row['qualification']}" if row.get('qualification') else ""))
+    portfolio += "<div class='fp-card'><h3>Portfolio exposures</h3>" + (_list(exposure_items) or
+        "<p class='fp-muted'>Exact portfolio exposures are unavailable; see the strategy description above.</p>") + "</div>"
+    sources = []
+    for item in research:
+        date = item.get("date") or "Date unavailable"
+        sources.append(f"{date} — {item.get('summary') or item.get('title') or 'Research finding'}"
+                       + (f" Source: {item['url']}" if item.get('url') else ""))
+    portfolio += "<div class='fp-card'><h3>Research findings</h3>" + (_list(sources) or
+        "<p class='fp-muted'>No vetted research is available for this review.</p>") + "</div>"
+    research_narrative = (facts.get("suggested_conclusion") or {}).get("research_narrative") or []
+    if research_narrative:
+        portfolio += "<div class='fp-card'><h3>Research interpretation</h3>" + _list(research_narrative) + "</div>"
+    documents = [str(name) for name in fund_context.get("sources") or []]
+    document_date = fund_context.get("document_date")
+    evidence = (_attention(data, quality, True) + "<div class='fp-card'><h3>Documents &amp; evidence</h3>"
+                + (_list(documents) or "<p class='fp-muted'>Document details are unavailable.</p>")
+                + (f"<p>Document date: {escape(str(document_date))}</p>" if document_date else "") + "</div>"
+                + _details("Manager questions and judgement points", _judgement(facts))
+                + _details("Technical details", technical_html(data)))
+    return {"overview": overview, "performance": performance, "portfolio": portfolio, "evidence": evidence}

@@ -66,6 +66,24 @@ def test_historical_repeated_prices_are_grouped_consistently_in_dashboard_and_re
     assert d['facts']['data_flags'] == entries
 
 
+def test_four_sections_show_question_separate_assessments_and_partial_evidence():
+    from fund_performance.dashboard import dashboard_sections
+    d = data()
+    question = 'For a five-year investor,\nwhat matters most?'
+    d['presentation_context'] = {'question': question,
+        'fund_context': {'document_summary': 'A global index strategy.', 'mandate_interpretation': 'Tracks the index.',
+                         'portfolio_exposures': {'sectors': [{'name': 'Technology', 'source': 'fund.pdf'}]}},
+        'investment_assessment': {'status': 'available', 'assessment': {
+            'recommendation': 'monitor', 'investment_thesis': 'Watch concentration.', 'scorecard_agreement': False,
+            'scorecard_disagreement_reason': 'Concentration merits monitoring.'}}, 'research': []}
+    views = dashboard_sections(d)
+    assert set(views) == {'overview', 'performance', 'portfolio', 'evidence'}
+    assert question in views['overview'] and 'Retain' in views['overview'] and 'Monitor' in views['overview']
+    assert 'Concentration merits monitoring.' in views['overview']
+    assert 'Technology' in views['portfolio'] and 'fund.pdf' in views['portfolio']
+    assert 'No vetted research' in views['portfolio'] and 'Returns to' in views['performance']
+
+
 def test_a_suggested_satisfied_with_open_data_issues_is_never_shown_as_final():
     html = text(dashboard_html(data(flags=[{"check": "x", "level": "warning", "message": "Gap in prices"}])))
     assert "Satisfied" in html and "Not final: review the data warnings first." in html
