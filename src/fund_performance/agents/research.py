@@ -46,6 +46,7 @@ You run one web search for an investment oversight review and summarise what you
   given. Only report what the sources say. No opinions, no investment advice.
 - url: the web address of the main source you used. Summarise only that page: never add content from other
   results, so the summary, the URL and the date all belong to the same page.
+- title: the source page's title if known, otherwise null.
 - date: the source's publication date as YYYY-MM-DD, with date_basis "published". If there is no
   publication date but the page states an "as at" or "updated" date, give that date with date_basis
   "as_at". If the page shows no date at all, give null for both.
@@ -88,6 +89,7 @@ class SearchSummary(BaseModel):
     date: str | None
     date_basis: Literal["published", "as_at"] | None
     limitations: str | None = None
+    title: str | None = None
 
 
 class PageSummary(BaseModel):
@@ -157,6 +159,7 @@ def review_months(profile: FundProfile) -> int:
 def tidy_plan(plan: SearchPlan, max_searches: int, profile: FundProfile | None = None) -> tuple[list[PlannedSearch], list[str]]:
     """ Code keeps the limits: at most max_searches, no search operators (site:, inurl: ...), no empty, overlong
     or repeated queries, and no market-driver query that names the fund """
+    max_searches = min(max(max_searches, 0), 5)
     kept, seen, log = [], set(), []
     for item in plan.searches:
         query = " ".join(item.query.split())
@@ -205,7 +208,8 @@ def _check_page(page: FetchedPage):
         # The URL is the approved one from the config, never one the agent gives
         return {"query": f"Approved source: {page.source.name}", "topic": page.source.topic, "approved": True,
                 "summary": summary[:MAX_SUMMARY_CHARS], "url": page.source.url, "title": page.title,
-                "date": when, "date_basis": (out.date_basis or "published") if when else None}
+                "date": when, "date_basis": (out.date_basis or "published") if when else None,
+                "relevance": PAGE_REASONS[page.source.topic], "limitations": None}
     return check
 
 
@@ -233,6 +237,7 @@ def _check_summary(planned: PlannedSearch):
         # The planned query and topic are kept, so the report lists exactly what was searched
         return {"query": planned.query, "topic": planned.topic, "summary": summary[:MAX_SUMMARY_CHARS],
                 "url": out.url, "date": when, "date_basis": (out.date_basis or "published") if when else None,
+                "title": " ".join((out.title or "").split())[:200] or None, "relevance": planned.reason,
                 "limitations": " ".join((out.limitations or "").split())[:200] or None}
     return check
 
@@ -253,6 +258,7 @@ async def research(profile: FundProfile, planned: list[PlannedSearch], max_searc
     """ Approved pages first, then web searches: fallbacks for pages that could not be read, then the Task Planner's
     searches with what is left of max_searches. Research is optional: if it fails, the review goes on without
     market context """
+    max_searches = min(max(max_searches, 0), 5)
     out = Research()
     readable = [p for p in pages if p.ok]
     fallbacks: list[PlannedSearch] = []

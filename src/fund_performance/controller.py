@@ -37,6 +37,7 @@ from fund_performance.agents.extractor import extract
 from fund_performance.agents.judge import draft_and_judge, REVISED
 from fund_performance.agents.task_planner import TaskPlan, plan_tasks
 from fund_performance.agents.mandate import read_mandate
+from fund_performance.agents.investment_analyst import assess as assess_investment
 from fund_performance.agents.research import PlannedSearch, market_name, research, vet_summaries, with_timing
 from fund_performance.calc import calculate
 from fund_performance.checks import check_prices
@@ -79,6 +80,8 @@ class Runners:
     task_planner: RunFn | None = None
     reporter: RunFn | None = None
     judge: RunFn | None = None
+    investment_analyst: RunFn | None = None
+    investment_reviewer: RunFn | None = None
     http_get: GetFn = http_get
     email_post: PostFn | None = None
 
@@ -101,6 +104,7 @@ STAGES = {
     "research": (3, "Search Agent", "Reading approved sources and running the planned web searches, alongside the calculations"),
     "narrative": (4, "Oversight Analyst and Evaluator", "Writing and checking the market context"),
     "drafts": (4, "Reporting Agent and Judge", "Drafting the summary and checking it"),
+    "investment_assessment": (4, "Investment Analyst Agent", "Assessing the investment evidence"),
     "report": (5, "Code: reports", "Building the Executive and Detailed PDF reports"),
 }
 TOTAL_STAGES = 5
@@ -196,6 +200,7 @@ class RunResult:
     reasons: dict[str, str] = field(default_factory=dict)    # one-line plain reason per rating, as on report page 1
     flags: list[DataFlag] = field(default_factory=list)       # every flag of the run, as in the report's appendix
     executive_pdf: Path | None = None          # report_executive.pdf (2 pages), or None if it could not fit
+    investment_assessment: dict | None = None
 
 
 def new_run_dir(root: Path) -> Path:
@@ -504,7 +509,8 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         budget = t.limits.max_web_searches if s.research.enabled else 0
         planning_calls: list[str] = []
         planned = await _timed(plan_tasks(question, profile, r.task_planner, budget, tool_calls=planning_calls,
-                                          mandate_flags=flags), s.timeouts_seconds.task_planner)
+                                          mandate_flags=flags, exposures=(intake or {}).get("portfolio_exposures")),
+                               s.timeouts_seconds.task_planner)
         if planned is None:
             plan = TaskPlan(reason="Default plan: the Task Planner did not answer in time")
             flags.append(DataFlag(check="task_planner", level="info", message=(
@@ -638,6 +644,24 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         text_log += doc_log
         research_step.outputs["benchmark_documents_kept"] = len(doc_sources)
 
+    # Keep qualitative judgement in a separate artifact; it never changes the scorecard or the facts used by reports.
+    step = log.start("investment_assessment", ["scorecard", "mandate", "vetted research"], announce=not offline)
+    if offline:
+        assessment = {"status": "unavailable", "reason": "Offline run: AI assessment not requested", "tool_calls": []}
+        log.end(step, "skipped", notes=[assessment["reason"]])
+    else:
+        assessment_calls: list[str] = []
+        assessment = await _timed(assess_investment(facts, profile, vetted, question, r.investment_analyst,
+                                                   r.investment_reviewer, assessment_calls,
+                                                   (intake or {}).get("portfolio_exposures")), s.timeouts_seconds.narrative)
+        if assessment is None:
+            assessment = {"status": "unavailable", "reason": _why(s.timeouts_seconds.narrative),
+                          "tool_calls": assessment_calls}
+        log.end(step, "ok" if assessment["status"] == "available" else "unavailable",
+                outputs={"status": assessment["status"], "tool_calls": assessment.get("tool_calls", [])},
+                notes=[assessment.get("reason", "") ] if assessment["status"] != "available" else [])
+    (run_dir / "investment_assessment.json").write_text(json.dumps(assessment, indent=1, ensure_ascii=False), encoding="utf-8")
+
     # 8. Narrative: the findings and actions are written by code; the market context, if any, comes from the
     # Reporting Agent's checked draft below (the Analyst and Evaluator are not called in Version 1)
     narrative = Narrative(template(facts), "template")
@@ -737,4 +761,4 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     text_log.append(line)
     log.end(step, "ok" if line.startswith("Email: sent") else "failed" if s.email.enabled else "skipped", notes=[line])
     return RunResult(pdf, run_dir, log, narrative, facts, {name: plain_reason(inputs, name) for name in card.pillars},
-                     list({(f.level, f.message): f for f in flags}.values()), executive_pdf)
+                     list({(f.level, f.message): f for f in flags}.values()), executive_pdf, assessment)

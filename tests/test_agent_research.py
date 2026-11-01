@@ -247,8 +247,25 @@ def test_planner_and_search_rules():
     from fund_performance.agents.task_planner import task_planner_agent
     text = task_planner_agent(MAX).instructions
     assert "never the fund" in text and "S&P 500 review Oct 2025 to Sep 2026" in text and "up to 5 web searches" in text
-    assert "Fewer is better" in text
+    assert "normally 3 to 5" in text and "Use fewer when justified" in text
     assert "index providers" in search_agent().instructions and "over fund data pages" in search_agent().instructions
+
+
+def test_search_metadata_retains_source_title_and_relevance():
+    from fund_performance.agents.research import PlannedSearch, SearchSummary, _check_summary
+    task = PlannedSearch(topic="market_drivers", query="market news", reason="benchmark risk")
+    result = _check_summary(task)(SearchSummary(query="market news", summary="A development.",
+        url="https://example.org/news", date="2026-10-01", date_basis="published",
+        limitations="Press report", title="Market update"))
+    assert result['title'] == 'Market update' and result['relevance'] == 'benchmark risk'
+    assert result['date'] == '2026-10-01' and result['date_basis'] == 'published'
+
+
+def test_search_plan_has_a_hard_maximum_of_five():
+    from fund_performance.agents.research import SearchPlan, tidy_plan
+    plan = SearchPlan(searches=planned(8))
+    kept, _ = tidy_plan(plan, 20)
+    assert len(kept) == 5
 
 
 def test_a_market_query_that_names_the_fund_is_dropped():

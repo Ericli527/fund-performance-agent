@@ -11,7 +11,7 @@ from datetime import date
 import re
 from typing import Literal
 from agents import Agent
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from fund_performance.agents.base import RunFn, model_kwargs, run_structured
 from fund_performance.models import DataFlag, FactsheetPerformance, FundProfile
 
@@ -38,6 +38,9 @@ hypothetical market-close NAV used to compare with the index ("Fund PNAV"); "ind
   fund_size_gbp_m only if the size is in GBP millions.
 - performance_fee: false only if the documents say there is none ("None", "N/A", "Nil", "0%"); true only if they
   say one is charged; else null. "Excludes performance fees (where applicable)" says neither.
+- exposures: only explicitly reported fund holdings, sector, geographic or currency allocations, not benchmark
+  constituents. Give the exact source quotation containing the category, name and percentage. If unavailable,
+  return an empty list; never infer positions from the benchmark or objective.
 All returns and percentages as plain numbers in percent (17.5 for 17.5%).
 """
 
@@ -100,6 +103,13 @@ class ExtractedProfile(_Strict):
     minimum_investment: str | None
 
 
+class ExtractedExposure(_Strict):
+    category: Literal["holdings", "sectors", "regions", "currencies"]
+    name: str
+    weight_pct: float
+    quote: str
+
+
 class ExtractorOutput(_Strict):
     as_of_date: str | None
     currency: str | None
@@ -108,6 +118,7 @@ class ExtractorOutput(_Strict):
     discrete_12m: list[ExtractedWindow]
     risk: list[ExtractedRisk]
     profile: ExtractedProfile
+    exposures: list[ExtractedExposure] = Field(default_factory=list)
 
 
 @dataclass
@@ -116,6 +127,7 @@ class ExtractionResult:
     profile_draft: dict = field(default_factory=dict)     # only what the documents state; a person confirms
     missing_profile_fields: list[str] = field(default_factory=list)
     flags: list[DataFlag] = field(default_factory=list)
+    exposures: list[ExtractedExposure] = field(default_factory=list)
 
 
 def extractor_agent() -> Agent:
@@ -251,4 +263,4 @@ async def extract(document_text: str, run: RunFn | None = None) -> ExtractionRes
     if unfound:
         flags.append(DataFlag(check="extractor_agent", level="warning",
                               message="Extracted values not found in the document text: " + "; ".join(unfound)))
-    return ExtractionResult(result.output, draft, missing, flags)
+    return ExtractionResult(result.output, draft, missing, flags, out.exposures)

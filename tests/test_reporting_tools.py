@@ -204,3 +204,16 @@ def test_planner_calls_scoped_evidence_tools_through_sdk(sdk_with):
     assert profile.objective_text in outputs[0] and "Objective conflict" in outputs[0]
     assert "not available" in outputs[1]
     assert len(plan.focus) == 4
+
+
+def test_investment_analyst_invokes_existing_tools_in_sdk_loop(sdk_with):
+    from fund_performance.agents.investment_analyst import assess
+    from test_investment_analyst import BASE, PASS
+    from conftest import FakeRun
+    profile = FundProfile.model_validate(json.loads((Path(__file__).parent / "fixtures" / "fund_profile_sample.json").read_text()))
+    model = sdk_with(ScriptedModel([[('get_oversight_scorecard', {}), ('get_research_sources', {})], BASE]))
+    result = asyncio.run(assess(FACTS, profile, [], 'Review', review_run=FakeRun(PASS)))
+    assert result['status'] == 'available'
+    assert result['tool_calls'] == ['get_oversight_scorecard', 'get_research_sources']
+    outputs = [item['output'] for item in model.inputs[1] if isinstance(item, dict) and item.get('type') == 'function_call_output']
+    assert 'Retain' in outputs[0] and 'No vetted market research' in outputs[1]

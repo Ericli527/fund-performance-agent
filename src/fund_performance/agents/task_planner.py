@@ -38,8 +38,9 @@ From the request and the fund's public details, choose from the menu only:
   performance question; usually false for a fee question).
 - manager_questions: true if the reader will need questions to ask the fund manager.
 - angles: the readers to draft a summary for, from: board, analyst, manager_meeting. At least one.
-- searches: if market_context is true, up to {max_searches} web searches that would help this review, else none.
-  Fewer is better: only searches with a clear purpose, never two on the same thing. Each has:
+- searches: if market_context is true, up to {max_searches} web searches, normally 3 to 5 targeted searches, else none.
+  Use fewer when justified: only searches with a clear purpose, never two on the same thing. Prioritise material
+  holdings, sectors, geography and currency exposures only when the exposure tool provides evidence. Each has:
   - topic: fund_news (changes to this fund, share class, fees or index), manager_changes (the manager or the team
     that runs the fund) or market_drivers (market trends, benchmark developments and risks in the review period);
   - query: plain words, no search operators (site:, inurl:, quotes). market_drivers queries name the market and the
@@ -145,9 +146,11 @@ def planner_input(question: str, profile: FundProfile, max_searches: int = 0) ->
 
 async def plan_tasks(question: str, profile: FundProfile, run: RunFn | None = None,
                      max_searches: int = 0, tool_calls: list[str] | None = None,
-                     mandate_flags: list[DataFlag] | None = None) -> tuple[TaskPlan, list[DataFlag]]:
+                     mandate_flags: list[DataFlag] | None = None,
+                     exposures: dict | None = None) -> tuple[TaskPlan, list[DataFlag]]:
     """ The plan; with max_searches > 0 (web research on) it also proposes up to that many web searches """
-    context = PlanningContext.of(profile, mandate_flags)
+    max_searches = min(max(max_searches, 0), 5)
+    context = PlanningContext.of(profile, mandate_flags, exposures)
     try:
         result = await run_structured(task_planner_agent(max_searches), planner_input(question, profile, max_searches),
                                       PlanOutput, convert=lambda out: checked_plan(out, profile, max_searches),
