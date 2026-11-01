@@ -66,6 +66,19 @@ def test_the_table_shows_what_the_agents_read_and_where(tmp_path):
     assert rows["peer1.5y"]["status"] == CODE and "annualised by code" in rows["peer1.5y"]["source"]
 
 
+def test_supporting_documents_are_included_with_source_names(tmp_path):
+    factsheet, _ = docs(tmp_path)
+    first, second = tmp_path / 'policy.txt', tmp_path / 'charges.txt'
+    first.write_text('Supplementary investment policy.')
+    second.write_text('Supplementary charges explanation.')
+    extractor = FakeRun(extractor_answer())
+    intake = asyncio.run(read_documents(factsheet, run_extractor=extractor, run_mandate=FakeRun(MANDATE),
+                                        supporting_documents=[first, second]))
+    assert 'Supplementary investment policy.' in extractor.prompts[0]
+    assert 'Supplementary charges explanation.' in extractor.prompts[0]
+    assert {'policy.txt', 'charges.txt'} <= set(intake['documents'])
+
+
 def test_a_missing_required_value_is_highlighted_and_blocks_the_run(tmp_path):
     intake = read(tmp_path, isin=None)
     assert by_key(intake)["isin"]["status"] == MISSING
