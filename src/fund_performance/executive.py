@@ -67,6 +67,10 @@ def _chart(inp, out_dir: Path) -> tuple[Path | None, str]:
         series = "market-close price (PNAV)" if ev.get("series") == "fund_pnav" else "price (NAV)"
         if kind == "yearly_gap":
             pi, ocf = inp.thresholds.performance_index, inp.profile.ocf_pct
+            if ocf is None:
+                path = charts.yearly_gap_chart(years, gaps, out_dir / "exec_chart.png",
+                                               f"Yearly gap to the index, {years[0]}–{years[-1]}")
+                return path, "Fund minus index, each calendar year (pp). Fee-dependent limits are unavailable."
             path = charts.yearly_gap_chart(years, gaps, out_dir / "exec_chart.png",
                                            f"Yearly gap to the index, {years[0]}–{years[-1]}", ocf,
                                            ocf + pi.green_td_margin_over_ocf_pp, ocf + pi.amber_td_margin_over_ocf_pp)
@@ -77,7 +81,7 @@ def _chart(inp, out_dir: Path) -> tuple[Path | None, str]:
         return path, f"Fund {series} minus benchmark, each calendar year (pp). Source: factsheet; calculated."
     if kind == "rolling_12m":
         figs = _figures(facts)
-        n = facts.get("fund", {}).get("time_horizon_years", 5)
+        n = (facts.get("fund", {}).get("time_horizon_years") or facts.get("fund", {}).get("analysis_period_years", 5))
         basis = (figs.get(f"comparison.td.{n}y") or {}).get("basis") or "fund_nav"
         ends = sorted({k.rsplit(".", 1)[1] for k in figs if k.startswith(f"{basis}.discrete_12m.")}
                       & {k.rsplit(".", 1)[1] for k in figs if k.startswith("index.discrete_12m.")})
@@ -105,7 +109,7 @@ def _chip(rating: str) -> str:
 
 def _banner(inp) -> str:
     p = inp.profile
-    n = p.time_horizon_years
+    n = p.analysis_period_years
     return (f"<table class='x-banner'><tr><td><span class='x-kicker'>FUND PERFORMANCE REVIEW · EXECUTIVE REPORT</span><br/>"
             f"<span class='x-fund'>{escape(p.fund_name)}</span><br/><span class='x-meta'>ISIN {escape(p.isin)} · "
             f"{escape(p.share_class)} · {escape(p.currency)} · Benchmark: {escape(p.benchmark_name)}<br/>Reporting "
@@ -226,7 +230,7 @@ def page1(inp, content: ExecutiveContent) -> str:
 
 def _comparison(inp, facts: dict) -> str:
     figs = _figures(facts)
-    n = facts.get("fund", {}).get("time_horizon_years", 5)
+    n = (facts.get("fund", {}).get("time_horizon_years") or facts.get("fund", {}).get("analysis_period_years", 5))
     basis = (figs.get(f"comparison.td.{n}y") or {}).get("basis") or "fund_nav"
     fund_label = "This fund, market-close price (PNAV)" if basis == "fund_pnav" else "This fund (NAV)"
 
@@ -237,12 +241,13 @@ def _comparison(inp, facts: dict) -> str:
     def ann(s):
         return [f"{figs[name]['value']:.2f}%".replace("-", "−") if (name := f"{s}.{kind}.{k}y") in figs else "–"
                 for kind, k in (("cum", 1), ("ann", 3), ("ann", 5))]
-    rows = row(fund_label, ann(basis), f"{inp.profile.ocf_pct:.2f}%", _source(*(figs.get(f"{basis}.ann.{k}y") for k in (3, 5))), True)
+    fee = f"{inp.profile.ocf_pct:.2f}%" if inp.profile.ocf_pct is not None else "Not available"
+    rows = row(fund_label, ann(basis), fee, _source(*(figs.get(f"{basis}.ann.{k}y") for k in (3, 5))), True)
     peer_series = {"fund_pnav" if "PNAV" in p.get("basis", "") else "fund_nav"
                    for p in facts.get("peers", []) if p.get("used_for_returns")}
     for other in sorted(peer_series - {basis}):          # the peers were compared with the other fund series
         words = "noon price (NAV)" if other == "fund_nav" else "market-close price (PNAV)"
-        rows += row(f"This fund, {words}: compared with peers", ann(other), f"{inp.profile.ocf_pct:.2f}%",
+        rows += row(f"This fund, {words}: compared with peers", ann(other), fee,
                     _source(*(figs.get(f"{other}.ann.{k}y") for k in (3, 5))), True)
     invalid = comparison_invalid(facts)
     rows += (row("Index or benchmark", ["–"] * 3, "–", f"{UNRELIABLE}: data check") if invalid else
@@ -287,7 +292,7 @@ def _peer_note(peer: dict) -> str:
 def _fees_and_risk(inp, facts: dict) -> str:
     p = inp.profile
     value, fees = inp.card.pillars["Value for investors"].values, inp.card.pillars["Fees"].values
-    fee_rows = [("Ongoing charge (OCF)", f"{p.ocf_pct:.2f}% a year"),
+    fee_rows = [("Ongoing charge (OCF)", f"{p.ocf_pct:.2f}% a year" if p.ocf_pct is not None else "Not available"),
                 ("Transaction costs", "Not disclosed in the documents provided" if p.transaction_cost_pct is None
                  else f"{p.transaction_cost_pct:.2f}%"),
                 ("Performance fee", "Yes" if p.performance_fee else "None" if p.performance_fee is False

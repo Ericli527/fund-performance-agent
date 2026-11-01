@@ -97,7 +97,7 @@ def mandate_rating(reported: ReportedFigures, profile: FundProfile, t: Threshold
         # a reviewer checks it (owner decision; measurable rules in v2)
         return Pillar("Mandate", MANUAL_CHECK, MANUAL_MANDATE_REASON, summary="Manual check")
     m = t.mandate_index
-    r2, beta, label = _tracking_stats(reported, profile.time_horizon_years)
+    r2, beta, label = _tracking_stats(reported, profile.analysis_period_years)
     if r2 is None or beta is None:
         return Pillar("Mandate", CHECK_DATA, "R² and beta not available from the factsheet or an index price series")
     in_green = m.green_beta_range[0] <= beta <= m.green_beta_range[1]
@@ -132,6 +132,8 @@ def _index_tests(reported: ReportedFigures, profile: FundProfile, path: Decision
     fund, index, period = _period_figures(reported, path, series)
     if fund is None or index is None:
         td_sub = SubRating("Tracking difference", CHECK_DATA, f"fund or index return not available ({period})")
+    elif profile.ocf_pct is None:
+        td_sub = SubRating("Tracking difference", CHECK_DATA, "ongoing charge not established; fee-dependent limits unavailable")
     else:
         td = fund - index
         green = profile.ocf_pct + p.green_td_margin_over_ocf_pp + extra_tolerance_pp
@@ -203,10 +205,11 @@ def performance_rating(reported: ReportedFigures, profile: FundProfile, path: De
     rating = weakest([s.rating for s in subs])
     weak = [s for s in subs if s.rating == rating]
     reason = "; ".join(f"{s.name} {s.rating}: {s.reason}" for s in weak)
+    short_reason = SHORT_HISTORY_REASON if profile.time_horizon_years is not None else "track record shorter than the standard analysis period"
     if path.short_history and rating == GREEN:
-        rating, reason = AMBER, f"{SHORT_HISTORY_REASON} ({reason})"
+        rating, reason = AMBER, f"{short_reason} ({reason})"
     elif path.short_history:
-        notes.append(f"Short history: {SHORT_HISTORY_REASON}")
+        notes.append(f"Short history: {short_reason}")
     if len(path.objectives) > 1:
         notes.append("Dual objective: Performance is the weaker of the two objectives")
     limits = [s.limit for s in subs if s.limit]
@@ -251,6 +254,8 @@ def fees_rating(profile: FundProfile, t: Thresholds, peers, performance: str) ->
     """ The fund's OCF against the peers' (their average when there are several). A fee does not depend on the
     currency, so every peer counts here """
     peers = as_list(peers)
+    if profile.ocf_pct is None:
+        return Pillar("Fees", CHECK_DATA, "Ongoing charge not established in the supplied documents")
     if not peers:
         return Pillar("Fees", AMBER, NO_PEER, summary=ADD_PEER,
                       notes=[FEE_NOT_ESTABLISHED_NOTE] if profile.performance_fee is None else [])

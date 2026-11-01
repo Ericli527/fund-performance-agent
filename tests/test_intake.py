@@ -62,8 +62,22 @@ def test_the_table_shows_what_the_agents_read_and_where(tmp_path):
     assert rows["series.index.5y"]["value"] == "50.8"
     assert rows["series.fund_pnav.5y"]["status"] == "Not found (optional)"           # PNAV is optional
     assert rows["hedged"]["value"] == "no" and rows["hedged"]["status"] == CODE       # no hedging mentioned
-    assert rows["peer1.ocf_pct"]["value"] == "0.05" and rows["peer1.5y"]["value"] == "8.16"     # 48% over 5 years
+    assert rows["peer1.ocf_pct"]["value"] == "0.05" and rows["peer1.5y"]["value"] == "8.16"
     assert rows["peer1.5y"]["status"] == CODE and "annualised by code" in rows["peer1.5y"]["source"]
+
+
+def test_missing_documented_horizon_and_returns_do_not_block_intake(tmp_path):
+    from fund_performance.intake import self_check
+    factsheet, _ = docs(tmp_path)
+    mandate = MANDATE | {"time_horizon_years": None}
+    intake = asyncio.run(read_documents(factsheet, run_extractor=FakeRun(extractor_answer()),
+                                        run_mandate=FakeRun(mandate)))
+    for row in intake['rows']:
+        if row['key'].startswith('series.'):
+            row['value'] = ''
+    built = self_check(intake)
+    assert built.problems == [] and built.profile.get('time_horizon_years') is None
+    assert any(flag['check'] == 'fund_horizon' for flag in built.flags)
 
 
 def test_a_missing_required_value_is_highlighted_and_blocks_the_run(tmp_path):

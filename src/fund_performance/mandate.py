@@ -36,7 +36,7 @@ def decision_path(profile: FundProfile, short_history: bool, flags: list[DataFla
     """ Walk the five questions of spec 5.1 and record the answers """
     blocking = [f for f in flags if f.level == "blocking"]
     path = DecisionPath(profile.objective_type, profile.secondary_objective, short_history,
-                        profile.time_horizon_years, blocking)
+                        profile.analysis_period_years, blocking)
     path.steps.append(f"1. Objective type: {profile.objective_type}, so judge {WHAT_IS_JUDGED[profile.objective_type]}")
     if profile.secondary_objective:
         rated = profile.secondary_objective in get_args(ObjectiveType)
@@ -46,10 +46,12 @@ def decision_path(profile: FundProfile, short_history: bool, flags: list[DataFla
                                                "cannot be rated by code"))
     else:
         path.steps.append("2. Dual objective: no")
-    path.steps.append("3. Short history: " + (f"yes, {SHORT_HISTORY_REASON}; since-launch figures are used and "
+    history_reason = SHORT_HISTORY_REASON if profile.time_horizon_years is not None else "track record shorter than the standard analysis period"
+    path.steps.append("3. Short history: " + (f"yes, {history_reason}; since-launch figures are used and "
                                                "Performance is at least Amber, never Red on history alone"
                                                if short_history else "no"))
-    path.steps.append(f"4. Main test period: {profile.time_horizon_years} years; 1y and 3y shown as trend context")
+    origin = " (standard analysis period; the fund horizon was not established)" if profile.time_horizon_years is None else ""
+    path.steps.append(f"4. Main test period: {profile.analysis_period_years} years{origin}; 1y and 3y shown as trend context")
     path.steps.append("5. Data checks: " + ("; ".join(f.message for f in blocking) + ", so CHECK DATA"
                                              if blocking else "no blocking flag"))
     return path
