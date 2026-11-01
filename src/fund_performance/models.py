@@ -40,9 +40,8 @@ class FundProfile(_Strict):
     performance_fee_justification: str | None = None   # written by a person only, never by an AI agent
     fund_size_gbp_m: float | None = None
     risk_indicator: int | None = Field(default=None, ge=1, le=7)
-    # When the fund is priced: noon or market close. null = not stated in the documents (it must still be given,
-    # so a missing value is a choice, not a typo); the comparison then carries an info flag
-    pricing_point: PricingPoint | None
+    # Omitted or null means the documents did not state the pricing time; comparisons carry an info flag.
+    pricing_point: PricingPoint | None = None
     as_of_date: date
     asset_class: str = "equity"
     # Documents route (step 11 update): who gave each field, e.g. {"ocf_pct": "user", "isin": "ai_extracted"}

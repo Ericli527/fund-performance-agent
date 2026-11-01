@@ -454,6 +454,8 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     step = log.start("peers", ["peer.json"] if peers else ["config/peers.yaml"], announce=False)
     if peers:
         log.end(step, "skipped", outputs={"peers": [p.name for p in peers]}, notes=["peer.json supplied"])
+    elif intake is not None and "peer_origins" in intake:
+        log.end(step, "skipped", notes=["peer selection and extraction already completed during intake"])
     else:
         approved = approved_peers(load_peers(), profile.benchmark_name, profile.isin)
         flags += approved.flags

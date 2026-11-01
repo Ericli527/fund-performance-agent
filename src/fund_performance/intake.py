@@ -213,7 +213,8 @@ def peer_values(extracted: ExtractionResult) -> dict:
                     "minimum_investment": draft.get("minimum_investment"),
                     "as_of_date": fs.as_of_date.isoformat() if fs and fs.as_of_date else None, "_derived": {}}
     if fs and values["pricing_point"] is None:
-        values["pricing_point"] = next((s.pricing for s in fs.series.values() if s.pricing), None)
+        nav = fs.series.get("fund_nav")
+        values["pricing_point"] = nav.pricing if nav else None
     annual = fs.series_annualised.get("fund_nav") if fs else None
     cumulative = fs.series.get("fund_nav") if fs else None
     for n in (1, 3, 5):
@@ -247,7 +248,7 @@ def peer_record(values: dict, origin: str) -> dict:
 async def read_peer(path: Path, run: RunFn | None = None) -> tuple[dict, ExtractionResult, list[str]]:
     """ One peer factsheet read by the Extractor Agent: its values, the raw result and the pages """
     pages = read_document_pages(path)
-    extracted = await extract("\n".join(pages), run)
+    extracted = await extract("\n".join(pages), run, peer=True)
     return peer_values(extracted), extracted, pages
 
 
@@ -305,7 +306,8 @@ async def read_documents(factsheet: Path, kid: Path | None = None, peer_factshee
         if spec.key == "hedged" and value is None:
             value, status, source = _hedged(draft, docs)
         if spec.key == "pricing_point" and value is None and fs:
-            value = next((s.pricing for s in fs.series.values() if s.pricing), None)
+            nav = fs.series.get("fund_nav")
+            value = nav.pricing if nav else None
         if spec.key == "performance_fee":
             value, status, source = _performance_fee(value, docs, fee_flags)
         rows.append(_row(spec, value, status, source))

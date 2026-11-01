@@ -78,11 +78,15 @@ def test_controller_reuses_context_for_planning_research_and_analyst(tmp_path, m
         captured['planner_context'] = kwargs.get('fund_context')
         return await original(*args, **kwargs)
     monkeypatch.setattr(controller, 'plan_tasks', record)
+    def no_repeated_peer_selection(*args, **kwargs):
+        raise AssertionError('peer selection was already performed during intake')
+    monkeypatch.setattr(controller, 'approved_peers', no_repeated_peer_selection)
     runners = mocked()
+    runners.extractor = FakeRun()  # any repeated extraction fails the test
     runners.investment_analyst, runners.investment_reviewer = FakeRun(BASE), FakeRun(PASS)
     sample = Path(__file__).parents[1] / 'demo' / 'sample_index_fund'
     result = asyncio.run(controller.run_review(sample, out_root=tmp_path, runners=runners,
-                         intake={'fund_context': brief, 'documents': [], 'rows': [], 'flags': []}))
+                         intake={'fund_context': brief, 'documents': [], 'rows': [], 'flags': [], 'peer_origins': []}))
     assert captured['planner_context'] == brief
     assert json.loads((result.run_dir / 'fund_context.json').read_text()) == brief
     assert runners.search.prompts and 'global index' in runners.search.prompts[0]
