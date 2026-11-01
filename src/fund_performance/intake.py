@@ -253,11 +253,18 @@ async def read_peer(path: Path, run: RunFn | None = None) -> tuple[dict, Extract
 
 async def read_documents(factsheet: Path, kid: Path | None = None, peer_factsheets: list[Path] | Path | None = None,
                          run_extractor: RunFn | None = None, run_mandate: RunFn | None = None,
-                         run_peer: RunFn | None = None, peers_config: PeersConfig | None = None) -> dict:
+                         run_peer: RunFn | None = None, peers_config: PeersConfig | None = None,
+                         supporting_documents: list[Path] | None = None) -> dict:
     """ Read the documents with the Extractor and Mandate agents; return the table to confirm and what else the run
     needs (a plain dict, so the page can keep it between the two clicks). Without peer factsheets, the approved
     peers for the fund's benchmark (config/peers.yaml) are read """
-    docs = {p.name: read_document_pages(p) for p in (factsheet, kid) if p}
+    paths = [p for p in (factsheet, kid) if p] + list(supporting_documents or [])
+    docs = {}
+    for path in paths:
+        name = path.name
+        if name in docs:
+            raise ValueError(f"Duplicate document name: {name}; rename the files to preserve source references")
+        docs[name] = read_document_pages(path)
     text = "\n\n".join(f"=== Document: {name} ===\n" + "\n".join(pages) for name, pages in docs.items())
     extracted: ExtractionResult = await extract(text, run_extractor)
     fs = extracted.factsheet

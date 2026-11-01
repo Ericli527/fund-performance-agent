@@ -8,10 +8,11 @@ PRICE = 'Price history'
 FACTSHEET = 'Fund factsheet'
 KID = 'KID/KIID'
 PEER = 'Peer factsheet'
+SUPPORTING = 'Other supporting document'
 BENCHMARK = 'Benchmark evidence'
 CONFIRM = 'Needs confirmation'
 DEMO_INPUT = 'Prevalidated demo input'
-ROLES = (PRICE, FACTSHEET, KID, PEER, BENCHMARK, CONFIRM)
+ROLES = (PRICE, FACTSHEET, KID, PEER, SUPPORTING, BENCHMARK, CONFIRM)
 PRICE_TYPES = {'.csv', '.xlsx', '.xls'}
 DOC_TYPES = {'.pdf', '.docx'}
 
@@ -40,10 +41,20 @@ def classify(path: str) -> tuple[str, str]:
                 return CONFIRM, 'No readable text found.'
             kid = re.search(r'\b(key investor information|key information document|kiid|kid)\b', text)
             factsheet = re.search(r'\b(fund factsheet|fund fact sheet|fund fact card|fund factcard)\b', text)
+            filename = re.sub(r'[^a-z0-9]+', ' ', p.stem.lower()).strip()
+            named_factsheet = bool(re.search(r'\b(?:fact\s*sheet|factsheet)\b', filename))
+            if named_factsheet:
+                if re.match(r'^(?:key investor information|key information document|kiid|kid)\b', text):
+                    return CONFIRM, 'Filename and document heading disagree; confirm its type.'
+                if re.search(r'\bpeer\b', filename):
+                    return PEER, ''
+                return FACTSHEET, ''
             if kid and factsheet:
                 return CONFIRM, 'The document mentions both a KID and a factsheet; confirm its role.'
             if kid:
-                return KID, ''
+                if re.match(r'^(?:key investor information|key information document|kiid|kid)\b', text):
+                    return KID, ''
+                return CONFIRM, 'The document mentions a KID; confirm its type.'
             if factsheet:
                 return CONFIRM, 'Factsheet detected; confirm whether it is the fund or a peer.'
             return CONFIRM, 'Document role needs confirmation.'
@@ -117,7 +128,7 @@ def validate(question: str, entries: list[dict], synthetic: bool = False) -> lis
                 issues.append(f'{path.name}: {issue}')
             if role == PRICE and detected != PRICE:
                 issues.append(f'{path.name}: select a readable price history.')
-            if role in (FACTSHEET, KID, PEER) and path.suffix.lower() not in DOC_TYPES:
+            if role in (FACTSHEET, KID, PEER, SUPPORTING) and path.suffix.lower() not in DOC_TYPES:
                 issues.append(f'{path.name}: this role requires a readable PDF or Word document.')
     if sum(e['role'] == PRICE for e in entries) != 1:
         issues.append('Add exactly one fund price history.')
@@ -129,6 +140,8 @@ def validate(question: str, entries: list[dict], synthetic: bool = False) -> lis
         issues.append('Choose at most one separate benchmark series.')
     if synthetic and any(e['role'] == BENCHMARK for e in entries):
         issues.append('The synthetic demo uses its validated inputs; remove separate benchmark files.')
+    if synthetic and any(e['role'] == SUPPORTING for e in entries):
+        issues.append('The synthetic demo uses its validated inputs; remove supporting documents.')
     prices = [e['path'] for e in entries if e['role'] == PRICE]
     series = [e['path'] for e in entries if e['role'] == BENCHMARK and Path(e['path']).suffix.lower() in PRICE_TYPES]
     if len(prices) == len(series) == 1:
@@ -145,3 +158,19 @@ def engine_inputs(entries: list[dict]) -> tuple:
         return next((e['path'] for e in entries if e['role'] == role), None)
     return (one(PRICE), one(FACTSHEET), one(KID), [e['path'] for e in entries if e['role'] == PEER],
             [e['path'] for e in entries if e['role'] == DEMO_INPUT])
+
+
+def supporting_inputs(entries: list[dict]) -> list[str]:
+    """Supporting documents remain separate from peer and benchmark evidence."""
+    return [e['path'] for e in entries if e['role'] == SUPPORTING]
+
+
+def select_type(entries: list[dict], table, attachment_id: str, selected_type: str):
+    """Apply a per-file selection to the authoritative table and server-side state."""
+    selected, error = apply_roles(entries or [], table)
+    if error or selected_type not in ROLES:
+        return entries, table
+    if not any(e['id'] == attachment_id and e['role'] != DEMO_INPUT for e in selected):
+        return entries, table
+    selected = [e | {'role': selected_type, 'issue': ''} if e['id'] == attachment_id else e for e in selected]
+    return selected, rows(selected)

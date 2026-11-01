@@ -80,6 +80,35 @@ def test_missing_documented_horizon_and_returns_do_not_block_intake(tmp_path):
     assert any(flag['check'] == 'fund_horizon' for flag in built.flags)
 
 
+def test_supporting_documents_are_included_with_source_names(tmp_path):
+    factsheet, _ = docs(tmp_path)
+    first, second = tmp_path / 'policy.txt', tmp_path / 'charges.txt'
+    first.write_text('Supplementary investment policy.')
+    second.write_text('Supplementary charges explanation.')
+    extractor = FakeRun(extractor_answer())
+    intake = asyncio.run(read_documents(factsheet, run_extractor=extractor, run_mandate=FakeRun(MANDATE),
+                                        supporting_documents=[first, second]))
+    assert 'Supplementary investment policy.' in extractor.prompts[0]
+    assert 'Supplementary charges explanation.' in extractor.prompts[0]
+    assert {'policy.txt', 'charges.txt'} <= set(intake['documents'])
+
+
+def test_supporting_documents_with_missing_horizon_remain_usable(tmp_path):
+    from fund_performance.intake import self_check
+    factsheet, _ = docs(tmp_path)
+    supporting = tmp_path / 'policy.txt'
+    supporting.write_text('Supplementary investment policy.')
+    extractor = FakeRun(extractor_answer())
+    mandate = MANDATE | {'time_horizon_years': None}
+    intake = asyncio.run(read_documents(factsheet, run_extractor=extractor, run_mandate=FakeRun(mandate),
+                                        supporting_documents=[supporting]))
+    built = self_check(intake)
+    assert built.problems == [] and built.profile.get('time_horizon_years') is None
+    assert any(flag['check'] == 'fund_horizon' for flag in built.flags)
+    assert 'Supplementary investment policy.' in extractor.prompts[0]
+    assert 'policy.txt' in intake['documents']
+
+
 def test_a_missing_required_value_is_highlighted_and_blocks_the_run(tmp_path):
     intake = read(tmp_path, isin=None)
     assert by_key(intake)["isin"]["status"] == MISSING
