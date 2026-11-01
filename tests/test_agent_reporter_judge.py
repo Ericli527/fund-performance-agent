@@ -279,10 +279,12 @@ def test_the_reporting_and_judge_agents_use_the_chosen_model(monkeypatch):
     from fund_performance.agents.reporter import reporter_agent
     for agent in ("REPORTER", "JUDGE"):
         monkeypatch.delenv(f"FUND_MODEL_{agent}", raising=False)
-    assert reporter_agent().model == reporter_agent(tools=True).model == judge_agent().model == "gpt-6.1-sol"
+    assert reporter_agent().model == reporter_agent(tools=True).model == judge_agent().model == "gpt-6.1-terra"
     # the Reporting Agent writes the dashboard answer, so it thinks harder than the Judge on the same model
     assert reporter_agent().model_settings.reasoning.effort == "medium"
     assert judge_agent().model_settings.reasoning.effort == "low"
+    from fund_performance.agents.investment_analyst import reviewer_agent
+    assert reviewer_agent().model == "gpt-6.1-terra" and reviewer_agent().model_settings.reasoning.effort == "low"
 
 
 # Two narratives from one run: a concise dashboard answer and a distinct Executive commentary

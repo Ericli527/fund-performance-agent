@@ -22,7 +22,7 @@ VIEW = evaluator_view(FACTS, AnalystDraft.model_validate(GOOD))
 def test_agent_settings(monkeypatch):
     monkeypatch.delenv("FUND_MODEL_EVALUATOR", raising=False)
     agent = evaluator_agent()
-    assert agent.model == "gpt-6.1-sol" and agent.model_settings.reasoning.effort == "low"
+    assert agent.model == "gpt-6.1-terra" and agent.model_settings.reasoning.effort == "low"
     assert agent.instructions != ANALYST_INSTRUCTIONS                      # its own prompt, so no self-grading
     for check in ("no_rating_change", "supported_claims", "sources_cited", "check_data_handled", "plain_english"):
         assert check in agent.instructions

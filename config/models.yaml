@@ -11,15 +11,15 @@
 # confidential or client data.
 
 agents:
-  extractor: gpt-5.4-mini
-  mandate: gpt-5.4-mini
+  extractor: gpt-6.1-terra
+  mandate: gpt-6.1-terra
   planner: gpt-5.4-mini
   search: gpt-5.4-mini
   analyst: gpt-5.4
-  evaluator: gpt-6.1-sol          # a different model from the Analyst, with its own strict checking prompt (step 10)
-  task_planner: gpt-5.4-mini      # turns the request into a task plan (menu choices only)
-  reporter: gpt-6.1-sol           # Reporting Agent: answers the reviewer's question (answer, then supporting evidence)
-  judge: gpt-6.1-sol              # Judge Agent: reviews the draft (owner decision: the same model as the Reporting Agent)
+  evaluator: gpt-6.1-terra        # a different model from the Analyst, with its own strict checking prompt (step 10)
+  task_planner: gpt-6.1-terra     # turns the request into a task plan (menu choices only)
+  reporter: gpt-6.1-terra         # Reporting Agent: answers the reviewer's question (answer, then supporting evidence)
+  judge: gpt-6.1-terra            # Judge Agent and Investment Quality Reviewer
 
 models:
   gpt-5.4-mini:
@@ -31,8 +31,13 @@ models:
   gpt-6.1-sol:
     supports_temperature: false
     reasoning_effort: low
+  gpt-6.1-terra:
+    supports_temperature: false
+    reasoning_effort: low
 
-# reasoning: a reasoning effort for one agent instead of its model's. The Reporting Agent writes the answer to the
-#   reviewer's question on the dashboard, so it thinks harder (medium); every other agent keeps its model's setting
+# reasoning: a reasoning effort for one agent instead of its model's.
 reasoning:
+  extractor: medium
+  mandate: medium
+  task_planner: medium
   reporter: medium
