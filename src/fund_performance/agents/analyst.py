@@ -125,7 +125,8 @@ def _where(f: dict) -> str:
     """ "over 3 years, factsheet" from a figure's name and source """
     period = f["name"].rsplit(".", 1)[-1]
     years = period[:-1] if period.endswith("y") and period[:-1].isdigit() else None
-    source = {"factsheet": "factsheet", "calculated": "calculated", "ai_extracted": "factsheet, please verify"}
+    source = {"factsheet": "factsheet", "calculated": "calculated", "ai_extracted": "factsheet, please verify",
+              "calculated_provisional": "calculated from AI-extracted figures, please verify"}
     return (f"over {years} year{'' if years == '1' else 's'}, " if years else "") + source.get(f.get("source"), "")
 
 

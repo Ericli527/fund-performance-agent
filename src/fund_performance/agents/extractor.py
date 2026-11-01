@@ -39,8 +39,12 @@ hypothetical market-close NAV used to compare with the index ("Fund PNAV"); "ind
 - performance_fee: false only if the documents say there is none ("None", "N/A", "Nil", "0%"); true only if they
   say one is charged; else null. "Excludes performance fees (where applicable)" says neither.
 - exposures: only explicitly reported fund holdings, sector, geographic or currency allocations, not benchmark
-  constituents. Give the exact source quotation containing the category, name and percentage. If unavailable,
-  return an empty list; never infer positions from the benchmark or objective.
+  constituents. Give the exact source quotation. A weight is optional when not stated. Identify whether the
+  observation concerns the fund, benchmark, a peer, or is unclear; never infer holdings from an index.
+- document_summary: a source-aware narrative of material fund identity, strategy, portfolio, returns, risk,
+  charges and disclosures. Include figures with their periods and distinguish fund, benchmark and peers.
+- return_evidence: also list directly quoted fund or benchmark returns that may have been missed in series,
+  identifying period, basis, currency, and an exact source quotation. Never estimate or calculate.
 All returns and percentages as plain numbers in percent (17.5 for 17.5%).
 """
 
@@ -104,9 +108,19 @@ class ExtractedProfile(_Strict):
 
 
 class ExtractedExposure(_Strict):
-    category: Literal["holdings", "sectors", "regions", "currencies"]
+    category: Literal["holdings", "sectors", "regions", "currencies", "asset_classes", "concentration", "portfolio_description"]
     name: str
-    weight_pct: float
+    weight_pct: float | None = None
+    quote: str
+    subject: Literal["fund", "benchmark", "peer", "unknown"] = "unknown"
+
+
+class ExtractedReturnEvidence(_Strict):
+    series: SeriesName
+    period: Literal["1y", "3y", "5y"]
+    basis: Literal["cumulative", "annualised"]
+    currency: str
+    value: float
     quote: str
 
 
@@ -119,6 +133,8 @@ class ExtractorOutput(_Strict):
     risk: list[ExtractedRisk]
     profile: ExtractedProfile
     exposures: list[ExtractedExposure] = Field(default_factory=list)
+    document_summary: str = ""
+    return_evidence: list[ExtractedReturnEvidence] = Field(default_factory=list)
 
 
 @dataclass
@@ -128,6 +144,8 @@ class ExtractionResult:
     missing_profile_fields: list[str] = field(default_factory=list)
     flags: list[DataFlag] = field(default_factory=list)
     exposures: list[ExtractedExposure] = field(default_factory=list)
+    document_summary: str = ""
+    return_evidence: list[ExtractedReturnEvidence] = field(default_factory=list)
 
 
 def extractor_agent() -> Agent:
@@ -263,4 +281,4 @@ async def extract(document_text: str, run: RunFn | None = None) -> ExtractionRes
     if unfound:
         flags.append(DataFlag(check="extractor_agent", level="warning",
                               message="Extracted values not found in the document text: " + "; ".join(unfound)))
-    return ExtractionResult(result.output, draft, missing, flags, out.exposures)
+    return ExtractionResult(result.output, draft, missing, flags, out.exposures, out.document_summary, out.return_evidence)

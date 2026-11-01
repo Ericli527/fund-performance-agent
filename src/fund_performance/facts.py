@@ -37,7 +37,7 @@ def _figure(name: str, f: Figure) -> dict:
     return {"name": name, "label": label(name),
             "value": round(f.exact if f.exact is not None else f.value, 2), "unit": f.unit,
             "display": f.display(percent_decimals=2 if two_dp else 1), "source": f.source, "period": f.period, "basis": f.basis,
-            **({"note": "please verify"} if f.source == "ai_extracted" else {})}
+            **({"note": "please verify"} if f.needs_verification else {})}
 
 
 def _note_figure(label_text: str, value: float, unit: str, decimals: int = 1, key: bool = False) -> dict:
