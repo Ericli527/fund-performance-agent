@@ -38,15 +38,19 @@ def test_models_per_agent_match_the_owner_decision(monkeypatch):
         monkeypatch.delenv(f"FUND_MODEL_{agent.upper()}", raising=False)
     m = load_models()
     assert {a: m.for_agent(a)[0] for a in m.agents} == {
-        "extractor": "gpt-5.4-mini", "mandate": "gpt-5.4-mini", "planner": "gpt-5.4-mini",
-        "search": "gpt-5.4-mini", "analyst": "gpt-5.4", "evaluator": "gpt-6.1-sol", "task_planner": "gpt-5.4-mini",
-        "reporter": "gpt-6.1-sol", "judge": "gpt-6.1-sol"}
+        "extractor": "gpt-6.1-terra", "mandate": "gpt-6.1-terra", "planner": "gpt-5.4-mini",
+        "search": "gpt-5.4-mini", "analyst": "gpt-5.4", "evaluator": "gpt-6.1-terra", "task_planner": "gpt-6.1-terra",
+        "reporter": "gpt-6.1-terra", "judge": "gpt-6.1-terra"}
+    assert {a: m.for_agent(a)[1].reasoning_effort for a in ("extractor", "mandate", "task_planner", "reporter")} == {
+        "extractor": "medium", "mandate": "medium", "task_planner": "medium", "reporter": "medium"}
+    assert all(m.for_agent(a)[1].reasoning_effort == "low" for a in ("judge", "evaluator"))
+    assert "gpt-6.1-sol" in m.models
 
 
 def test_an_environment_variable_overrides_one_agent_only(monkeypatch):
     monkeypatch.setenv("FUND_MODEL_ANALYST", "gpt-5.4-mini")
     m = load_models()
-    assert m.for_agent("analyst")[0] == "gpt-5.4-mini" and m.for_agent("evaluator")[0] == "gpt-6.1-sol"
+    assert m.for_agent("analyst")[0] == "gpt-5.4-mini" and m.for_agent("evaluator")[0] == "gpt-6.1-terra"
 
 
 def test_an_override_must_be_a_listed_model(monkeypatch):
@@ -92,8 +96,8 @@ def test_build_agent_sends_what_the_model_supports(tmp_path, monkeypatch):
     assert agent.model == "gpt-4.1-mini" and agent.model_settings.temperature == 0 and agent.model_settings.reasoning is None
     monkeypatch.delenv("FUND_MODEL_MANDATE")
     agent = build_agent("Test", "x", Out, "mandate")
-    assert agent.model == "gpt-5.4-mini" and agent.model_settings.temperature is None
-    assert agent.model_settings.reasoning.effort == "low"
+    assert agent.model == "gpt-6.1-terra" and agent.model_settings.temperature is None
+    assert agent.model_settings.reasoning.effort == "medium"
 
 
 # .env loading

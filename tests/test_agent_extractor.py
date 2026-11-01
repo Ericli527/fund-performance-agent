@@ -38,8 +38,8 @@ def output(**changes) -> dict:
 def test_agent_settings(monkeypatch):
     monkeypatch.delenv("FUND_MODEL_EXTRACTOR", raising=False)
     agent = extractor_agent()
-    assert agent.model == "gpt-5.4-mini" and agent.output_type is ExtractorOutput
-    assert agent.model_settings.temperature is None and agent.model_settings.reasoning.effort == "low"
+    assert agent.model == "gpt-6.1-terra" and agent.output_type is ExtractorOutput
+    assert agent.model_settings.temperature is None and agent.model_settings.reasoning.effort == "medium"
 
 
 def test_conversion_labels_everything_ai_extracted_and_keeps_risk_bases_apart():

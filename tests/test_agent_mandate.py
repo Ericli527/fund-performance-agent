@@ -34,8 +34,8 @@ def run(prof, *responses):
 def test_agent_settings(monkeypatch):
     monkeypatch.delenv("FUND_MODEL_MANDATE", raising=False)
     agent = mandate_agent()
-    assert agent.model == "gpt-5.4-mini"                                   # from config/models.yaml
-    assert agent.model_settings.temperature is None and agent.model_settings.reasoning.effort == "low"
+    assert agent.model == "gpt-6.1-terra"                                  # from config/models.yaml
+    assert agent.model_settings.temperature is None and agent.model_settings.reasoning.effort == "medium"
     monkeypatch.setenv("FUND_MODEL_MANDATE", "gpt-5.4")                     # override one agent for testing
     assert mandate_agent().model == "gpt-5.4"
 
