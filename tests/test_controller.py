@@ -77,7 +77,7 @@ def test_test1_offline_run_logs_every_step(tmp_path):
     assert [(s["step"], s["status"]) for s in log["steps"]] == [
         ("read_files", "ok"), ("extractor", "skipped"), ("peers", "skipped"), ("data_checks", "ok"),
         ("mandate", "skipped"), ("plan", "skipped"), ("research", "skipped"), ("calculator", "ok"), ("scorecard", "ok"),
-        ("drafts", "skipped"), ("report", "ok"), ("email", "skipped")]
+        ("investment_assessment", "skipped"), ("drafts", "skipped"), ("report", "ok"), ("email", "skipped")]
     assert log["run"]["status"] == "ok" and all(s["ended"] for s in log["steps"])
     assert log["steps"][8]["outputs"]["verdict"] == "Monitor until a peer is added"
     assert "fund_profile.json" in log["sources"]["input_files"] and log["sources"]["web"] == []

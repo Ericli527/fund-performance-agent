@@ -338,7 +338,9 @@ async def read_documents(factsheet: Path, kid: Path | None = None, peer_factshee
                                     "message": f"Peer factsheet {path.name}: {f.message}"} for f in peer_result.flags]
         log.append(f"Extractor Agent read the {'approved ' if origin == 'approved' else ''}peer factsheet: {path.name}")
 
+    from fund_performance.portfolio import source_checked_exposures
     return {"rows": rows, "documents": list(docs) + [p.name for p, _, _ in peer_docs],
+            "portfolio_exposures": source_checked_exposures(extracted.exposures, docs),
             "text_chars": {name: sum(len(x) for x in pages) for name, pages in docs.items()},
             "factsheet": fs.model_dump(mode="json", by_alias=True) if fs else None,
             "promises": mandate.promises if mandate else [],

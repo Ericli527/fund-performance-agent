@@ -52,6 +52,17 @@ def by_key(intake):
     return {r["key"]: r for r in intake["rows"]}
 
 
+def test_source_matched_exposure_flows_from_document_intake(tmp_path):
+    factsheet, _ = docs(tmp_path)
+    factsheet.write_text(FACTSHEET + '\nFund holdings Example Corp 4.2%')
+    answer = extractor_answer() | {'exposures': [{'category': 'holdings', 'name': 'Example Corp',
+        'weight_pct': 4.2, 'quote': 'Fund holdings Example Corp 4.2%'}]}
+    intake = asyncio.run(read_documents(factsheet, run_extractor=FakeRun(answer), run_mandate=FakeRun(MANDATE)))
+    holding = intake['portfolio_exposures']['holdings'][0]
+    assert holding['name'] == 'Example Corp' and holding['source'] == 'factsheet.txt, page 1'
+    assert 'require review' in holding['qualification']
+
+
 def test_the_table_shows_what_the_agents_read_and_where(tmp_path):
     rows = by_key(read(tmp_path))
     assert rows["fund_name"]["value"] == "Sample Fund A Acc" and rows["fund_name"]["status"] == AI

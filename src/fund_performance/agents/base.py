@@ -88,11 +88,19 @@ class StructuredResult(Generic[T]):
 AI_CALLS: ContextVar[list[dict] | None] = ContextVar("AI_CALLS", default=None)
 
 
-def _record(agent: Agent, attempt: int, started: float, outcome: str) -> None:
+def _record(agent: Agent, attempt: int, started: float, outcome: str, result: Any = None) -> None:
     calls = AI_CALLS.get()
     if calls is not None:
-        calls.append({"agent": agent.name, "attempt": attempt, "seconds": round(time.monotonic() - started, 2),
-                      "outcome": outcome})
+        entry = {"agent": agent.name, "attempt": attempt, "seconds": round(time.monotonic() - started, 2),
+                 "outcome": outcome}
+        responses = getattr(result, "raw_responses", None)
+        if responses is not None:
+            entry["model_requests"] = len(responses)
+            usages = [getattr(response, "usage", None) for response in responses]
+            if usages and all(u is not None for u in usages):
+                entry["tokens"] = {key: sum(getattr(u, key, 0) for u in usages)
+                                   for key in ("input_tokens", "output_tokens", "total_tokens")}
+        calls.append(entry)
 
 
 async def run_structured(agent: Agent, prompt: str, output_model: type[BaseModel],
@@ -112,19 +120,20 @@ async def run_structured(agent: Agent, prompt: str, output_model: type[BaseModel
     errors: list[str] = []
     for attempt in range(1, attempts + 1):
         started = time.monotonic()
+        result = None
         try:
             result = await run(agent, prompt)
             output = output_model.model_validate(result.final_output) if not isinstance(
                 result.final_output, output_model) else result.final_output
             converted = convert(output) if convert else output
-            _record(agent, attempt, started, "ok")
+            _record(agent, attempt, started, "ok", result)
             return StructuredResult(converted, attempt, errors)
         except (ValidationError, ModelBehaviorError, ValueError) as e:
-            _record(agent, attempt, started, "invalid output")
+            _record(agent, attempt, started, "invalid output", result)
             errors.append(f"attempt {attempt}: invalid output ({type(e).__name__}: {str(e)[:200]})")
         except (AgentsException, OpenAIError) as e:
             # A failed call (network, key, quota) is not invalid output: no retry
-            _record(agent, attempt, started, "call failed")
+            _record(agent, attempt, started, "call failed", result)
             errors.append(f"attempt {attempt}: call failed ({type(e).__name__}: {str(e)[:200]})")
             return StructuredResult(None, attempt, errors)
     return StructuredResult(None, attempts, errors)

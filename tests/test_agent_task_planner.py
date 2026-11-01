@@ -33,3 +33,12 @@ def test_an_invalid_answer_twice_gives_the_default_plan_and_an_info_flag():
     plan, flags = asyncio.run(plan_tasks("q", PROFILE, FakeRun({"bad": 1}, {"bad": 2})))
     assert plan == TaskPlan(reason=plan.reason) and plan.source == "default"
     assert flags[0].level == "info" and "default plan" in flags[0].message
+
+
+def test_exposure_aware_plan_drops_unsourced_holdings():
+    answer = FEE_PLAN | {'market_context': True, 'searches': [
+        {'topic': 'portfolio_exposure', 'query': 'Example Corp outlook', 'objective': 'Assess news', 'relevance': 'Holding'},
+        {'topic': 'portfolio_exposure', 'query': 'Unknown Corp outlook', 'objective': 'Assess news', 'relevance': 'Holding'}]}
+    exposures = {'holdings': [{'name': 'Example Corp', 'source': 'fund.pdf, page 1'}]}
+    plan, flags = asyncio.run(plan_tasks('Review holdings', PROFILE, FakeRun(answer), max_searches=5, exposures=exposures))
+    assert not flags and [x['query'] for x in plan.searches] == ['Example Corp outlook']

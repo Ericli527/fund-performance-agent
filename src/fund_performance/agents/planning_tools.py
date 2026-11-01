@@ -1,5 +1,6 @@
 """Read-only, per-review planning evidence; no files or network access."""
 from dataclasses import dataclass, field
+import copy
 
 from agents import RunContextWrapper, function_tool
 
@@ -15,10 +16,12 @@ def fund_mandate(profile: FundProfile) -> dict:
             "qualification": "Document-derived fields may still require verification; follow data-quality flags."}
 
 
-def portfolio_exposures() -> dict:
-    """No structured portfolio evidence is currently collected by the intake pipeline."""
+def portfolio_exposures(exposures: dict | None = None) -> dict:
+    """Return source-matched portfolio observations, or explicit unavailable values."""
+    if exposures is not None:
+        return copy.deepcopy(exposures)
     return {"holdings": None, "sectors": None, "regions": None, "currencies": None,
-            "concentration": None, "unavailable": "Portfolio exposures are not available in the current input model."}
+            "concentration": None, "unavailable": "Portfolio exposures are not available for this review."}
 
 
 @dataclass
@@ -26,12 +29,15 @@ class PlanningContext:
     profile: FundProfile
     mandate_flags: list[dict] = field(default_factory=list)
     calls: list[str] = field(default_factory=list)
+    exposures: dict | None = None
 
     @classmethod
-    def of(cls, profile: FundProfile, flags: list[DataFlag] | None = None) -> "PlanningContext":
+    def of(cls, profile: FundProfile, flags: list[DataFlag] | None = None,
+           exposures: dict | None = None) -> "PlanningContext":
         return cls(profile.model_copy(deep=True),
                    [{"level": f.level, "message": f.message} for f in flags or []
-                    if f.check in ("mandate_agent", "fund_horizon", "ongoing_charge")])
+                    if f.check in ("mandate_agent", "fund_horizon", "ongoing_charge")],
+                   exposures=copy.deepcopy(exposures))
 
     def allow(self, name: str) -> bool:
         if len(self.calls) >= 6:
@@ -53,7 +59,7 @@ def get_portfolio_exposures(ctx: RunContextWrapper[PlanningContext]) -> dict:
     """Get portfolio exposures or explicit reasons they are unavailable."""
     if not ctx.context.allow("get_portfolio_exposures"):
         return {"error": "planning tool call limit reached"}
-    return portfolio_exposures()
+    return portfolio_exposures(ctx.context.exposures)
 
 
 TOOLS = [get_fund_mandate, get_portfolio_exposures]

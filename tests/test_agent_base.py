@@ -14,6 +14,23 @@ class Out(BaseModel):
     value: int
 
 
+def test_audit_records_actual_sdk_response_counts_and_tokens():
+    import time
+    from types import SimpleNamespace
+    from fund_performance.agents.base import AI_CALLS, _record
+    from agents.usage import Usage
+    records = []
+    token = AI_CALLS.set(records)
+    try:
+        responses = [SimpleNamespace(usage=Usage(input_tokens=10, output_tokens=5, total_tokens=15)),
+                     SimpleNamespace(usage=Usage(input_tokens=8, output_tokens=2, total_tokens=10))]
+        _record(SimpleNamespace(name='test'), 1, time.monotonic(), 'ok', SimpleNamespace(raw_responses=responses))
+    finally:
+        AI_CALLS.reset(token)
+    assert records[0]['model_requests'] == 2
+    assert records[0]['tokens'] == {'input_tokens': 18, 'output_tokens': 7, 'total_tokens': 25}
+
+
 # config/models.yaml
 def test_models_per_agent_match_the_owner_decision(monkeypatch):
     for agent in ("extractor", "mandate", "planner", "search", "analyst", "evaluator", "task_planner", "reporter",

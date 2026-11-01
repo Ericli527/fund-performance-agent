@@ -29,13 +29,20 @@ def test_the_version_1_defaults_one_draft_research_on_email_off():
 
 
 def test_a_review_makes_a_bounded_set_of_ai_calls_and_records_them(tmp_path):
-    """ JSON route: Task Planner, Mandate, the Planner's 2 web searches (one Search Agent each), one Reporting Agent
-    draft, one Judge review: 6 calls. No research planner, Analyst or Evaluator """
-    result = run(tmp_path, mocked())
+    """The investment assessment and its reviewer add two bounded agent runs to the existing workflow."""
+    from conftest import FakeRun
+    from test_investment_analyst import BASE, PASS
+    runners = mocked()
+    runners.investment_analyst, runners.investment_reviewer = FakeRun(BASE), FakeRun(PASS)
+    result = run(tmp_path, runners)
     calls = calls_of(result)
-    assert calls["total"] == 6 and calls["by_agent"] == {"Task Planner Agent": 1, "Mandate Agent": 1,
-                                                         "Search Agent": 2, "Reporting Agent": 1, "Judge Agent": 1}
+    assert calls["total"] == 8 and calls["by_agent"] == {"Task Planner Agent": 1, "Mandate Agent": 1,
+        "Search Agent": 2, "Reporting Agent": 1, "Judge Agent": 1,
+        "Investment Analyst Agent": 1, "Investment Quality Reviewer": 1}
     assert all(c["outcome"] == "ok" and c["seconds"] >= 0 for c in calls["calls"])
+    assessment = json.loads((result.run_dir / "investment_assessment.json").read_text())
+    assert assessment == result.investment_assessment and assessment["status"] == "available"
+    assert result.facts["scorecard"]["verdict"] == "Retain"
     log = json.loads((result.run_dir / "log.json").read_text())
     assert log["run"]["run_id"] == result.run_dir.name
     assert log["run"]["trace_id"] is None                     # tracing is off without an API key (tests, offline)
@@ -58,6 +65,14 @@ def test_a_rejected_draft_gets_one_targeted_rewrite_and_no_second_judge_pass(tmp
     assert concl["source"] == "ai" and concl["revised"] is True
     assert "revised once after the Judge's review and checked by code" in conclusion_origin(concl)
     assert "still need a data check" in runners.reporter.prompts[1]    # the rewrite got the Judge's feedback
+
+
+def test_unavailable_investment_analyst_keeps_scorecard_and_reports(tmp_path):
+    result = run(tmp_path, mocked())
+    assessment = json.loads((result.run_dir / "investment_assessment.json").read_text())
+    assert assessment['status'] == 'unavailable' and 'assessment' not in assessment
+    assert result.pdf.is_file() and result.executive_pdf.is_file()
+    assert result.facts['scorecard']['verdict']
 
 
 @pytest.mark.parametrize("agent", ["task_planner", "reporter", "judge"])
