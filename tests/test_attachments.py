@@ -2,7 +2,7 @@
 from pathlib import Path
 from docx import Document
 from fund_performance.attachments import (BENCHMARK, CONFIRM, DEMO_INPUT, FACTSHEET, KID, PEER, PRICE, SUPPORTING,
-                                          add_files, apply_roles, classify, engine_inputs, rows, select_type,
+                                          add_files, apply_roles, classify, engine_inputs, remove_attachment, rows, select_type,
                                           supporting_inputs, validate)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,12 +74,13 @@ def test_type_override_refreshes_validation_and_supports_multiple_documents(tmp_
     table = rows(entries)
     status = {fn.name: fn.fn for fn in web.build_ui().fns.values()}['update_status']
     assert status('Review', entries, table, None)[1]['interactive'] is False
-    for i, role in enumerate((FACTSHEET, PEER, PEER, SUPPORTING, SUPPORTING), 2):
-        entries, table = select_type(entries, table, str(i), role)
+    for attachment_id, role in zip([entry['id'] for entry in entries[1:]],
+                                   (FACTSHEET, PEER, PEER, SUPPORTING, SUPPORTING)):
+        entries, table = select_type(entries, table, attachment_id, role)
     assert status('Review', entries, table, None)[1]['interactive'] is True
     assert engine_inputs(entries)[3] == files[1:3]
     assert supporting_inputs(entries) == files[3:]
-    entries, table = select_type(entries, table, '2', KID)
+    entries, table = select_type(entries, table, entries[1]['id'], KID)
     message, button = status('Review', entries, table, None)
     assert not button['interactive'] and 'main fund factsheet' in message
 
@@ -104,6 +105,301 @@ def test_dynamic_type_controls_create_private_dropdown_events(tmp_path):
     assert len(controls) == 1 and SUPPORTING in [value for _, value in controls[0].choices]
     assert FACTSHEET in [value for _, value in controls[0].choices]
     assert all(fn.api_visibility == 'private' for fn in ui.fns.values())
+    render_trigger = next(fn for fn in ui.fns.values() if fn.name == 'apply')
+    assert render_trigger.concurrency_limit == 1 and render_trigger.concurrency_id == 'attachment-render'
+    removals = [fn for fn in ui.fns.values() if fn.name == 'remove_file']
+    assert removals and removals[0].concurrency_id == 'attachment-mutations'
+    state, table, message = removals[0].fn(entries, rows(entries))
+    assert state == [] and table == [] and message == 'Attachment removed.' and path.exists()
+
+
+def test_selector_render_errors_are_logged_and_shown(monkeypatch, capsys):
+    import gradio as gr
+    from gradio.context import LocalContext
+    from fund_performance import attachments, web
+    def fail(*args):
+        raise RuntimeError('synthetic selector error')
+    monkeypatch.setattr(attachments, 'apply_roles', fail)
+    ui = web.build_ui()
+    token = LocalContext.blocks_config.set(ui.default_config)
+    try:
+        ui.default_config.renderables[0].apply([], [])
+    finally:
+        LocalContext.blocks_config.reset(token)
+    assert 'synthetic selector error' in capsys.readouterr().err
+    assert any(isinstance(block, gr.Markdown) and 'could not be displayed' in str(block.value)
+               for block in ui.blocks.values())
+
+
+def test_upload_processing_feedback_precedes_slow_classification(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from fund_performance import attachments, web
+    started, finish = Event(), Event()
+    original = attachments.add_files
+    def slow(existing, paths):
+        started.set()
+        assert finish.wait(5)
+        return original(existing, paths)
+    monkeypatch.setattr(attachments, 'add_files', slow)
+    callback = {fn.name: fn.fn for fn in web.build_ui().fns.values()}['upload_files']
+    path = tmp_path / 'fund.docx'
+    doc = Document()
+    doc.add_paragraph('Fund factsheet')
+    doc.save(path)
+    stream = callback([str(path)], [], [])
+    initial = next(stream)
+    assert initial[3]['interactive'] is False and initial[-1] is True
+    assert 'Processing' in initial[8] and not started.is_set()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(next, stream)
+        assert started.wait(5) and not pending.done()
+        finish.set()
+        final = pending.result(timeout=5)
+    assert len(final[0]) == 1 and final[1]['value'][0][1] == 'fund.docx'
+    assert final[3]['interactive'] is True and final[-1] is False
+
+
+def test_sequential_overlapping_uploads_do_not_discard_newer_files(tmp_path):
+    from fund_performance.web import build_ui
+    callback = {fn.name: fn.fn for fn in build_ui().fns.values()}['upload_files']
+    paths = []
+    for name in ('one.docx', 'two.docx', 'three.docx'):
+        path = tmp_path / name
+        doc = Document()
+        doc.add_paragraph('Fund factsheet')
+        doc.save(path)
+        paths.append(str(path))
+    initial, result = list(callback(paths[:2], [], []))
+    assert len(result[0]) == 2
+    # A queued second request can carry an old table even when the server state has advanced.
+    _, second = list(callback(paths[2:], result[0], []))
+    assert [Path(e['path']).name for e in second[0]] == ['one.docx', 'two.docx', 'three.docx']
+    assert len({entry['id'] for entry in second[0]}) == 3
+
+
+def test_stale_table_cannot_restore_a_removed_attachment(tmp_path):
+    paths = []
+    for name in ('one.docx', 'two.docx'):
+        path = tmp_path / name
+        doc = Document()
+        doc.add_paragraph('Fund factsheet')
+        doc.save(path)
+        paths.append(str(path))
+    state = add_files([], paths)
+    stale = rows(state)
+    current, _ = remove_attachment(state, stale, state[0]['id'])
+    result, table = select_type(current, stale, current[0]['id'], FACTSHEET)
+    assert result == current and table == rows(current) and len(table) == 1
+
+
+def test_remove_and_clear_preserve_other_files_and_update_validation(tmp_path, monkeypatch):
+    from fund_performance import web
+    monkeypatch.setattr(web, 'live_demo_allowed', lambda: True)
+    price = str(ROOT / 'demo/sample_index_fund/prices.csv')
+    doc_path = tmp_path / 'fund.docx'
+    doc = Document()
+    doc.add_paragraph('Fund factsheet')
+    doc.save(doc_path)
+    state = add_files([], [price, str(doc_path)])
+    table = rows(state)
+    state, table = select_type(state, table, state[1]['id'], FACTSHEET)
+    callbacks = {fn.name: fn.fn for fn in web.build_ui().fns.values()}
+    assert callbacks['update_status']('Review', state, table, None)[1]['interactive']
+    state, table = remove_attachment(state, table, state[1]['id'])
+    assert len(state) == 1 and doc_path.exists()
+    assert not callbacks['update_status']('Review', state, table, None)[1]['interactive']
+    cleared = callbacks['clear_files']()
+    assert cleared[:3] == ([], [], None) and cleared[4]['value'] is None
+    assert callbacks['choose_case']('sample_index_fund')[0]
+
+
+def test_failed_file_does_not_lose_successful_uploads(tmp_path, monkeypatch, caplog):
+    from fund_performance import attachments, web
+    original = attachments.classify
+    def sometimes_fails(path, **kwargs):
+        if Path(path).name == 'bad.docx':
+            raise RuntimeError('synthetic inspection failure')
+        return original(path, **kwargs)
+    monkeypatch.setattr(attachments, 'classify', sometimes_fails)
+    good, bad = tmp_path / 'good.docx', tmp_path / 'bad.docx'
+    doc = Document()
+    doc.add_paragraph('Fund factsheet')
+    doc.save(good)
+    bad.write_bytes(b'bad')
+    callback = {fn.name: fn.fn for fn in web.build_ui().fns.values()}['upload_files']
+    _, final = list(callback([str(good), str(bad)], [], []))
+    assert len(final[0]) == 2 and final[0][1]['role'] == CONFIRM
+    assert 'could not be read' in final[8] and 'synthetic inspection failure' in caplog.text
+    state, table = select_type(final[0], final[1]['value'], final[0][1]['id'], FACTSHEET)
+    assert any('could not be processed' in issue for issue in validate('Review', state))
+
+
+def test_unexpected_upload_error_is_logged_and_existing_state_is_kept(tmp_path, monkeypatch, capsys):
+    from fund_performance import attachments, web
+    path = tmp_path / 'existing.docx'
+    doc = Document()
+    doc.add_paragraph('Fund factsheet')
+    doc.save(path)
+    state = add_files([], [str(path)])
+    def fail(*args):
+        raise RuntimeError('synthetic upload failure')
+    monkeypatch.setattr(attachments, 'add_files', fail)
+    callback = {fn.name: fn.fn for fn in web.build_ui().fns.values()}['upload_files']
+    _, final = list(callback(['new.docx'], state, rows(state)))
+    assert final[0] == state and final[1]['value'] == rows(state)
+    assert 'Existing attachments were kept' in final[8] and final[-1] is False
+    assert 'synthetic upload failure' in capsys.readouterr().err
+
+
+def test_validation_reuses_inspection_until_the_file_changes(tmp_path, monkeypatch):
+    from fund_performance import attachments
+    path = tmp_path / 'fund.docx'
+    doc = Document()
+    doc.add_paragraph('Fund factsheet')
+    doc.save(path)
+    original = attachments.read_document
+    calls = []
+    def counted(p):
+        calls.append(p)
+        return original(p)
+    monkeypatch.setattr(attachments, 'read_document', counted)
+    entries = add_files([], [str(path)])
+    entries[0]['role'] = FACTSHEET
+    validate('Review', entries)
+    validate('Review again', entries)
+    assert len(calls) == 1
+    doc.add_paragraph('Updated')
+    doc.save(path)
+    validate('Review', entries)
+    assert len(calls) == 2
+
+
+def test_multiple_uploads_stream_processing_and_table_over_http(tmp_path):
+    import json
+    import socket
+    import requests
+    from fund_performance.web import build_ui
+    sock = socket.socket()
+    sock.bind(('127.0.0.1', 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    ui = build_ui()
+    ui.queue()
+    ui.launch(server_name='127.0.0.1', server_port=port, prevent_thread_lock=True, quiet=True)
+    try:
+        paths = []
+        for name in ('first.docx', 'second.docx'):
+            path = tmp_path / name
+            doc = Document()
+            doc.add_paragraph('Fund factsheet')
+            doc.save(path)
+            paths.append(path)
+        session = requests.Session()
+        base = f'http://127.0.0.1:{port}'
+        files = [('files', (path.name, path.read_bytes(), 'application/octet-stream')) for path in paths]
+        uploaded = session.post(base + '/gradio_api/upload', files=files, timeout=20)
+        uploaded.raise_for_status()
+        payload = [{'path': path, 'orig_name': Path(path).name, 'meta': {'_type': 'gradio.FileData'}}
+                   for path in uploaded.json()]
+        fn = next(fn for fn in ui.fns.values() if fn.name == 'upload_files')
+        table = {'headers': ['ID', 'File', 'Type', 'Notes', 'Document date'], 'data': []}
+        joined = session.post(base + '/gradio_api/queue/join', json={'data': [payload, None, table],
+            'event_data': None, 'fn_index': fn._id, 'session_hash': 'upload-test'}, timeout=20)
+        joined.raise_for_status()
+        event = joined.json()['event_id']
+        messages = []
+        with session.get(base + '/gradio_api/queue/data', params={'session_hash': 'upload-test'},
+                         stream=True, timeout=30) as response:
+            response.raise_for_status()
+            for line in response.iter_lines(decode_unicode=True):
+                if not line or not line.startswith('data: '):
+                    continue
+                message = json.loads(line[6:])
+                if message.get('event_id') == event:
+                    messages.append(message)
+                    if message.get('msg') == 'process_completed':
+                        break
+        first = next(m for m in messages if m.get('msg') == 'process_generating')
+        last = messages[-1]
+        assert 'Processing' in first['output']['data'][8]
+        assert first['output']['data'][3]['interactive'] is False
+        assert last['success'] and last['output']['data'][3]['interactive'] is True
+        table_rows = last['output']['data'][1]['value']['data']
+        assert [row[1] for row in table_rows] == ['first.docx', 'second.docx']
+    finally:
+        ui.close()
+
+
+def test_overlapping_http_uploads_keep_both_files(tmp_path, monkeypatch):
+    import json
+    import socket
+    import threading
+    import requests
+    from fund_performance import attachments
+    from fund_performance.web import build_ui
+    sock = socket.socket()
+    sock.bind(('127.0.0.1', 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    ui = build_ui()
+    ui.queue()
+    ui.launch(server_name='127.0.0.1', server_port=port, prevent_thread_lock=True, quiet=True)
+    started, release = threading.Event(), threading.Event()
+    original = attachments.classify
+    def slow(path, **kwargs):
+        if Path(path).name == 'first.docx':
+            started.set()
+            assert release.wait(10)
+        return original(path, **kwargs)
+    monkeypatch.setattr(attachments, 'classify', slow)
+    try:
+        paths = []
+        for name in ('first.docx', 'second.docx'):
+            path = tmp_path / name
+            doc = Document()
+            doc.add_paragraph('Fund factsheet')
+            doc.save(path)
+            paths.append(path)
+        base = f'http://127.0.0.1:{port}'
+        session = requests.Session()
+        files = [('files', (path.name, path.read_bytes(), 'application/octet-stream')) for path in paths]
+        uploaded = session.post(base + '/gradio_api/upload', files=files, timeout=20)
+        uploaded.raise_for_status()
+        cached = uploaded.json()
+        fn = next(fn for fn in ui.fns.values() if fn.name == 'upload_files')
+        table = {'headers': ['ID', 'File', 'Type', 'Notes', 'Document date'], 'data': []}
+        def join(path):
+            file_data = {'path': path, 'orig_name': Path(path).name, 'meta': {'_type': 'gradio.FileData'}}
+            response = session.post(base + '/gradio_api/queue/join', json={'data': [[file_data], None, table],
+                'event_data': None, 'fn_index': fn._id, 'session_hash': 'overlapping-upload-test'}, timeout=20)
+            response.raise_for_status()
+            return response.json()['event_id']
+        messages = []
+        def listen():
+            with requests.get(base + '/gradio_api/queue/data', params={'session_hash': 'overlapping-upload-test'},
+                              stream=True, timeout=30) as response:
+                response.raise_for_status()
+                for line in response.iter_lines(decode_unicode=True):
+                    if line and line.startswith('data: '):
+                        messages.append(json.loads(line[6:]))
+                        if sum(item.get('msg') == 'process_completed' for item in messages) >= 2:
+                            break
+        first = join(cached[0])
+        listener = threading.Thread(target=listen, daemon=True)
+        listener.start()
+        assert started.wait(10)
+        second = join(cached[1])
+        release.set()
+        listener.join(30)
+        assert not listener.is_alive()
+        results = {item['event_id']: item for item in messages if item.get('msg') == 'process_completed'}
+        assert results[first]['success'] and results[second]['success']
+        final = results[second]['output']['data'][1]['value']['data']
+        assert [row[1] for row in final] == ['first.docx', 'second.docx']
+    finally:
+        release.set()
+        ui.close()
 
 
 def test_unreadable_and_unsupported_files_are_blocked(tmp_path):
