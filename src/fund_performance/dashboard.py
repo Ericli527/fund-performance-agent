@@ -18,13 +18,14 @@ import base64
 import math
 import re
 from html import escape
+from urllib.parse import urlparse
 from fund_performance.plain import verdict_meaning, verdict_name
 from fund_performance.presentation import (NAVY, NOT_AVAILABLE, QUESTIONS, RATING_STYLE,  # noqa: F401
                                            VERDICT_STYLE, EvidenceQuality, _date, _figures, _shown, _source,
                                            assessment_caveat, evidence_quality, flag_dicts, headline_metrics,
                                            conclusion_origin, issue_groups, summary_parts, next_step, risk_measures, UNRELIABLE,
                                            UNRELIABLE_SOURCE, UNRELIABLE_WHY, assessment_meaning, comparison_invalid,
-                                           report_action)
+                                           report_action, rating_explanation)
 from fund_performance.report import ANGLE_WORDS, JUDGE_WORDS, REPORT_TYPE_WORDS, plain_note
 
 AUDIENCES = ("analyst", "management")
@@ -41,6 +42,9 @@ def dashboard_data(result) -> dict:
     source_reader = getattr(log, "report_sources", None)
     sources = source_reader()[1] if callable(source_reader) else (list(narrative.sources) if narrative else [])
     chart = None
+    primary_chart = None
+    shared = getattr(result, 'presentation_context', None) or {}
+    primary_status = shared.get('performance_chart') or {}
     chart_path = getattr(result, "run_dir", None)
     if chart_path and not comparison_invalid(result.facts or {}):
         try:
@@ -48,12 +52,17 @@ def dashboard_data(result) -> dict:
             chart = base64.b64encode(image).decode("ascii")
         except OSError:
             pass
+        if primary_status.get('available'):
+            try:
+                primary_chart = base64.b64encode((chart_path / 'dashboard_growth.png').read_bytes()).decode('ascii')
+            except OSError:
+                primary_status = {'available': False, 'reason': 'The prepared chart image is unavailable.'}
     return {"facts": result.facts or {}, "reasons": dict(getattr(result, "reasons", {}) or {}),
             "findings": list(output.key_findings) if output else [],
             "actions": list(output.action_texts) if output else [],
             "market_context": output.market_context if output else None,
-            "sources": sources, "performance_chart": chart,
-            "presentation_context": getattr(result, "presentation_context", None) or {},
+            "sources": sources, "performance_chart": chart, "primary_chart": primary_chart,
+            "primary_chart_status": primary_status, "presentation_context": shared,
             "flags": flags or [dict(f) for f in (result.facts or {}).get("data_flags", [])],
             "offline": bool(log.run.get("offline")) if log is not None else False}
 
@@ -110,7 +119,7 @@ def _header(data: dict, quality: EvidenceQuality, institutional: bool = False) -
 </div>"""
 
 
-def _summary(data: dict, quality: EvidenceQuality, title: str = "Summary") -> str:
+def _summary(data: dict, quality: EvidenceQuality, title: str = "Summary", concise: bool = False) -> str:
     """ The analyst's answer: Answer, Supporting evidence and Recommended next step. The verdict and ratings are shown
     in their own sections; data-quality items are listed once, in a collapsible section """
     facts = data["facts"]
@@ -119,8 +128,12 @@ def _summary(data: dict, quality: EvidenceQuality, title: str = "Summary") -> st
     parts = summary_parts(concl)
     if parts:
         answer, evidence = parts
+        shown = evidence[:3] if concise else evidence
         body = (f"<p class='fp-concern-title'>Answer</p><p class='fp-conclusion'>{escape(answer)}</p>"
-                + (f"<p class='fp-concern-title'>Supporting evidence</p>" + _list(evidence, "fp-evidence") if evidence else ""))
+                + (f"<p class='fp-concern-title'>{'Key findings' if concise else 'Supporting evidence'}</p>"
+                   + _list(shown, "fp-evidence") if shown else ""))
+        if concise and len(evidence) > 3:
+            body += _details("Full supporting evidence", _list(evidence))
     else:
         answer = concl.get('text') or 'The answer is unavailable; review the scorecard and evidence below.'
         body = f"<p class='fp-concern-title'>Answer</p><p class='fp-conclusion'>{escape(answer)}</p>"
@@ -157,9 +170,23 @@ def _metrics(facts: dict) -> str:
     return f"<div class='fp-metrics'>{cards}</div>"
 
 
-def _ratings(data: dict, analyst: bool) -> str:
+def _ratings(data: dict, analyst: bool, explanatory: bool = False) -> str:
     rows = ""
     for p in data["facts"].get("scorecard", {}).get("pillars", []):
+        if explanatory:
+            explanation = rating_explanation(data["facts"], p)
+            limits = (p.get('values') or {}).get('limits') or []
+            rules = [f"{v.get('metric', 'Measure')}: Green {v.get('green')}, Amber {v.get('amber')}; "
+                     f"rule {v.get('kind', 'not specified')} ({v.get('unit') or 'ratio'})." for v in limits]
+            methodology = _list([explanation['methodology']] + [s.get('reason', '') for s in p.get('sub_ratings', [])] + rules)
+            content = (f"<p><b>{escape(explanation['conclusion'])}</b></p>"
+                       f"<p><b>Why this rating?</b> {escape(explanation['why'])}</p>"
+                       + ("<p><b>Supporting evidence</b></p>" + _list(explanation['evidence']) if explanation['evidence'] else "")
+                       + ("<p><b>Limitations</b></p>" + _list(explanation['limitations']) if explanation['limitations'] else "")
+                       + _details("Rating methodology", methodology))
+            rows += (f"<div class='fp-rating'><div class='fp-rating-name'><b>{escape(p['name'])}</b></div>"
+                     f"{_chip(p['rating'])}<div class='fp-rating-why'>{content}</div></div>")
+            continue
         extra = ""
         if analyst:
             subs = [f"{s['name']}: {RATING_STYLE.get(s['rating'], (s['rating'],))[0]} ({s['reason']})"
@@ -358,24 +385,30 @@ def dashboard_html(data: dict, audience: str = "analyst") -> str:
             f"<p class='fp-view'>{view}. Both views use the same figures and ratings.</p>{''.join(parts)}</div>")
 
 
+def _chartable_allocation(row: dict) -> bool:
+    if (not isinstance(row, dict) or not row.get("name") or not row.get("source")
+            or row.get("subject") in ("benchmark", "peer", "unknown")):
+        return False
+    value, level = row.get("weight_pct"), row.get("evidence_level")
+    if (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+            or not 0 <= value <= 100 or level not in ("verified", "provisional")):
+        return False
+    if level == "provisional":
+        numbers = re.findall(r'(?<![\d.])(\d+(?:\.\d+)?)\s*%', row.get('excerpt') or '')
+        return len(numbers) == 1 and abs(float(numbers[0]) - value) <= 1e-9
+    return True
+
+
 def _allocation_bars(exposures: dict) -> str:
     """Display only sourced, unambiguous weights; extracted classifications remain provisional."""
     sections = []
     for key, heading in (("sectors", "Sector allocation"), ("regions", "Geographic allocation")):
         bars = []
         for row in exposures.get(key) or []:
-            if (not isinstance(row, dict) or not row.get("name") or not row.get("source")
-                    or row.get("subject") in ("benchmark", "peer", "unknown")):
+            if not _chartable_allocation(row):
                 continue
             value = row.get("weight_pct")
             level = row.get("evidence_level")
-            if (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
-                    or not 0 <= value <= 100 or level not in ("verified", "provisional")):
-                continue
-            if level == "provisional":
-                numbers = re.findall(r'(?<![\d.])(\d+(?:\.\d+)?)\s*%', row.get('excerpt') or '')
-                if len(numbers) != 1 or abs(float(numbers[0]) - value) > 1e-9:
-                    continue
             label = f"{row['name']} — {value:g}%"
             source = str(row['source']) + ("; provisional, classification and date require verification"
                                            if level == "provisional" else "")
@@ -386,6 +419,75 @@ def _allocation_bars(exposures: dict) -> str:
         if bars:
             sections.append(f"<h4>{heading}</h4>" + "".join(bars))
     return "".join(sections)
+
+
+def _strategy(facts: dict, context: dict, exposures: dict, assessment: dict | None = None) -> str:
+    fund, extracted = facts.get('fund') or {}, context.get('fund_facts') or {}
+    objective = fund.get('objective_text') or extracted.get('objective_text')
+    lines = []
+    if objective:
+        lines.append('Investment objective: ' + str(objective))
+    kind = fund.get('objective_type')
+    benchmark = fund.get('benchmark_name') or extracted.get('benchmark_name')
+    if kind == 'index_tracker':
+        lines.append('Investment approach: index tracking' + (f'; benchmark: {benchmark}.' if benchmark else '.'))
+    elif benchmark:
+        lines.append(f'Benchmark: {benchmark}; consult the mandate for its role.')
+    if fund.get('time_horizon_years') is not None:
+        lines.append(f"Documented investment horizon: {fund['time_horizon_years']} years.")
+    asset = fund.get('asset_class') or extracted.get('asset_class')
+    if asset:
+        lines.append('Asset class: ' + str(asset))
+    regions = [str(item['name']) for item in exposures.get('regions') or []
+               if isinstance(item, dict) and item.get('name') and item.get('subject') not in ('benchmark', 'peer', 'unknown')]
+    if regions and len(lines) < 6:
+        lines.append('Documented geographic exposure: ' + ', '.join(regions[:2]) + ' (AI-extracted; verify).')
+    ai = ((assessment or {}).get('assessment') or {}) if (assessment or {}).get('status') == 'available' else {}
+    risks = ai.get('material_risks') or []
+    if risks and len(lines) < 6:
+        lines.append('Main investment risk (AI assessment): ' + str(risks[0]))
+    for group in ('portfolio_description', 'concentration'):
+        for item in exposures.get(group) or []:
+            if isinstance(item, dict) and item.get('name') and len(lines) < 6:
+                lines.append(f"Portfolio characteristic: {item['name']} (AI-extracted; verify classification and date).")
+    if not lines:
+        lines.append('Strategy details are unavailable in the structured evidence.')
+    full = ''.join(f"<p>{escape(str(value))}</p>" for value in
+                   (context.get('document_summary'), context.get('mandate_interpretation')) if value)
+    return ("<div class='fp-card'><h3>Fund strategy &amp; mandate</h3>" + _list(lines[:6])
+            + ("<p class='fp-muted'>AI-extracted descriptions require source verification.</p>" if full else '')
+            + _details('Source details', full) + '</div>')
+
+
+def _research_cards(research: list[dict], as_of: str | None) -> str:
+    if not research:
+        return "<div class='fp-card'><h3>Research findings</h3><p class='fp-muted'>No vetted research is available for this review.</p></div>"
+    cards, full = [], []
+    for item in research:
+        summary = str(item.get('summary') or item.get('title') or 'Research finding unavailable.')
+        first = re.split(r'(?<=[.!?])\s+(?=[A-Z])', summary, maxsplit=1)[0]
+        url = str(item.get('url') or '')
+        try:
+            parsed = urlparse(url)
+            host = parsed.hostname
+        except ValueError:
+            parsed, host = urlparse(''), None
+        source = host or item.get('title') or 'Source'
+        link = (f"<a href='{escape(url, quote=True)}' target='_blank' rel='noopener noreferrer'>{escape(str(source))}</a>"
+                if parsed.scheme in ('http', 'https') and host else escape(str(source)))
+        day = str(item.get('date') or 'Date unavailable')
+        timing = ((' — published after review date' if item.get('date_basis') == 'published'
+                   else ' — source date after review; publication date not established')
+                  if as_of and item.get('date') and str(item['date']) > as_of else '')
+        relevance = item.get('relevance') or 'Assess its relevance to the fund and review question.'
+        limitation = item.get('limitations')
+        cards.append(f"<div class='fp-research-item'><p><b>Finding:</b> {escape(first)}</p>"
+                     f"<p><b>Why it matters:</b> {escape(str(relevance))}</p>"
+                     f"<p class='fp-muted'>{link} · {escape(day + timing)}</p>"
+                     + (f"<p><b>Limitation:</b> {escape(str(limitation))}</p>" if limitation else '') + '</div>')
+        full.append(f"<p>{escape(summary)}</p><p class='fp-muted'>{link} · {escape(day + timing)}</p>")
+    return ("<div class='fp-card'><h3>Research findings</h3>" + ''.join(cards[:3])
+            + _details('Full research summaries', ''.join(full)) + '</div>')
 
 
 def dashboard_sections(data: dict) -> dict[str, str]:
@@ -409,40 +511,44 @@ def dashboard_sections(data: dict) -> dict[str, str]:
     else:
         details = "<p class='fp-muted'>Independent assessment unavailable; use the scorecard and evidence below.</p>"
     ai_card = "<div class='fp-card'><h3>AI Investment Analyst</h3>" + details + "</div>"
-    overview = _header(data, quality, True) + _summary(data, quality, "Answer to your question") + _ratings(data, True) + ai_card + _metrics(facts)
-    chart = ("<figure><img style='width:100%;max-width:720px' alt='Performance chart from the review' "
+    overview = _header(data, quality, True) + _summary(data, quality, "Answer to your question", True) + _ratings(data, True, True) + ai_card + _metrics(facts)
+    chart = ("<figure><img style='width:100%;max-width:720px' alt='Yearly tracking analysis from the review' "
              f"src='data:image/png;base64,{escape(data['performance_chart'], quote=True)}'><figcaption>"
-             "Review-period chart; see labels and source in the report.</figcaption></figure>"
+             "Yearly tracking analysis; see labels and source in the report.</figcaption></figure>"
              if data.get("performance_chart") else "")
-    financial_detail = chart + _returns_table(facts) + _risk_rows(facts) + _statistics(facts)
-    performance = ("<div class='fp-card'><h3>Performance &amp; risk</h3>" + (financial_detail or
+    status = data.get('primary_chart_status') or {}
+    primary = ("<figure><img style='width:100%;max-width:900px' alt='Five-year growth of 100: fund and benchmark' "
+               f"src='data:image/png;base64,{escape(data['primary_chart'], quote=True)}'>"
+               f"<figcaption>{escape(status.get('caption') or '')}</figcaption></figure>"
+               if data.get('primary_chart') else
+               f"<p class='fp-muted'>Five-year line chart unavailable: {escape(status.get('reason') or 'Comparable total-return series have not been confirmed.')}</p>")
+    financial_detail = _returns_table(facts) + _risk_rows(facts) + _statistics(facts)
+    performance = ("<div class='fp-card'><h3>Five-year cumulative performance — fund vs benchmark</h3>" + primary
+                   + "</div><div class='fp-card'><h3>Period returns &amp; risk</h3>" + (financial_detail or
                    "<p class='fp-muted'>Performance and risk figures are unavailable for this review.</p>")
-                   + "</div>" + _peers(facts))
-    narrative = (fund_context.get("document_summary") or (facts.get("fund") or {}).get("objective_text")
-                 or "Fund strategy details are unavailable.")
-    mandate = fund_context.get("mandate_interpretation") or "Mandate interpretation is unavailable."
-    note = ("<p class='fp-muted'>AI-extracted descriptions are provisional and require verification.</p>"
-            if fund_context.get("document_summary") or fund_context.get("mandate_interpretation") else "")
-    portfolio = ("<div class='fp-card'><h3>Fund strategy &amp; mandate</h3>"
-                 f"<p>{escape(narrative)}</p><p>{escape(mandate)}</p>{note}</div>")
+                   + "</div>" + _details('Tracking analysis', chart) + _peers(facts))
     exposures = fund_context.get("portfolio_exposures") or {}
+    portfolio = _strategy(facts, fund_context, exposures, assessment)
     exposure_items = []
+    all_exposure_items = []
     for group in ("holdings", "sectors", "regions", "currencies", "asset_classes", "concentration", "portfolio_description"):
         for row in exposures.get(group) or []:
             if isinstance(row, dict):
                 weight = f" — {row['weight_pct']:g}%" if isinstance(row.get("weight_pct"), (float, int)) else ""
-                exposure_items.append(f"{group.replace('_', ' ').title()}: {row.get('name', '')}{weight}"
-                                      + (f" ({row['source']})" if row.get('source') else "")
-                                      + (f" — {row['qualification']}" if row.get('qualification') else ""))
-    portfolio += "<div class='fp-card'><h3>Portfolio exposures</h3>" + _allocation_bars(exposures) + (_list(exposure_items) or
-        "<p class='fp-muted'>Exact portfolio exposures are unavailable; see the strategy description above.</p>") + "</div>"
-    sources = []
-    for item in research:
-        date = item.get("date") or "Date unavailable"
-        sources.append(f"{date} — {item.get('summary') or item.get('title') or 'Research finding'}"
-                       + (f" Source: {item['url']}" if item.get('url') else ""))
-    portfolio += "<div class='fp-card'><h3>Research findings</h3>" + (_list(sources) or
-        "<p class='fp-muted'>No vetted research is available for this review.</p>") + "</div>"
+                scope = row.get('subject')
+                prefix = f"{scope.title()} " if scope in ('benchmark', 'peer', 'unknown') else ''
+                text = (f"{prefix}{group.replace('_', ' ').title()}: {row.get('name', '')}{weight}"
+                        + (f" ({row['source']})" if row.get('source') else "")
+                        + (f" — {row['qualification']}" if row.get('qualification') else ""))
+                all_exposure_items.append(text)
+                if group not in ('sectors', 'regions') or not _chartable_allocation(row):
+                    exposure_items.append(text)
+    bars = _allocation_bars(exposures)
+    fallback = "<p class='fp-muted'>Exact portfolio exposures are unavailable; see the strategy description above.</p>"
+    portfolio += ("<div class='fp-card'><h3>Portfolio exposures</h3>" + bars
+                  + (_list(exposure_items) if exposure_items else '' if bars else fallback)
+                  + _details('Exposure source details', _list(all_exposure_items)) + "</div>")
+    portfolio += _research_cards(research, (facts.get('fund') or {}).get('as_of_date'))
     research_narrative = (facts.get("suggested_conclusion") or {}).get("research_narrative") or []
     if research_narrative:
         portfolio += "<div class='fp-card'><h3>Research interpretation</h3>" + _list(research_narrative) + "</div>"

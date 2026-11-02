@@ -407,12 +407,15 @@ Progress = Callable[[str], None]
 
 
 async def _run_controller(folder: Path, question: str, offline: bool, on_step: Progress | None, out_root: Path,
-                          runner, intake: dict | None = None) -> Outcome:
+                          runner, intake: dict | None = None, chart_evidence: dict | None = None) -> Outcome:
     if on_server():                                   # a server keeps reports for a day, not for ever
         prune_runs(out_root, load_settings().web.keep_runs_hours)
     try:
+        options = {"intake": intake, "on_step": on_step}
+        if chart_evidence:
+            options['chart_evidence'] = chart_evidence
         result = await runner(folder, question if question and question.strip() else DEFAULT_QUESTION, out_root, offline,
-                              intake=intake, on_step=on_step)
+                              **options)
     except RunStopped as e:
         return Outcome(f"**{e}**")
     except Exception as e:                       # noqa: BLE001 - shown on the page, details in the server log
@@ -451,7 +454,7 @@ def _download(result: RunResult, pdf: Path | None) -> str | None:
 async def start_review(question: str, price, factsheet, kid, peer_factsheets, json_files, offline: bool,
                        limits: AiLimits, on_step: Progress | None = None, out_root: Path = RUNS,
                        runner=run_review, reader=read_documents, benchmark_inputs: dict | None = None,
-                       supporting_documents: list[str] | None = None) -> Outcome:
+                       supporting_documents: list[str] | None = None, chart_evidence: dict | None = None) -> Outcome:
     """ "Run the review": JSON files run straight away; documents are read, checked by code, then run """
     price, factsheet, kid = map(_one, (price, factsheet, kid))
     peers = _many(peer_factsheets)
@@ -474,11 +477,11 @@ async def start_review(question: str, price, factsheet, kid, peer_factsheets, js
         try:
             prepare_inputs([price] + json_files, folder)
             if offline:
-                return await _run_controller(folder, question, True, on_step, out_root, runner)
+                return await _run_controller(folder, question, True, on_step, out_root, runner, chart_evidence=chart_evidence)
             if (refused := limits.start()):
                 return Outcome(refused)
             try:
-                return await _run_controller(folder, question, False, on_step, out_root, runner)
+                return await _run_controller(folder, question, False, on_step, out_root, runner, chart_evidence=chart_evidence)
             finally:
                 limits.finish()
         finally:
@@ -532,7 +535,8 @@ async def start_review(question: str, price, factsheet, kid, peer_factsheets, js
             return await _run_controller(folder, question, False, on_step, out_root, runner,
                                          intake=intake | {"rows": built.rows,
                                                           "benchmark_inputs": benchmark_inputs or {},
-                                                          "flags": intake.get("flags", []) + built.flags})
+                                                          "flags": intake.get("flags", []) + built.flags},
+                                         chart_evidence=chart_evidence)
         finally:
             limits.finish()
             shutil.rmtree(folder, ignore_errors=True)
@@ -769,6 +773,11 @@ CSS = f"""
 .fp-question {{ color: {MUTED}; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }}
 .fp-verdict {{ color: {NAVY_TEXT}; font-size: 21px; font-weight: 650; }}
 .fp-dashboard {{ overflow-wrap: anywhere; }}
+.fp-research-item {{ border-top: 1px solid #e6ebf0; padding: 12px 0; }}
+.fp-research-item:first-of-type {{ border-top: 0; }}
+.fp-research-item a {{ color: {BLUE_DARK}; text-decoration: underline; }}
+.fp-rating-why .fp-details {{ padding: 8px 10px; margin-top: 8px; }}
+.fp-rating-why .fp-details summary {{ font-size: 13px; }}
 .fp-allocation {{ margin: 12px 0; }}
 .fp-allocation-label {{ display: flex; justify-content: space-between; gap: 12px; }}
 .fp-allocation-track {{ height: 8px; background: #edf1f5; border-radius: 4px; overflow: hidden; }}
@@ -897,6 +906,16 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             benchmark_confirmed = gr.Checkbox(label="I confirm the benchmark series name, currency and pricing time")
         case_info = gr.Markdown()
         attachment_status = gr.Markdown()
+        with gr.Accordion("Optional: confirm data for the five-year chart", open=False):
+            gr.Markdown("For a fund-versus-benchmark chart, the uploaded prices must contain both series. Confirm that "
+                        "the benchmark matches this fund and that both series are total return, including reinvested "
+                        "distributions, in the same currency. Unconfirmed data uses the return table instead.")
+            chart_confirmed = gr.Checkbox(label="I confirm both series match the fund and benchmark, use the same currency and include reinvested distributions; the fund series uses dealing NAV, not hypothetical PNAV")
+            chart_currency = gr.Textbox(label="Currency of both series (three-letter code)")
+            chart_fund_pricing = gr.Dropdown([('Noon', 'midday'), ('Market close', 'market_close')],
+                                             label="Fund NAV-based series pricing time")
+            chart_index_pricing = gr.Dropdown([('Noon', 'midday'), ('Market close', 'market_close')],
+                                              label="Benchmark pricing time")
         run = gr.Button("Run Fund Review", variant="primary", interactive=False, elem_classes="fp-run")
         with gr.Accordion("Help & methodology", open=False):
             gr.Markdown("Upload the fund price history and factsheet. A KID and peer factsheets are optional. "
@@ -1015,7 +1034,8 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                      for i, (p, role) in enumerate((x for x in items if x[0]), start=1)]
             return state, rows(state), demo_id, mode, f"{demo.title} loaded."
 
-        async def on_run(q, state, table, demo_id, mode, name='', currency='', confirmed=False, pricing=None):
+        async def on_run(q, state, table, demo_id, mode, name='', currency='', confirmed=False, pricing=None,
+                         chart_ok=False, chart_ccy='', chart_fund_time=None, chart_index_time=None):
             selected, error = apply_roles(state or [], table)
             demo = find_demo(demo_id) if demo_id else None
             synthetic = bool(demo and demo.fallback)
@@ -1040,6 +1060,10 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                     kwargs['benchmark_inputs'] = benchmark
                 if supporting:
                     kwargs['supporting_documents'] = supporting
+                if chart_ok:
+                    kwargs['chart_evidence'] = {'confirmed': True, 'currency': chart_ccy,
+                        'benchmark_identity_confirmed': True, 'fund_total_return': True, 'benchmark_total_return': True,
+                        'fund_pricing': chart_fund_time, 'benchmark_pricing': chart_index_time}
                 return start_review(q, price, factsheet, kid, peer, jsons, offline, limits, say, **kwargs)
             async for kind, item in with_progress(work):
                 if kind == "progress":
@@ -1123,13 +1147,16 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                 fn.api_visibility = "private"
 
         attachments.change(show_benchmark, [entries, attachments], benchmark_fields, **private)
+        # A confirmation applies only to the current uploaded series, not later attachment edits.
+        attachments.change(lambda: False, outputs=chart_confirmed, **private)
         for control in (question, attachments, demo_state, benchmark_name, benchmark_currency,
                         benchmark_confirmed, benchmark_pricing):
             control.change(update_status, [question, entries, attachments, demo_state, benchmark_name,
                                            benchmark_currency, benchmark_confirmed, benchmark_pricing, upload_busy],
                            [attachment_status, run], trigger_mode="always_last", **private)
         run.click(on_run, [question, entries, attachments, demo_state, mode_state, benchmark_name,
-                           benchmark_currency, benchmark_confirmed, benchmark_pricing],
+                           benchmark_currency, benchmark_confirmed, benchmark_pricing, chart_confirmed,
+                           chart_currency, chart_fund_pricing, chart_index_pricing],
                   [progress, message, results, overview, performance, portfolio, evidence,
                    executive_pdf, pdf, technical, log, plain], **private)
     return ui
