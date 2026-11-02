@@ -33,11 +33,17 @@ class InvestmentAssessment(BaseModel):
     evidence_references: list[str] = Field(description="Evidence IDs from the tools, e.g. mandate, scorecard, performance:5y, peers, research:1")
 
 
+ReviewField = Literal['investment_thesis', 'supporting_evidence', 'strengths', 'material_risks',
+                      'uncertainties', 'recommended_actions', 'manager_questions', 'scorecard_disagreement_reason']
+
+
 class QualityReview(BaseModel):
     model_config = ConfigDict(extra="forbid")
     material_issue: bool
     security_issue: bool
     feedback: str
+    recommendation_supported: bool | None = Field(default=None, description="Whether the independent recommendation is supported by the supplied evidence; null if uncertain.")
+    supported_fields: list[ReviewField] = Field(default_factory=list, description="Fields whose entire content is supported and safe to show; omit any field containing an unsupported or misleading claim.")
 
 
 @dataclass
@@ -199,6 +205,10 @@ def reviewer_agent() -> Agent:
                  "repeat an issue that has been corrected. Identify the specific remaining claim and the evidence "
                  "or qualification needed, rather than rejecting a defensible qualified conclusion. "
                  "Preserve supported independent judgement; do not reject for wording or inconsequential attribution. "
+                 "For material issues, explicitly identify whether the recommendation is supported and list only "
+                 "whole assessment fields that are accurate, evidence-supported, appropriately qualified and safe "
+                 "to display. Omit a field if any part is unsupported or misleading. Never infer support from the "
+                 "scorecard alone. Identify verification or source limitations in feedback. "
                  "Only material defects or security issues warrant rejection; ignore style.")
 
 
@@ -290,6 +300,32 @@ def unsupported_numbers(out: InvestmentAssessment, facts: dict, sources: list[di
     return check_numbers(text, facts | evidence)
 
 
+TEXT_FIELDS = ('investment_thesis', 'supporting_evidence', 'strengths', 'material_risks', 'uncertainties',
+               'recommended_actions', 'manager_questions', 'scorecard_disagreement_reason')
+
+
+def without_unsupported_numbers(out: InvestmentAssessment, facts: dict, sources: list[dict],
+                                exposures: dict | None, fund_context: dict | None) -> tuple[InvestmentAssessment, bool]:
+    """Remove whole claims containing unsupported numbers; never edit or round a number into agreement."""
+    empty = {name: ([] if isinstance(getattr(out, name), list) else None if name == 'scorecard_disagreement_reason'
+                    else '') for name in TEXT_FIELDS}
+    cleaned, omitted = {}, False
+    for name in TEXT_FIELDS:
+        value = getattr(out, name)
+        def valid(item):
+            probe = out.model_copy(update=empty | {name: [item] if isinstance(value, list) else item})
+            return not unsupported_numbers(probe, facts, sources, exposures, fund_context)
+        if isinstance(value, list):
+            cleaned[name] = [item for item in value if valid(item)]
+            omitted |= len(cleaned[name]) != len(value)
+        elif value and not valid(value):
+            cleaned[name] = empty[name]
+            omitted = True
+        else:
+            cleaned[name] = value
+    return out.model_copy(update=cleaned), omitted
+
+
 def problems(out: InvestmentAssessment, facts: dict, sources: list[dict], exposures: dict | None = None,
              fund_context: dict | None = None) -> list[str]:
     allowed = {"mandate", "fund_context", "scorecard", "peers", "risk_quality", *(f"performance:{p}" for p in ("1y", "3y", "5y", "since_launch")),
@@ -338,6 +374,55 @@ def evidence_catalog(facts: dict, profile: FundProfile, sources: list[dict], ref
     return result
 
 
+def reviewer_observations(feedback: str) -> list[str]:
+    """Summarise review findings without exposing untrusted or private source text."""
+    observations = [SAFE_FEEDBACK[c] for c in feedback_categories(feedback)] if feedback.strip() else []
+    if re.search(r'provisional|unverified', feedback, re.I):
+        observations.insert(0, 'Some evidence is provisional; verify it against the source before sign-off.')
+    return observations
+
+
+def partial_assessment(out: InvestmentAssessment, review: QualityReview | None, facts: dict, profile: FundProfile,
+                       sources: list[dict], exposures: dict | None, fund_context: dict | None,
+                       diagnostic: dict, calls: list[str], reason: str) -> dict:
+    """Keep only whole fields explicitly supported by a completed non-security review."""
+    kept = {}
+    if review and not review.security_issue:
+        for name in review.supported_fields:
+            kept[name] = copy.deepcopy(getattr(out, name))
+    support = bool(kept.get('investment_thesis') or kept.get('supporting_evidence'))
+    recommendation = out.recommendation if review and review.recommendation_supported is True and support else None
+    kept['recommendation'] = recommendation
+    if kept.keys() - {'recommendation'}:
+        kept['evidence_references'] = list(out.evidence_references)
+    if recommendation is not None:
+        kept['scorecard_agreement'] = out.scorecard_agreement
+    observations = reviewer_observations(review.feedback) if review else []
+    names = {'investment_thesis': 'investment thesis', 'supporting_evidence': 'supporting evidence',
+             'strengths': 'strengths', 'material_risks': 'risks', 'uncertainties': 'uncertainties',
+             'recommended_actions': 'actions', 'manager_questions': 'manager questions',
+             'scorecard_disagreement_reason': 'scorecard disagreement explanation'}
+    withheld = [names[name] for name in TEXT_FIELDS if getattr(out, name) and name not in kept]
+    if withheld:
+        observations.append('Not cleared for display: ' + ', '.join(withheld) + '.')
+    observations.append('Some AI claims were withheld; check the evidence and complete a human review before sign-off.')
+    diagnostic.update(status='partial')
+    evidence = (evidence_catalog(facts, profile, sources, out.evidence_references, exposures, fund_context)
+                if review and kept.get('evidence_references') else {})
+    limits = []
+    if not sources:
+        limits.append('No vetted market research is available.')
+    elif (any(item.get('limitations') for item in sources) or
+          any(item['date_relation'] == 'after_review' for item in research_availability(profile, sources)['sources'])):
+        limits.append('Some research has date or coverage limitations; review its source details.')
+    if any(f.get('source') in ('ai_extracted', 'calculated_provisional') for f in facts.get('figures', [])):
+        limits.append('AI-extracted figures are provisional; verify them before sign-off.')
+    return {'status': 'partial', 'review_status': 'qualified_draft' if recommendation else 'requires_analyst_review',
+            'assessment': kept, 'reason': reason, 'reviewer_observations': observations,
+            'evidence_summary': 'The deterministic scorecard and source evidence remain available in the review.',
+            'evidence': evidence, 'limitations': limits, 'tool_calls': calls, 'diagnostics': diagnostic}
+
+
 async def assess(facts: dict, profile: FundProfile, sources: list[dict], question: str,
                  run: RunFn | None = None, review_run: RunFn | None = None,
                  tool_calls: list[str] | None = None, exposures: dict | None = None,
@@ -358,6 +443,9 @@ async def assess(facts: dict, profile: FundProfile, sources: list[dict], questio
               + json.dumps(brief, ensure_ascii=False))
     feedback = ""
     previous_review = None
+    last_review = None
+    last_reviewed_out = None
+    omitted_number_claims = False
     for attempt in range(2):
         entry = {'attempt': attempt + 1, 'analyst': 'in_progress', 'review': 'not_run'}
         diagnostic['attempts'].append(entry)
@@ -366,11 +454,20 @@ async def assess(facts: dict, profile: FundProfile, sources: list[dict], questio
         if not result.ok:
             entry['analyst'] = 'call_failed' if any('call failed' in e for e in result.errors) else 'invalid_output'
             diagnostic.update(status='unavailable', final_reason='analyst_' + entry['analyst'])
+            if last_review and last_reviewed_out:
+                return partial_assessment(last_reviewed_out, last_review, facts, profile, sources, exposures,
+                                          fund_context, diagnostic, context.calls,
+                                          'The revision was unavailable; previously reviewed sections are shown.')
             return {"status": "unavailable", "reason": "Investment Analyst did not return a valid assessment.",
                     "tool_calls": context.calls, "diagnostics": diagnostic}
         entry['analyst'] = 'valid_output'
         out = result.output
         issues = problems(out, facts, sources, exposures, fund_context)
+        if attempt == 1 and issues == ['A numerical claim is not present in the financial facts']:
+            cleaned, omitted = without_unsupported_numbers(out, facts, sources, exposures, fund_context)
+            if omitted and not problems(cleaned, facts, sources, exposures, fund_context):
+                out, issues, omitted_number_claims = cleaned, [], True
+                entry['unsupported_numeric_claims_withheld'] = True
         entry['validation_issues'] = [VALIDATION_CODES.get(issue, 'other_validation_issue') for issue in issues]
         if not issues:
             evidence = {"question": question, "facts": facts, "scorecard_evidence": brief["scorecard"],
@@ -386,6 +483,10 @@ async def assess(facts: dict, profile: FundProfile, sources: list[dict], questio
             if not review.ok:
                 entry['review'] = 'unavailable'
                 diagnostic.update(status='unavailable', final_reason='quality_review_unavailable')
+                if last_review and last_reviewed_out:
+                    return partial_assessment(last_reviewed_out, last_review, facts, profile, sources, exposures,
+                                              fund_context, diagnostic, context.calls,
+                                              'Revision review was unavailable; previously reviewed sections are shown.')
                 return {"status": "unavailable", "reason": "Quality review unavailable.",
                         "tool_calls": context.calls, "diagnostics": diagnostic}
             if review.output.security_issue:
@@ -393,6 +494,8 @@ async def assess(facts: dict, profile: FundProfile, sources: list[dict], questio
                 diagnostic.update(status='unavailable', final_reason='security_issue')
                 return {"status": "unavailable", "reason": "Quality review identified a security issue",
                         "tool_calls": context.calls, "diagnostics": diagnostic}
+            last_review = review.output
+            last_reviewed_out = out
             if not review.output.material_issue:
                 entry['review'] = 'accepted'
                 diagnostic.update(status='available', final_reason=None)
@@ -403,10 +506,23 @@ async def assess(facts: dict, profile: FundProfile, sources: list[dict], questio
                     s.get('date_relation') == 'after_review' for s in availability['sources'])
                 blocking = any(f.get('level') == 'blocking' for f in facts.get('data_flags', []))
                 provisional_context = 'fund_context' in out.evidence_references and bool(fund_context)
-                review_status = ('qualified' if out.uncertainties or limitations or provisional or source_limits
-                                 or blocking or provisional_context or missing_evidence(facts) else 'approved')
+                if provisional or provisional_context:
+                    limitations.append('AI-extracted evidence is provisional; verify source documents before sign-off.')
+                if source_limits:
+                    limitations.append('Some research has date or coverage limitations; review its source details.')
+                if blocking or missing_evidence(facts):
+                    limitations.append('Some required evidence is missing or subject to a blocking data check.')
+                observations = reviewer_observations(review.output.feedback)
+                if previous_review:
+                    observations.extend('Earlier review (addressed in revision): ' + item
+                                        for item in reviewer_observations(previous_review['feedback']))
+                if omitted_number_claims:
+                    observations.append('An unsupported numerical claim was withheld; verify the source evidence.')
+                review_status = ('qualified_draft' if out.uncertainties or limitations or provisional or source_limits
+                                 or blocking or provisional_context or missing_evidence(facts) or observations else 'reviewed')
                 return {"status": "available", "assessment": out.model_dump(), "tool_calls": context.calls,
                         "review_status": review_status,
+                        "reviewer_observations": observations,
                         "evidence": evidence_catalog(facts, profile, sources, out.evidence_references, exposures, fund_context),
                         "limitations": limitations,
                         "diagnostics": diagnostic}
@@ -434,5 +550,10 @@ async def assess(facts: dict, profile: FundProfile, sources: list[dict], questio
         details = [messages.get(code, 'An assessment validation check failed.')
                    for code in final.get('validation_issues', [])]
     reason = "A material or unsupported issue remains after revision. " + " ".join(details)
-    return {"status": "unavailable", "reason": reason,
-            "tool_calls": context.calls, "diagnostics": diagnostic}
+    # Validation failures were never seen by the reviewer: keep only deterministic evidence in that case.
+    reviewed = last_review if last_reviewed_out else None
+    partial = partial_assessment(last_reviewed_out if reviewed else out, reviewed, facts, profile, sources, exposures, fund_context,
+                                 diagnostic, context.calls, reason)
+    if omitted_number_claims:
+        partial['reviewer_observations'].append('An unsupported numerical claim was withheld; verify the source evidence.')
+    return partial

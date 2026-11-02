@@ -704,7 +704,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
             assessment_diagnostics.update(status='unavailable', final_reason='assessment_timeout')
             assessment = {"status": "unavailable", "reason": _why(s.timeouts_seconds.narrative),
                           "tool_calls": assessment_calls, "diagnostics": assessment_diagnostics}
-        log.end(step, "ok" if assessment["status"] == "available" else "unavailable",
+        log.end(step, "ok" if assessment["status"] == "available" else assessment["status"],
                 outputs={"status": assessment["status"], "tool_calls": assessment.get("tool_calls", []),
                          "diagnostics": assessment.get("diagnostics", {})},
                 notes=[assessment.get("reason", "") ] if assessment["status"] != "available" else [])

@@ -88,7 +88,7 @@ def test_ai_assessment_status_and_unavailable_reason_are_clear_and_escaped():
     from fund_performance.dashboard import dashboard_sections
     d = data()
     assessment = {'recommendation': 'satisfied', 'investment_thesis': 'The fund tracks its index.'}
-    for status, label in [('approved', 'Approved'), ('qualified', 'Qualified')]:
+    for status, label in [('reviewed', 'Reviewed'), ('qualified_draft', 'Qualified draft')]:
         d['presentation_context'] = {'investment_assessment': {'status': 'available', 'review_status': status,
                                                                 'assessment': assessment}}
         overview = text(dashboard_sections(d)['overview'])
@@ -97,6 +97,20 @@ def test_ai_assessment_status_and_unavailable_reason_are_clear_and_escaped():
         'reason': 'Check the evidence <script>unsafe</script>.'}}
     raw = dashboard_sections(d)['overview']
     assert 'AI assessment status: Unavailable' in raw and 'Check the evidence' in raw and '<script>' not in raw
+
+
+def test_partial_assessment_displays_reviewer_observations_and_supported_evidence():
+    from fund_performance.dashboard import dashboard_sections
+    d = data()
+    d['presentation_context'] = {'investment_assessment': {
+        'status': 'partial', 'review_status': 'requires_analyst_review',
+        'assessment': {'recommendation': None, 'supporting_evidence': ['Tracking evidence is available.']},
+        'reviewer_observations': ['Verify provisional figures before sign-off.'],
+        'evidence_summary': 'The deterministic scorecard and source evidence remain available.'}}
+    overview = text(dashboard_sections(d)['overview'])
+    assert 'Requires analyst review' in overview and 'Recommendation requires further assessment' in overview
+    assert 'Tracking evidence is available.' in overview and 'Verify provisional figures' in overview
+    assert 'Retain' in overview
 
 
 def test_sourced_allocation_bars_and_qualitative_fallback():
