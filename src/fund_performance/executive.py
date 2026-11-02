@@ -139,9 +139,11 @@ def _statuses(data: dict) -> str:
     ai_note = (f"<br/><b>AI Investment Analyst:</b> {escape(ai_label)}"
                + (f" — {escape(str(ai['scorecard_disagreement_reason']))}" if not ai.get('scorecard_agreement', True)
                   and ai.get('scorecard_disagreement_reason') else ''))
+    readable_verdict = verdict_name(code)
+    verdict_display = code if readable_verdict == code else f'{code} · {readable_verdict}'
     return (f"<table class='x-status'><tr>"
             f"<td width='50%' class='x-box' style='border-left: 4px solid {colour}'><span class='x-label'>INVESTMENT "
-            f"SCORECARD (SUGGESTED)</span><br/><span class='x-big' style='color:{colour}'>{escape(code)} · {escape(verdict_name(code))}</span>"
+            f"SCORECARD (SUGGESTED)</span><br/><span class='x-big' style='color:{colour}'>{escape(verdict_display)}</span>"
             f"<br/>{escape(assessment_meaning(code, quality, verdict_meaning(code)))}. From fixed rules on the four "
             "ratings; the analyst decides."
             f"{ai_note}{('<br/><b>' + escape(caveat) + '</b>') if caveat else ''}</td><td width='2%'></td>"
@@ -243,9 +245,12 @@ def page1(inp, content: ExecutiveContent) -> str:
     if long_summary:
         chart = chart.replace("width='330'", "width='240'")
         narrative = summary + findings_html + f"<div align='center'>{chart}</div>"
-    else:
+    elif content.chart:
         narrative = (f"<table width='100%'><tr><td width='52%' valign='top'>{summary}{findings_html}</td>"
                      f"<td width='3%'></td><td valign='top' align='center'>{chart}</td></tr></table>")
+    else:
+        # An unavailable chart should not squeeze material text into half the page.
+        narrative = chart + summary + findings_html
     return f"""
 {_banner(inp)}
 <h1>{PAGE1}</h1>
@@ -462,7 +467,7 @@ EXEC_CSS = f"""
 .x-callout td {{ text-align: left; background-color: #f3eefa; border-left: 4px solid #6d4c9f; padding: 8px 10px; font-size: 8.8pt; }}
 .x-approval {{ background-color: #f6f8fb; }}
 .x-signoff-lead {{ font-size: 9pt; }}
-.x-approval td {{ padding: 8px 4px 1px 4px; }} .x-line {{ border-bottom: 0.8px solid #1d2733; }}
+.x-approval td {{ padding: 5px 4px 1px 4px; }} .x-line {{ border-bottom: 0.8px solid #1d2733; }}
 .x-right {{ text-align: right; }} .x-after {{ margin-top: 8px; }}
 .x-box {{ font-size: 12pt; }} .x-tick-row {{ font-size: 9pt; }}
 .x-tick-head {{ font-weight: bold; color: {NAVY}; width: 22%; }}

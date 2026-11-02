@@ -251,7 +251,11 @@ def test_a_review_with_an_unknown_performance_fee_runs_and_never_shows_green_fee
     assert result.facts["scorecard"]["verdict"] == "Monitor (data check needed: Fees)"
     assert result.facts["fund"]["performance_fee"] is None
     assert {f["name"]: f["value"] for f in result.facts["figures"]} == {f["name"]: f["value"] for f in known.facts["figures"]}
-    text = " ".join(" ".join(page_texts(result.executive_pdf)).split())
-    assert len(page_texts(result.executive_pdf)) == 2
+    pages = [" ".join(page.split()) for page in page_texts(result.executive_pdf)]
+    assert len(pages) == 2
+    assert "Fees Fee justified? Check data" in pages[0]
+    assert "Verification before sign-off" in pages[1] and "Analyst sign-off" in pages[1]
+    assert "Full tables, sources, data checks and audit evidence" in pages[1]
+    text = " ".join(pages)
     assert "Not established in the documents (missing evidence)" in text and "Evidence missing" in text
     assert "do not say whether the fund charges a performance fee" in text
