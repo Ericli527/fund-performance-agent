@@ -213,7 +213,8 @@ def test_the_page_has_the_instructions_files_table_and_how_it_works():
     texts = " ".join(str(getattr(c, "value", "") or "") for c in ui.blocks.values())
     assert PUBLIC_DATA_HTML in texts and HOW_END in texts
     accordions = {c.label: c.open for c in ui.blocks.values() if isinstance(c, gr.Accordion)}
-    assert accordions == {"Help & methodology": False, "Technical details": False}
+    assert accordions == {"Help & methodology": False, "Technical details": False,
+                          "Optional: confirm data for the five-year chart": False}
 
 
 
@@ -259,6 +260,20 @@ def test_submitted_question_reaches_controller_without_rewriting(tmp_path):
         raise RunStopped('test')
     asyncio.run(_run_controller(tmp_path, question, False, None, tmp_path, runner))
     assert seen == [question]
+
+
+def test_chart_confirmation_is_optional_and_passed_to_review(tmp_path):
+    from fund_performance.web import _run_controller
+    seen = []
+    evidence = {'confirmed': True, 'currency': 'GBP', 'fund_pricing': 'midday', 'benchmark_pricing': 'market_close'}
+    async def runner(folder, submitted, out_root, offline, **kwargs):
+        seen.append(kwargs.get('chart_evidence'))
+        raise RunStopped('test')
+    asyncio.run(_run_controller(tmp_path, 'Review', False, None, tmp_path, runner, chart_evidence=evidence))
+    assert seen == [evidence]
+    ui = build_ui()
+    assert any(isinstance(c, gr.Checkbox) and 'both series' in str(c.label).lower() and not c.value
+               for c in ui.blocks.values())
 
 
 
