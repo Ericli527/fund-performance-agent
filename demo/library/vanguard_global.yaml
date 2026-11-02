@@ -4,7 +4,7 @@
 id: vanguard_global
 order: 2
 title: "Vanguard FTSE Global All Cap Index Fund GBP Acc"
-subtitle: "Real global equity tracker with an HSBC peer, and missing evidence handled honestly"
+subtitle: "Global equity index tracker with benchmark analysis, portfolio research and peer comparison"
 fund_name: "Vanguard FTSE Global All Cap Index Fund GBP Acc"
 share_class: "A GBP Accumulation"
 isin: GB00BD3RZ582
@@ -29,7 +29,7 @@ sources:
   - {publisher: "HSBC Asset Management", title: "HSBC FTSE All-World Index Fund Acc C monthly report", date: "31 May 2026", used: "peer: ongoing charge, share class, currency, accumulation, pricing time (its returns are not compared: different dates)"}
 disclosures:
   - "Benchmark returns are the GBP figures printed in Vanguard's factsheet. The FTSE Russell factsheet gives USD returns, which are not used."
-  - "Tracking error, beta and R² are not published in the documents provided, and there is no GBP benchmark price series to calculate them, so Mandate and Performance cannot be fully rated: the verdict waits for that evidence."
+  - "When tracking error, beta or R² cannot be established from the documents or a compatible benchmark price series, the relevant ratings wait for that evidence. Check the source and extraction results before concluding that a metric is absent."
   - "Peer: HSBC FTSE All-World Index Fund Acc C (GB00BMJJJF91), a GBP accumulation share class, priced at 12:00 UK time. Its latest verified official report is dated 31 May 2026, not 30 Sep 2026, so its returns cover different periods and are left out of the value comparison; its ongoing charge is used for fees. Value for investors waits for a peer report dated 30 Sep 2026."
   - "Benchmark difference: the peer tracks the FTSE All-World Index (large and mid caps, about 4,200 stocks), while the fund tracks the FTSE Global All Cap Index, which also includes small caps (about 10,200 stocks). The peer is a close comparison, not an identical benchmark."
   - "Peer share class: HSBC Acc C has a minimum initial investment of GBP 1,000,000 (an institutional class), so its fee may be lower than retail investors can get."
