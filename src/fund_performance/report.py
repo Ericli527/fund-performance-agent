@@ -27,7 +27,7 @@ from fund_performance.peers import PeerComparison, as_list
 from fund_performance.plain import plain_peer_reason
 from fund_performance.presentation import (NOT_RELIABLE, UNRELIABLE, UNRELIABLE_MARK, comparison_problems,
                                            missing_evidence,
-                                           is_comparative)
+                                           is_comparative, rating_explanation)
 from fund_performance.precedence import ReportedFigures
 from fund_performance.scorecard import AMBER, CHECK_DATA, GREEN, MANUAL_CHECK, RED, Scorecard
 
@@ -83,6 +83,7 @@ class ReportInputs:
     prices: pd.DataFrame | None = None
     run_note: str | None = None             # e.g. "Offline run: AI steps skipped"
     prepared: date = field(default_factory=date.today)
+    presentation_context: dict = field(default_factory=dict)
 
     def __post_init__(self):
         self.peers = self.peers or as_list(self.peer)
@@ -530,19 +531,47 @@ def _page2(inp: ReportInputs, out_dir: Path) -> str:
     notes = "".join(f"<li>{mark}{escape(plain_note(n))}<br/><span class='small'>{escape(note_source_line(n))}</span></li>"
                     for n in inp.facts.get("data_notes", []))
     growth, yearly, caption = _chart_images(inp, out_dir)
+    status = (inp.presentation_context or {}).get('performance_chart')
+    if status is not None:
+        candidate = out_dir / 'dashboard_growth.png'
+        growth = candidate if status.get('available') and candidate.is_file() else None
+        caption = (status.get('caption') if growth else
+                   'Five-year comparable line chart unavailable: ' + str(status.get('reason') or 'basis not confirmed'))
+    context = (inp.presentation_context or {}).get('fund_context') or {}
+    mandate = context.get('mandate_interpretation')
+    strategy = f"<h3>Investment strategy and mandate</h3><p>{escape(str(mandate))}</p><p class='small'>AI interpretation; verify against source documents.</p>" if mandate else ''
+    exposures = context.get('portfolio_exposures') or {}
+    from fund_performance.dashboard import _chartable_allocation
+    allocation_plots = []
+    for group, label in (('sectors', 'Sector allocation'), ('regions', 'Geographic allocation')):
+        rows = [row for row in exposures.get(group) or [] if _chartable_allocation(row)]
+        if rows:
+            chart = charts.allocation_chart([(str(row['name']), float(row['weight_pct'])) for row in rows[:8]],
+                                             out_dir / f'allocation_{group}.png', label)
+            allocation_plots.append(_img(chart) + "<p class='small'>Source-matched weights; AI-extracted values and "
+                                    "their classification and date require verification. Full observations follow.</p>")
+    observations = [f"{group.title()}: {row.get('name', '')}" +
+                    (f" — {row['weight_pct']:g}%" if isinstance(row.get('weight_pct'), (int, float)) else '') +
+                    (f" ({row['source']}; verify)" if row.get('source') else '')
+                    for group in ('holdings', 'sectors', 'regions', 'currencies', 'concentration')
+                    for row in exposures.get(group) or [] if isinstance(row, dict) and row.get('name')
+                    and row.get('subject') not in ('benchmark', 'peer', 'unknown')]
+    portfolio = ('<h3>Portfolio characteristics</h3><ul>' + ''.join(f'<li>{escape(x)}</li>' for x in observations) + '</ul>'
+                 if observations else '<h3>Portfolio characteristics</h3><p>Detailed portfolio exposures are unavailable.</p>')
     return f"""
 <h1>Appendix B: Mandate and performance</h1>
 {_not_reliable(inp)}
 {_in_full(inp)}
+<table width="100%"><tr><td align="center">{_img(growth)}</td><td align="center">{_img(yearly)}</td></tr></table>
+<p class="small">{escape(caption)}</p>
 <table class="facts"><tr><td class="label">Objective</td><td>{escape(inp.profile.objective_text)}</td></tr></table>
+{strategy}{''.join(allocation_plots)}{portfolio}
 <table width="100%"><tr><td width="50%" valign="top"><h3>What the fund promises</h3><ul class="tight">{promises}</ul></td>
 <td valign="top"><h3>How it was judged (decision path)</h3><ol class="tight small">{path}</ol></td></tr></table>
 <h3>Returns to {inp.profile.as_of_date:%d %b %Y}</h3>{_returns_table(inp)}
 <h3>Calendar-year returns</h3>{_calendar_table(inp)}
 <h3>Risk</h3>{_risk_table(inp)}
 <h3>Below the surface</h3><ul class="tight">{notes or '<li>No data notes.</li>'}</ul>
-<table width="100%"><tr><td align="center">{_img(growth)}</td><td align="center">{_img(yearly)}</td></tr></table>
-<p class="small">{escape(caption)}</p>
 """
 
 
@@ -647,6 +676,13 @@ def _page3(inp: ReportInputs) -> str:
     analytical = (inp.facts.get("suggested_conclusion") or {}).get("detailed_analysis") or []
     analytical_html = ("<h3>Investment analysis</h3>" + "".join(f"<p>{escape(p)}</p>" for p in analytical)
                        if analytical else "")
+    explanations = []
+    for pillar in inp.facts.get('scorecard', {}).get('pillars', []):
+        item = rating_explanation(inp.facts, pillar)
+        explanations.append(f"<h3>{escape(pillar['name'])}: {escape(pillar['rating'])}</h3>"
+                            f"<p>{escape(item['conclusion'])} {escape(item['why'])}</p>"
+                            + ''.join(f"<p class='small'>{escape(line)}</p>" for line in item['evidence'] + item['limitations'])
+                            + f"<p class='small'>Methodology: {escape(item['methodology'])}</p>")
     market = (f"<p>{escape(context)}</p><p class='small'>Written by AI from the cited sources; sources [n] are listed "
               "in the appendix.</p>" if context else
               "<p class='small'>No market context: " + (
@@ -656,6 +692,7 @@ def _page3(inp: ReportInputs) -> str:
     return f"""
 <h1>Appendix C: Value, fees and Assessment of Value</h1>
 {analytical_html}
+<h3>Rating methodology and rationale</h3>{''.join(explanations)}
 <h3>Comparison with peer funds</h3>{peer}
 <h3>Fees</h3>{fees}
 <h3>Assessment of Value: the 7 FCA factors (COLL 6.6.20R)</h3>
@@ -784,10 +821,10 @@ CSS = f"""
 @font-face {{ font-family: DejaVu; src: url("fonts/DejaVuSans-Bold.ttf"); font-weight: bold; }}
 @page {{ size: a4 portrait; margin: 1.3cm 1.5cm 1.7cm 1.5cm;
   @frame footer {{ -pdf-frame-content: footer; left: 1.5cm; width: 18cm; bottom: 0.6cm; height: 0.8cm; }} }}
-body {{ font-family: DejaVu; font-size: 8.8pt; line-height: 1.35; color: #1d2733; }}
-h1 {{ font-size: 14pt; color: {NAVY}; border-bottom: 1.5px solid {NAVY}; padding-bottom: 2px; margin: 4px 0 7px 0; }}
-h2 {{ font-size: 10.8pt; color: {NAVY}; margin: 10px 0 4px 0; }}
-h3 {{ font-size: 9pt; color: {NAVY}; margin: 7px 0 3px 0; }}
+body {{ font-family: DejaVu; font-size: 9.2pt; line-height: 1.35; color: #1d2733; }}
+h1 {{ font-size: 15pt; color: {NAVY}; border-bottom: 1.5px solid {NAVY}; padding-bottom: 2px; margin: 4px 0 7px 0; }}
+h2 {{ font-size: 11.5pt; color: {NAVY}; margin: 10px 0 4px 0; }}
+h3 {{ font-size: 10pt; color: {NAVY}; margin: 7px 0 3px 0; }}
 p {{ margin: 0 0 3px 0; }} ul, ol {{ margin: 0 0 3px 0; }} li {{ margin-bottom: 1px; }}
 .small {{ font-size: 7.6pt; color: #4c5966; }}
 .banner td {{ background-color: {NAVY}; color: white; padding: 7px 9px; }}

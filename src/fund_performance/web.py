@@ -345,6 +345,7 @@ class Outcome:
     data: dict | None = None                 # the finished run, for the dashboard (dashboard.dashboard_data)
     executive: str | None = None             # report_executive.pdf (stage 3); None if it could not fit
     run_info: str = ""                       # run ID, trace ID and AI calls, for the progress area
+    research: str | None = None
 
 
 def summary_markdown(result: RunResult) -> str:
@@ -424,9 +425,11 @@ async def _run_controller(folder: Path, question: str, offline: bool, on_step: P
                        "the server log has the details.")
     log = result.run_dir / "log.json"
     executive = getattr(result, "executive_pdf", None)
+    research = getattr(result, "research_pdf", None)
     return Outcome(summary_markdown(result), _download(result, result.pdf), str(log) if log.exists() else None,
                    dashboard_data(result), _download(result, executive) if executive else None,
-                   run_info(result.log.run) if getattr(result, "log", None) else "")
+                   run_info(result.log.run) if getattr(result, "log", None) else "",
+                   _download(result, research) if research else None)
 
 
 def run_info(run: dict) -> str:
@@ -842,6 +845,7 @@ def theme() -> gr.themes.Base:
 
 DETAILED_LABEL = "Detailed Report (PDF)"
 EXECUTIVE_LABEL = "Executive Report (PDF)"
+RESEARCH_LABEL = "Research Brief (PDF)"
 
 
 def download_buttons(data: dict, audience: str) -> tuple[dict, dict]:
@@ -936,6 +940,7 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             with gr.Row():
                 executive_pdf = gr.DownloadButton(EXECUTIVE_LABEL, variant="primary", elem_classes="fp-download")
                 pdf = gr.DownloadButton(DETAILED_LABEL, variant="secondary", elem_classes="fp-download")
+                research_pdf = gr.DownloadButton(RESEARCH_LABEL, variant="secondary", elem_classes="fp-download")
             with gr.Accordion("Technical details", open=False):
                 technical = gr.HTML()
                 log = gr.File(label="Run log (log.json)", interactive=False)
@@ -1047,13 +1052,13 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                 if not uses_demo_files(price, jsons):
                     issues.append("The synthetic demo inputs have changed; reload the test case.")
             if issues:
-                yield "", "\n".join(f"- {x}" for x in issues), gr.update(visible=False), "", "", "", "", gr.update(value=None), gr.update(value=None), "", None, ""
+                yield "", "\n".join(f"- {x}" for x in issues), gr.update(visible=False), "", "", "", "", gr.update(value=None), gr.update(value=None), gr.update(value=None), "", None, ""
                 return
             price, factsheet, kid, peer, jsons = engine_inputs(selected)
             supporting = supporting_inputs(selected)
             offline = run_offline(price, jsons)
             history = []
-            yield "Starting…", "", gr.update(visible=False), "", "", "", "", gr.update(value=None), gr.update(value=None), "", None, ""
+            yield "Starting…", "", gr.update(visible=False), "", "", "", "", gr.update(value=None), gr.update(value=None), gr.update(value=None), "", None, ""
             def work(say):
                 kwargs = {}
                 if benchmark['series'] or benchmark['documents']:
@@ -1068,9 +1073,9 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             async for kind, item in with_progress(work):
                 if kind == "progress":
                     history = progress_history(history, item)
-                    yield (progress_markdown(history),) + (gr.update(),) * 11
+                    yield (progress_markdown(history),) + (gr.update(),) * 12
                 elif item.data is None:
-                    yield progress_markdown(history), item.message, gr.update(visible=False), "", "", "", "", gr.update(value=None), gr.update(value=None), "", None, ""
+                    yield progress_markdown(history), item.message, gr.update(visible=False), "", "", "", "", gr.update(value=None), gr.update(value=None), gr.update(value=None), "", None, ""
                 else:
                     banner = demo_banner(price, jsons, demo_id, mode)
                     data = item.data | {"pdf": item.pdf, "executive_pdf": item.executive}
@@ -1085,7 +1090,7 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                     views = ["<div class='fp-dashboard'>" + sections[k] + "</div>"
                              for k in ("overview", "performance", "portfolio", "evidence")]
                     yield (progress_markdown(history), "", gr.update(visible=True), *views,
-                           executive, detailed, tech, item.log, item.message)
+                           executive, detailed, gr.update(value=item.research, visible=bool(item.research)), tech, item.log, item.message)
 
         private = {"api_visibility": "private"}
         mutation = {"concurrency_id": "attachment-mutations", "concurrency_limit": 1}
@@ -1158,7 +1163,7 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                            benchmark_currency, benchmark_confirmed, benchmark_pricing, chart_confirmed,
                            chart_currency, chart_fund_pricing, chart_index_pricing],
                   [progress, message, results, overview, performance, portfolio, evidence,
-                   executive_pdf, pdf, technical, log, plain], **private)
+                   executive_pdf, pdf, research_pdf, technical, log, plain], **private)
     return ui
 
 

@@ -128,3 +128,12 @@ pytest --run-live -q
 
 - Branch: `claude/ux-redesign` (Stages 0-3 and the Stage 2.5 CI). Not merged to `main`; Render still serves the old
   page. Run `git status` and `git log` for the current state.
+
+## 7. Stage 6A/6B reporting work (2 November 2026)
+
+- Stage 6A dashboard readability, rating explanations and the evidence-gated five-year performance chart: draft PR #42, `feat/dashboard-ux-explanations`.
+- Stage 6B report refresh and Research Brief download: draft PR #43, `feat/stage-6b-professional-reports`, stacked on #42. Retarget #43 to `main` after #42 lands; neither is merged or deployed.
+- Focused Stage 6B report, dashboard, web and golden-facts tests: 94 passed, 12 skipped because private fixtures are unavailable. Stage 6A focused checks also passed.
+- Synthetic PDFs were rendered and inspected: executive two pages, detailed eight, research one. The detailed report retains its existing appendix structure; pagination and source-rich layouts should receive further human review with real fund documents. Browser-based dashboard inspection was unavailable.
+- No changes to financial calculations, rating rules or model assignments. Research Brief failure is isolated from the existing PDF downloads. No additional model calls were added.
+- Next: review both drafts and CI, inspect with real fund documents, then retarget the stacked PR after the parent is merged by an authorised person.
