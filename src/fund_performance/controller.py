@@ -710,8 +710,12 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                 notes=[assessment.get("reason", "") ] if assessment["status"] != "available" else [])
     (run_dir / "investment_assessment.json").write_text(json.dumps(assessment, indent=1, ensure_ascii=False), encoding="utf-8")
     # One read-only presentation package for the dashboard and both reports.
+    from fund_performance.evidence_diagnostics import evidence_gap_summary
+    extractor_step = log.step('extractor')
+    evidence_gaps = evidence_gap_summary(profile, factsheet, checked.prices, calculated, reported, card, flags,
+                                         intake, extractor_step.status if extractor_step else None)
     presentation_context = {"question": question, "fund_context": context_brief,
-                            "investment_assessment": assessment, "research": vetted}
+                            "investment_assessment": assessment, "research": vetted, "evidence_gaps": evidence_gaps}
     from fund_performance.presentation import comparison_invalid, historical_price_warning
     if comparison_invalid(facts):
         chart_status = {'available': False, 'state': 'unavailable', 'reason': 'A benchmark or currency data check makes the comparison unreliable.'}

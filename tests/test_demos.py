@@ -61,6 +61,11 @@ def test_the_committed_manifests_hold_metadata_only():
     assert not any(d.available for d in demos)                           # no private folder: shown as unavailable
 
 
+def test_vanguard_description_is_neutral_and_informative():
+    demo = find_demo('vanguard_global', load_demos(data=Path('/nonexistent')))
+    assert demo.subtitle == 'Global equity index tracker with benchmark analysis, portfolio research and peer comparison'
+
+
 def _private_figures() -> set[str]:
     """ The figures in the private quick inputs (when installed), read at test time: never written in a test """
     out = set()
@@ -276,7 +281,7 @@ def test_real_vanguard_demo(tmp_path):
         (typed["fund_nav"]["5y"], typed["index"]["5y"])                     # the GBP figures, as typed (annualised)
     assert figs["fund_nav.cum.5y"]["source"] == "calculated" and figs["fund_nav.cum.5y"]["value"] > 60
     text = " ".join(" ".join(page_texts(r.pdf)).split())               # the Detailed Report starts with the same pages
-    assert "Evidence missing" in text and "R² and beta are not in the documents provided" in text
+    assert "Evidence missing" in text and "R² and beta were not established from the available evidence" in text
     assert "resolve the data check" not in text.lower() and "CHECK DATA" not in text
 
 

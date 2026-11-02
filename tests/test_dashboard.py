@@ -113,6 +113,41 @@ def test_partial_assessment_displays_reviewer_observations_and_supported_evidenc
     assert 'Retain' in overview
 
 
+def test_analyst_summary_is_bounded_and_details_preserve_full_assessment():
+    from fund_performance.dashboard import dashboard_sections
+    d = data()
+    thesis = ' '.join(f'word{i}' for i in range(120))
+    ai = {'recommendation': 'monitor', 'investment_thesis': thesis,
+          'supporting_evidence': [f'finding {i}' for i in range(6)],
+          'strengths': ['extra strength'], 'material_risks': [f'risk {i}' for i in range(5)],
+          'recommended_actions': [f'action {i}' for i in range(5)],
+          'manager_questions': ['A specific manager question?'], 'evidence_references': ['research:1'],
+          'uncertainties': ['A provisional figure needs verification.']}
+    d['presentation_context'] = {'investment_assessment': {
+        'status': 'available', 'review_status': 'qualified_draft', 'assessment': ai,
+        'reviewer_observations': ['Reviewer says verify the source.'],
+        'limitations': ['Evidence is provisional.'], 'diagnostics': {'attempts': [{'review': 'accepted'}]},
+        'evidence': {'research:1': {'summary': 'Full source evidence.'}}}}
+    before = copy.deepcopy(d['presentation_context'])
+    html = dashboard_sections(d)['overview']
+    default, details = html.split('<summary>Detailed AI Analysis</summary>', 1)
+    assert 'Qualified draft' in default and 'word89' in default and 'word90' not in default
+    assert 'finding 3' in default and 'finding 4' not in default
+    assert 'risk 2' in default and 'risk 3' not in default
+    assert 'action 2' in default and 'action 3' not in default
+    assert 'Reviewer says verify the source.' in default and 'Evidence is provisional.' in default
+    assert 'A specific manager question?' not in default and 'A specific manager question?' in details
+    assert 'word119' in details and 'Full source evidence.' in details and 'accepted' in details
+    assert d['presentation_context'] == before
+
+
+def test_evidence_gap_summary_is_visible_in_evidence_tab():
+    from fund_performance.dashboard import dashboard_sections
+    d = data(presentation_context={'evidence_gaps': ['No benchmark price series was loaded.']})
+    output = text(dashboard_sections(d)['evidence'])
+    assert 'Evidence gaps and next steps' in output and 'No benchmark price series was loaded.' in output
+
+
 def test_sourced_allocation_bars_and_qualitative_fallback():
     from fund_performance.dashboard import dashboard_sections
     d = data()

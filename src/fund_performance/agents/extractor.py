@@ -283,6 +283,12 @@ async def extract(document_text: str, run: RunFn | None = None, *, peer: bool = 
     draft, missing = profile_draft(out)
     flags = [DataFlag(check="extractor_agent", level="info",
                       message="Figures read by the Extractor Agent (ai_extracted): please verify against the documents")]
+    risk_bases = [risk.basis for risk in out.risk]
+    retained = 2 if 'nav' in risk_bases and 'pnav' in risk_bases else min(1, len(risk_bases))
+    if len(risk_bases) > retained:
+        flags.append(DataFlag(check="extraction_risk_tables", level="warning", message=(
+            "Some extracted risk tables were not retained because their bases cannot all be represented; "
+            "check the source documents and the risk figures before relying on the review.")))
     if start_labelled(out):
         flags.append(DataFlag(check="extractor_agent", level="info", message=(
             "12-month periods: the Extractor Agent labelled them by their start dates; code moved each to its end "

@@ -1,0 +1,7 @@
+# Vanguard live-review evidence diagnostics
+
+The Vanguard preset resolves its private files under `FUND_DEMO_DATA/vanguard_global` (or `data/demos/vanguard_global` when that variable is unset). Its Live AI inputs are the NAV workbook in `quick/`, the fund factsheet and KIID in `documents/`, and the HSBC peer factsheet. The preset does not separately provide a benchmark price file; whether the workbook itself contains an index series must be checked from the actual file.
+
+The private source pack and the reported live-run logs were unavailable in this development workspace. Consequently the document contents, extracted values, selected runtime inputs and reason for the Vanguard risk gaps could not be independently verified. The preset manifest describes the intended inputs and prior assumptions; it is not evidence that those files were read in a particular run.
+
+For a completed review, inspect the evidence-gap panel and run log: check document text and extraction warnings, retained risk figures and their basis/date, the presence and alignment of a compatible benchmark price series, and benchmark/currency checks. An index-relative risk statistic requires compatible fund and benchmark observations or an eligible published figure; fund NAV alone does not establish it. If a figure is not in the structured extraction, inspect the source before concluding it is absent. The Extractor now flags risk tables that its current two-basis representation cannot retain; this flag does not establish that such a loss occurred in the Vanguard run.

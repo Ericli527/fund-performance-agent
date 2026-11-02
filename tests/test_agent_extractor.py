@@ -78,6 +78,14 @@ def test_valid_answer():
     assert "please verify" in result.flags[0].message
 
 
+def test_extra_or_duplicate_risk_tables_are_reported_as_not_retained():
+    data = output()
+    data['risk'].append(data['risk'][0] | {'basis': None})
+    result = asyncio.run(extract(DOC, run=FakeRun(data)))
+    assert result.factsheet is not None
+    assert any(f.check == 'extraction_risk_tables' and 'not retained' in f.message for f in result.flags)
+
+
 def test_output_that_does_not_convert_is_retried_once():
     bad = output(discrete_12m=[{"series": "index", "end_date": "Sep 2026", "value": 17.1}])   # not a date
     fake = FakeRun(bad, output())

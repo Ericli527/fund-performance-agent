@@ -15,6 +15,7 @@ The audience changes only how much is shown: the Investment Analyst view opens t
 leads with the summary and the decisions. Both show the same facts and ratings.
 """
 import base64
+import json
 import math
 import re
 from html import escape
@@ -490,6 +491,75 @@ def _research_cards(research: list[dict], as_of: str | None) -> str:
             + _details('Full research summaries', ''.join(full)) + '</div>')
 
 
+
+def _short_text(value: str, limit: int = 90) -> str:
+    """Keep whole sentences where practical; the complete text remains in the detail panel."""
+    value = ' '.join(str(value or '').split())
+    if len(value.split()) <= limit:
+        return value
+    sentences = re.split(r'(?<=[.!?])\s+', value)
+    kept = []
+    for sentence in sentences:
+        if len((' '.join(kept + [sentence])).split()) > limit:
+            break
+        kept.append(sentence)
+    if limit == 90 and len(' '.join(kept).split()) < 60:
+        kept = []
+    return (' '.join(kept) if kept else ' '.join(value.split()[:limit])) + ' … [continued in Detailed AI Analysis]'
+
+
+def _unique_items(*groups) -> list[str]:
+    seen, items = set(), []
+    for group in groups:
+        for item in group or []:
+            if not isinstance(item, str) or not item.strip():
+                continue
+            key = ' '.join(item.casefold().split()).rstrip('.')
+            if key not in seen:
+                seen.add(key)
+                items.append(item)
+    return items
+
+
+def _analyst_card(assessment: dict) -> str:
+    if assessment.get('status') not in ('available', 'partial'):
+        reason = assessment.get('reason') or 'The independent assessment was not produced.'
+        details = ("<p class='fp-muted'><b>AI assessment status: Unavailable.</b> "
+                   f"{escape(str(reason))} Use the scorecard and evidence below.</p>")
+    else:
+        ai = assessment.get('assessment') or {}
+        recommendation = ai.get('recommendation')
+        label = (str(recommendation).replace('_', ' ').capitalize() if recommendation else
+                 'Recommendation requires further assessment')
+        review_status = assessment.get('review_status')
+        status_text = ('Qualified draft' if review_status in ('qualified', 'qualified_draft') else
+                       'Requires analyst review' if review_status == 'requires_analyst_review' else 'Reviewed')
+        details = (f"<p><b>AI assessment status:</b> {status_text}</p>"
+                   f"<p class='fp-verdict'>{escape(label)}</p>"
+                   f"<p>{escape(_short_text(ai.get('investment_thesis') or ''))}</p>")
+        findings = _unique_items(ai.get('supporting_evidence'), ai.get('strengths'))
+        risks = _unique_items(ai.get('material_risks'))
+        actions = _unique_items(ai.get('recommended_actions'))
+        warnings = _unique_items(assessment.get('reviewer_observations'), assessment.get('limitations'))
+        for heading, items, limit in (('Supporting findings', findings, 4), ('Material risks', risks, 3),
+                                      ('Prioritised actions', actions, 3), ('Reviewer warnings and evidence limits', warnings, 3)):
+            if items:
+                details += f"<p class='fp-group'>{heading}</p>" + _list([_short_text(x, 40) for x in items[:limit]])
+        if not ai.get('scorecard_agreement', True) and ai.get('scorecard_disagreement_reason'):
+            details += f"<p><b>Difference from scorecard:</b> {escape(_short_text(ai['scorecard_disagreement_reason'], 40))}</p>"
+        if assessment.get('evidence_summary'):
+            details += f"<p>{escape(str(assessment['evidence_summary']))}</p>"
+        if assessment.get('status') == 'partial' and assessment.get('reason'):
+            details += f"<p class='fp-muted'>{escape(str(assessment['reason']))}</p>"
+    # Only fields already made available by the review pipeline are rendered, including partial redactions.
+    full = {key: assessment[key] for key in ('assessment', 'evidence', 'limitations', 'reviewer_observations',
+                                               'diagnostics') if key in assessment}
+    if full:
+        payload = escape(json.dumps(full, ensure_ascii=False, indent=2, default=str))
+        details += _details('Detailed AI Analysis',
+                            "<pre style='white-space:pre-wrap;overflow-wrap:anywhere'>" + payload + '</pre>')
+    return "<div class='fp-card'><h3>AI Investment Analyst</h3>" + details + '</div>'
+
 def dashboard_sections(data: dict) -> dict[str, str]:
     """Four saved-result views; building or opening a view never runs an agent."""
     facts = data["facts"]
@@ -498,37 +568,7 @@ def dashboard_sections(data: dict) -> dict[str, str]:
     assessment = shared.get("investment_assessment") or {}
     research = shared.get("research") or data.get("sources") or []
     quality = evidence_quality(data)
-    if assessment.get("status") in ("available", "partial"):
-        ai = assessment.get("assessment") or {}
-        recommendation = ai.get('recommendation')
-        label = (str(recommendation).replace("_", " ").capitalize() if recommendation else
-                 'Recommendation requires further assessment')
-        review_status = assessment.get('review_status')
-        status_text = ('Qualified draft' if review_status in ('qualified', 'qualified_draft') else
-                       'Requires analyst review' if review_status == 'requires_analyst_review' else 'Reviewed')
-        details = (f"<p><b>AI assessment status:</b> {status_text}</p>"
-                   f"<p class='fp-verdict'>{escape(label)}</p><p>{escape(ai.get('investment_thesis') or '')}</p>")
-        for heading, key in (("Supporting evidence", "supporting_evidence"), ("Strengths", "strengths"), ("Material risks", "material_risks"),
-                             ("Uncertainties", "uncertainties"), ("Monitoring actions", "recommended_actions")):
-            if ai.get(key):
-                details += f"<p class='fp-group'>{heading}</p>" + _list(ai[key])
-        if ai.get('evidence_references'):
-            details += "<p class='fp-group'>Evidence references</p>" + _list(ai['evidence_references'])
-        if assessment.get('reviewer_observations'):
-            details += "<p class='fp-group'>Quality reviewer observations</p>" + _list(assessment['reviewer_observations'])
-        if assessment.get('limitations'):
-            details += "<p class='fp-group'>Evidence limitations</p>" + _list(assessment['limitations'])
-        if assessment.get('evidence_summary'):
-            details += f"<p>{escape(assessment['evidence_summary'])}</p>"
-        if assessment.get('status') == 'partial' and assessment.get('reason'):
-            details += f"<p class='fp-muted'>{escape(str(assessment['reason']))}</p>"
-        if not ai.get("scorecard_agreement", True) and ai.get("scorecard_disagreement_reason"):
-            details += f"<p><b>Difference from scorecard:</b> {escape(ai['scorecard_disagreement_reason'])}</p>"
-    else:
-        reason = assessment.get('reason') or 'The independent assessment was not produced.'
-        details = ("<p class='fp-muted'><b>AI assessment status: Unavailable.</b> "
-                   f"{escape(str(reason))} Use the scorecard and evidence below.</p>")
-    ai_card = "<div class='fp-card'><h3>AI Investment Analyst</h3>" + details + "</div>"
+    ai_card = _analyst_card(assessment)
     overview = _header(data, quality, True) + _summary(data, quality, "Answer to your question", True) + _ratings(data, True, True) + ai_card + _metrics(facts)
     chart = ("<figure><img style='width:100%;max-width:720px' alt='Yearly tracking analysis from the review' "
              f"src='data:image/png;base64,{escape(data['performance_chart'], quote=True)}'><figcaption>"
@@ -573,7 +613,9 @@ def dashboard_sections(data: dict) -> dict[str, str]:
         portfolio += "<div class='fp-card'><h3>Research interpretation</h3>" + _list(research_narrative) + "</div>"
     documents = [str(name) for name in fund_context.get("sources") or []]
     document_date = fund_context.get("document_date")
-    evidence = (_attention(data, quality, True) + "<div class='fp-card'><h3>Documents &amp; evidence</h3>"
+    gaps = shared.get("evidence_gaps") or []
+    gap_card = ("<div class='fp-card'><h3>Evidence gaps and next steps</h3>" + _list(gaps) + "</div>" if gaps else "")
+    evidence = (_attention(data, quality, True) + gap_card + "<div class='fp-card'><h3>Documents &amp; evidence</h3>"
                 + (_list(documents) or "<p class='fp-muted'>Document details are unavailable.</p>")
                 + (f"<p>Document date: {escape(str(document_date))}</p>" if document_date else "") + "</div>"
                 + _details("Manager questions and judgement points", _judgement(facts))

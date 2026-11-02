@@ -105,9 +105,8 @@ class EvidenceQuality:
 # A rating can wait ("CHECK DATA") for two different reasons: a data check found a problem (a blocking flag), or the
 # documents do not give a figure the rating needs. The second is missing evidence, not bad data, and is said so.
 MISSING_WORDS = (
-    ("R²", "R² and beta are not in the documents provided, and there is no index price series to calculate them"),
-    ("tracking error not available", "tracking error is not in the documents provided, and there is no index price "
-                                     "series to calculate it"),
+    ("R²", "R² and beta were not established from the available evidence"),
+    ("tracking error not available", "tracking error was not established from the available evidence"),
     ("return not available", "a return needed for the comparison is not in the documents provided"),
     ("performance fee not available", "the documents provided do not say whether the fund charges a performance "
                                       "fee, so the fee cannot be rated Green"))
