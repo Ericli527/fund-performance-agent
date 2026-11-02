@@ -282,7 +282,8 @@ def _short(text: str, limit: int = 240) -> str:
 async def run_review(folder: Path, question: str = DEFAULT_QUESTION, out_root: Path | None = None,
                      offline: bool = False, thresholds: Thresholds | None = None,
                      settings: RunSettings | None = None, runners: Runners | None = None,
-                     intake: dict | None = None, on_step: ProgressFn | None = None) -> RunResult:
+                     intake: dict | None = None, on_step: ProgressFn | None = None,
+                     chart_evidence: dict | None = None) -> RunResult:
     """ One review. `intake` is the documents route (intake.read_documents + code's self-check of the values):
     the Extractor and Mandate agents have already run, so they are not run again. `on_step` gets a short message
     as each step starts, for the page's progress line """
@@ -304,7 +305,7 @@ async def run_review(folder: Path, question: str = DEFAULT_QUESTION, out_root: P
         with review_trace as tr:
             trace_id = getattr(tr, "trace_id", None)
             log.run["trace_id"] = trace_id if trace_id and trace_id != "no-op" else None
-            result = await _run(folder, question, run_dir, offline, t, s, r, log, text_log, intake)
+            result = await _run(folder, question, run_dir, offline, t, s, r, log, text_log, intake, chart_evidence)
         log.finish("ok")
         return result
     except RunStopped as e:
@@ -373,7 +374,8 @@ def pages_read(found) -> list[dict]:
 
 
 async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thresholds, s: RunSettings,
-               r: Runners, log: RunLog, text_log: list[str], intake: dict | None = None) -> RunResult:
+               r: Runners, log: RunLog, text_log: list[str], intake: dict | None = None,
+               chart_evidence: dict | None = None) -> RunResult:
     flags: list[DataFlag] = [DataFlag(**f) for f in (intake or {}).get("flags", [])]
     review_exposures = (intake or {}).get("portfolio_exposures")
     standalone_context = None
@@ -695,6 +697,31 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     # One read-only presentation package for the dashboard and both reports.
     presentation_context = {"question": question, "fund_context": context_brief,
                             "investment_assessment": assessment, "research": vetted}
+    from fund_performance.presentation import comparison_invalid, historical_price_warning
+    if comparison_invalid(facts):
+        chart_status = {'available': False, 'reason': 'A benchmark or currency data check makes the comparison unreliable.'}
+    elif (chart_evidence and benchmark_inputs.get('series') and
+          (chart_evidence.get('benchmark_pricing') != benchmark_inputs.get('pricing_point') or
+           str(chart_evidence.get('currency') or '').strip().upper() != str(benchmark_inputs.get('currency') or '').strip().upper())):
+        chart_status = {'available': False, 'reason': 'Chart confirmations conflict with the separate benchmark inputs.'}
+    else:
+        try:
+            from fund_performance.charts import dashboard_five_year_chart
+            chart_status = dashboard_five_year_chart(checked.prices, profile.as_of_date, profile.currency,
+                                                      profile.pricing_point, chart_evidence,
+                                                      run_dir / 'dashboard_growth.png')
+            if chart_status['available']:
+                chart_status['caption'] += f" Source: {data.source_file}"
+                if benchmark_inputs.get('series'):
+                    chart_status['caption'] += f" and {Path(benchmark_inputs['series']).name}"
+                chart_status['caption'] += '.'
+                if any(f.get('level') == 'warning' and f.get('check') == 'repeated_prices'
+                       and not historical_price_warning(f) for f in facts.get('data_flags', [])):
+                    chart_status['caption'] += ' Price-data warnings may affect this period; see Evidence & Actions.'
+        except Exception:  # Presentation failure must not block the financial review.
+            chart_status = {'available': False, 'reason': 'The performance chart could not be prepared.'}
+    presentation_context['performance_chart'] = chart_status
+    log.step('data_checks').outputs['dashboard_chart'] = chart_status
 
     # 8. Narrative: the findings and actions are written by code; the market context, if any, comes from the
     # Reporting Agent's checked draft below (the Analyst and Evaluator are not called in Version 1)

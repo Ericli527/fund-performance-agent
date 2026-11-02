@@ -114,6 +114,73 @@ def test_question_answer_preserves_requested_action_alongside_signoff():
     assert 'Ask the manager about the fee.' in overview and 'Sign-off check' in overview
 
 
+def test_rating_explanations_show_logic_evidence_and_peer_limitations():
+    from fund_performance.dashboard import dashboard_sections
+    d = data()
+    d['facts']['peers'][0].update(investor_type='institutional', minimum_investment='GBP 1,000,000')
+    overview = text(dashboard_sections(d)['overview'])
+    assert all(name in overview for name in ('Mandate', 'Performance', 'Value for investors', 'Fees'))
+    assert 'R² and beta alone do not establish' in overview and 'Tracking difference provides a separate' in overview
+    assert '1,000,000' in overview and 'institutional share class' in overview
+    assert 'Rating methodology' in overview and 'Supporting evidence' in overview
+
+
+def test_strategy_and_research_use_progressive_disclosure_and_safe_links():
+    from fund_performance.dashboard import dashboard_sections
+    d = data()
+    long_summary = 'Long original source description. ' * 30
+    d['presentation_context'] = {'fund_context': {'document_summary': long_summary}, 'research': [
+        {'summary': 'The benchmark changed. A longer source discussion follows.', 'url': 'https://example.org/a',
+         'date': '2026-10-15', 'date_basis': 'published', 'relevance': 'The fund tracks this benchmark.',
+         'limitations': 'Published after the review.'},
+        {'summary': 'Unsafe source.', 'url': 'javascript:alert(1)', 'date': '2026-08-01'}]}
+    page = dashboard_sections(d)['portfolio']
+    assert '<summary>Source details</summary>' in page and long_summary in page
+    assert "href='https://example.org/a'" in page and "href='javascript:" not in page
+    assert 'published after review date' in page and 'Full research summaries' in page
+
+
+def test_five_year_chart_uses_only_confirmed_compatible_observations(tmp_path):
+    import pandas as pd
+    from fund_performance.charts import dashboard_five_year_chart
+    dates = pd.date_range('2021-09-30', '2026-09-30', freq='ME')
+    prices = pd.DataFrame({'date': dates, 'nav': range(100, 100 + len(dates)),
+                           'index_level': range(200, 200 + len(dates))})
+    evidence = {'confirmed': True, 'benchmark_identity_confirmed': True, 'fund_total_return': True,
+                'benchmark_total_return': True, 'currency': 'GBP', 'fund_pricing': 'midday',
+                'benchmark_pricing': 'market_close'}
+    before = prices.copy(deep=True)
+    chart = dashboard_five_year_chart(prices, '2026-09-30', 'GBP', 'midday', evidence, tmp_path / 'chart.png')
+    assert chart['available'] and (tmp_path / 'chart.png').is_file()
+    assert 'Pricing times differ' in chart['caption'] and 'no interpolation' in chart['caption']
+    pd.testing.assert_frame_equal(prices, before)
+    assert not dashboard_five_year_chart(prices, '2026-09-30', 'USD', 'midday', evidence, tmp_path / 'x.png')['available']
+    assert not dashboard_five_year_chart(prices, '2026-09-30', 'GBP', 'market_close', evidence, tmp_path / 'x.png')['available']
+    assert not dashboard_five_year_chart(prices, '2026-09-30', 'GBP', 'midday', evidence | {'benchmark_total_return': False}, tmp_path / 'x.png')['available']
+    assert not dashboard_five_year_chart(prices, '2026-09-30', 'GBP', 'midday', None, tmp_path / 'x.png')['available']
+    assert not dashboard_five_year_chart(prices.drop(columns='index_level'), '2026-09-30', 'GBP', 'midday', evidence, tmp_path / 'x.png')['available']
+    missing = prices.copy()
+    missing.loc[2, 'index_level'] = None
+    assert not dashboard_five_year_chart(missing, '2026-09-30', 'GBP', 'midday', evidence, tmp_path / 'x.png')['available']
+    assert not dashboard_five_year_chart(prices.iloc[1:], '2026-09-30', 'GBP', 'midday', evidence, tmp_path / 'x.png')['available']
+    assert not dashboard_five_year_chart(prices.drop(index=[2, 3]), '2026-09-30', 'GBP', 'midday', evidence, tmp_path / 'x.png')['available']
+
+
+def test_review_surfaces_confirmed_five_year_chart_and_keeps_gap_chart(tmp_path):
+    from fund_performance.controller import run_review
+    from fund_performance.dashboard import dashboard_data, dashboard_sections
+    sample = Path(__file__).parents[1] / 'demo' / 'sample_index_fund'
+    evidence = {'confirmed': True, 'benchmark_identity_confirmed': True, 'fund_total_return': True,
+                'benchmark_total_return': True, 'currency': 'GBP', 'fund_pricing': 'market_close',
+                'benchmark_pricing': 'market_close'}
+    result = asyncio.run(run_review(sample, out_root=tmp_path, offline=True, chart_evidence=evidence))
+    displayed = dashboard_data(result)
+    html = dashboard_sections(displayed)['performance']
+    assert displayed['primary_chart_status']['available'] and displayed['primary_chart']
+    assert 'Five-year cumulative performance' in html and 'Growth of 100' in html
+    assert 'Tracking analysis' in html and result.pdf.is_file() and result.executive_pdf.is_file()
+
+
 def test_a_suggested_satisfied_with_open_data_issues_is_never_shown_as_final():
     html = text(dashboard_html(data(flags=[{"check": "x", "level": "warning", "message": "Gap in prices"}])))
     assert "Satisfied" in html and "Not final: review the data warnings first." in html

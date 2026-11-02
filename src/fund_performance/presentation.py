@@ -19,6 +19,79 @@ NOT_AVAILABLE = "Not available"
 
 # --- Evidence quality (separate from the investment assessment) ------------------------------------------------
 
+def rating_explanation(facts: dict, pillar: dict) -> dict:
+    """Explain the stored scorecard evidence without changing its rating or calculating new metrics."""
+    name, rating = pillar.get('name', ''), pillar.get('rating', '')
+    objective = (facts.get('fund') or {}).get('objective_type')
+    values = pillar.get('values') or {}
+    figures = facts.get('figures') or []
+    evidence, limitations = [], list(pillar.get('notes') or [])
+    conclusion = {'GREEN': 'The available evidence meets the scorecard criteria.',
+                  'AMBER': 'The evidence warrants monitoring or a more complete comparison.',
+                  'RED': 'The evidence warrants investigation under the scorecard criteria.',
+                  'CHECK DATA': 'The rating cannot be relied on until the missing or inconsistent evidence is resolved.',
+                  'MANUAL CHECK': 'The mandate requires an analyst review.'}.get(rating, 'Review the available evidence.')
+    if name == 'Mandate':
+        why = ('An index tracker aims to follow its benchmark, not consistently outperform it. The rating uses '
+               'co-movement and market sensitivity; R² and beta alone do not establish that returns match or prove '
+               'mandate delivery. Tracking difference provides a separate return comparison.' if objective == 'index_tracker'
+               else 'Assess the documented investment objective and portfolio policy against the evidence; '
+                    'market sensitivity alone does not establish mandate compliance.')
+        names = (('relative.r2.', 'risk.pnav.r2.', 'risk.nav.r2.'),
+                 ('relative.beta.', 'risk.pnav.beta.', 'risk.nav.beta.'), ('comparison.td.5y',))
+    elif name == 'Performance':
+        why = ('The scorecard assesses the benchmark-relative return gap and tracking variability against its limits; '
+               'together they help assess whether tracking outcomes suit the index mandate.' if objective == 'index_tracker'
+               else 'The scorecard considers performance against the fund’s documented objective and available '
+                    'benchmark or target; missing comparisons do not establish poor performance.')
+        names = (('comparison.td.5y',), ('relative.tracking_error.', 'risk.pnav.tracking_error.',
+                                           'risk.nav.tracking_error.'))
+    elif name == 'Value for investors':
+        why = 'The scorecard compares available fund and peer outcomes after fees; the comparison is limited by peer suitability and coverage.'
+        names = ()
+        if values.get('fund_ann') is not None and values.get('peer_ann') is not None:
+            period = f"over {values['years']} years" if values.get('years') else 'for the stated period'
+            evidence.append(f"Fund {values['fund_ann']:.2f}% a year; peer {values['peer_ann']:.2f}% a year "
+                            f"{period}, net of fees (scorecard comparison).")
+    elif name == 'Fees':
+        why = 'The scorecard compares the fund’s ongoing charge with available peer charges; a narrow peer sample does not establish market-wide competitiveness.'
+        names = ()
+        if values.get('fund_ocf') is not None:
+            evidence.append(f"Fund ongoing charge: {values['fund_ocf']:.2f}% a year (fund profile).")
+        if values.get('peer_ocf') is not None:
+            evidence.append(f"Available peer charge: {values['peer_ocf']:.2f}% a year (scorecard peer comparison).")
+    else:
+        why, names = 'Review the evidence and the scorecard methodology.', ()
+    for alternatives in names:
+        match = next((f for prefix in alternatives for f in figures if f.get('name', '').startswith(prefix)), None)
+        if match:
+            shown = match.get('display', 'unavailable')
+            if match.get('name', '').startswith('comparison.td.') and match.get('unit') == 'pp':
+                shown += ' a year'
+            evidence.append(f"{match.get('label', alternatives[0])}: {shown} "
+                            f"({SOURCE_WORDS.get(match.get('source'), 'source unavailable')}).")
+    if name in ('Value for investors', 'Fees'):
+        peers = facts.get('peers') or []
+        if len(peers) == 1:
+            limitations.append('A single peer does not represent the full market.')
+        for peer in peers:
+            if peer.get('origin') in ('uploaded', 'approved'):
+                limitations.append(f"{peer.get('name', 'Peer')}: figures were AI-extracted from a peer factsheet and require verification.")
+            if peer.get('investor_type') == 'institutional' or peer.get('minimum_investment'):
+                minimum = f"; minimum investment {peer['minimum_investment']}" if peer.get('minimum_investment') else ''
+                kind = 'institutional share class' if peer.get('investor_type') == 'institutional' else 'share-class eligibility not established'
+                limitations.append(f"{peer.get('name', 'Peer')}: {kind}{minimum}; investor eligibility may differ.")
+        if name == 'Value for investors' and any(f.get('name', '').startswith(('fund_nav.ann.', 'fund_pnav.ann.')) and
+               f.get('source') in ('ai_extracted', 'calculated_provisional') for f in figures):
+            limitations.append('Fund return figures include AI-extracted evidence or calculations from it; verify the source.')
+    if name in ('Mandate', 'Performance'):
+        limitations.extend(str(note['note']) for note in facts.get('data_notes', [])
+                           if note.get('kind') in ('pricing', 'timing') and note.get('note'))
+    if not evidence:
+        limitations.append('The supporting figures are unavailable in the current review; consult the methodology and data checks.')
+    return {'conclusion': conclusion, 'why': why, 'evidence': evidence[:3],
+            'limitations': list(dict.fromkeys(limitations)), 'methodology': pillar.get('reason') or ''}
+
 @dataclass
 class EvidenceQuality:
     level: str                        # "check", "warnings" or "clear"
