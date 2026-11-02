@@ -155,6 +155,7 @@ def test_chart_evidence_states_and_observed_date_alignment(tmp_path):
     assert verified['state'] == 'verified' and 'Verified historical' in verified['caption']
     indicative = chart(ev={})
     assert indicative['state'] == 'indicative' and 'Return treatment requires verification' in indicative['caption']
+    assert 'Fund NAV at noon; benchmark pricing time is not established' in indicative['caption']
     timed = chart(ev=evidence | {'benchmark_pricing': 'market_close'})
     assert timed['state'] == 'indicative' and 'Fund NAV at noon' in timed['caption']
     assert not chart(ev=evidence | {'currency': 'USD'})['available']
