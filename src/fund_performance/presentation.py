@@ -381,7 +381,7 @@ def risk_measures(facts: dict) -> list[tuple[str, str, str]]:
 
 # --- File names people see (downloads and email); the run folder keeps report.pdf and report_executive.pdf -------
 
-REPORT_KINDS = {"report.pdf": "Detailed", "report_executive.pdf": "Executive"}
+REPORT_KINDS = {"report.pdf": "Detailed", "report_executive.pdf": "Executive", "report_research.pdf": "Research"}
 
 
 def report_filename(fund_name: str, kind: str, as_of) -> str:

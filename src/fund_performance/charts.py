@@ -65,6 +65,23 @@ def dashboard_five_year_chart(prices: pd.DataFrame, as_of, fund_currency: str, f
                        f"User-confirmed total-return basis; observed prices, no interpolation. {timing}"}
 
 
+def allocation_chart(items: list[tuple[str, float]], path: Path, title: str) -> Path:
+    """Plot already source-checked allocation weights without deriving or filling any values."""
+    fig, ax = plt.subplots(figsize=(6, max(1.8, len(items) * .35)), dpi=150)
+    names, values = zip(*items)
+    ax.barh(range(len(items)), values, color='#447c9d')
+    ax.set_yticks(range(len(items)), names)
+    ax.invert_yaxis()
+    ax.set_xlim(0, 100)
+    ax.set_xlabel('Weight (%)')
+    ax.set_title(title, loc='left', color=NAVY, fontweight='bold')
+    ax.grid(axis='x', alpha=.2)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+    return path
+
+
 def growth_chart(labels: list[str], fund: list[float], index: list[float], path: Path,
                  fund_label: str, index_label: str, title: str) -> Path:
     """ Growth of 100: values already rebased to 100 at the first point """

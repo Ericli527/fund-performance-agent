@@ -296,13 +296,13 @@ def _descendants(block):
 
 
 def test_results_are_hidden_until_a_review_finishes():
-    from fund_performance.web import DETAILED_LABEL, EXECUTIVE_LABEL
+    from fund_performance.web import DETAILED_LABEL, EXECUTIVE_LABEL, RESEARCH_LABEL
     ui = build_ui()
     results = next(c for c in ui.blocks.values() if isinstance(c, gr.Column) and
                    any(isinstance(x, gr.DownloadButton) and x.label == DETAILED_LABEL for x in _descendants(c)))
     assert results.visible is False
     labels = {x.label for x in _descendants(results) if isinstance(x, gr.DownloadButton)}
-    assert labels == {DETAILED_LABEL, EXECUTIVE_LABEL}                     # both reports offered after a review
+    assert labels == {DETAILED_LABEL, EXECUTIVE_LABEL, RESEARCH_LABEL}
     assert not any(isinstance(c, gr.File) and c.label == "PDF report" for c in ui.blocks.values())
     accordions = {c.label for c in ui.blocks.values() if isinstance(c, gr.Accordion)}
     assert "Technical details" in accordions
