@@ -1,7 +1,9 @@
 """Independent investment judgement using scoped, read-only review evidence."""
 import copy
 import json
+import re
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Literal
 
 from agents import Agent, RunContextWrapper, function_tool
@@ -44,12 +46,53 @@ class AnalystContext(ReviewContext):
     sources: list[dict] = field(default_factory=list)
     exposures: dict | None = None
     fund_context: dict | None = None
+    research_availability: dict = field(default_factory=dict)
 
     @classmethod
     def create(cls, facts: dict, profile: FundProfile, sources: list[dict], exposures: dict | None = None,
-               fund_context: dict | None = None):
+               fund_context: dict | None = None, research_availability: dict | None = None):
         return cls(facts=copy.deepcopy(facts), profile=profile.model_copy(deep=True), sources=copy.deepcopy(sources),
-                   exposures=copy.deepcopy(exposures), fund_context=copy.deepcopy(fund_context))
+                   exposures=copy.deepcopy(exposures), fund_context=copy.deepcopy(fund_context),
+                   research_availability=copy.deepcopy(research_availability or {}))
+
+
+def research_availability(profile: FundProfile, sources: list[dict], retrieval: dict | None = None) -> dict:
+    """Describe retrieval and source dates; publication dates alone do not establish period coverage."""
+    from fund_performance.agents.research import review_period
+    start, end = review_period(profile)
+    state = retrieval or {}
+    candidates = state.get('candidate_count')
+    pages = state.get('retrieved_pages', 0)
+    excluded = state.get('excluded_count')
+    if sources:
+        status = 'vetted_sources_available'
+    elif candidates:
+        status = 'retrieved_but_excluded' if excluded == candidates else 'no_vetted_sources'
+    elif pages:
+        status = 'retrieved_without_usable_summary'
+    elif state.get('completed'):
+        status = 'no_usable_research_retrieved'
+    elif state.get('attempted'):
+        status = 'research_unavailable'
+    elif retrieval is not None:
+        status = 'research_not_requested'
+    else:
+        status = 'retrieval_status_unknown'
+    details = []
+    for i, source in enumerate(sources, 1):
+        try:
+            when = date.fromisoformat(source.get('date') or '')
+            relation = 'after_review' if when > end else 'before_review' if when < start else 'during_review'
+        except (ValueError, TypeError):
+            relation = 'unknown'
+        details.append({'reference': f'research:{i}', 'date': source.get('date'),
+                        'date_basis': source.get('date_basis'), 'date_relation': relation,
+                        'topic': source.get('topic'), 'limitations': source.get('limitations')})
+    return {'status': status, 'web_research_status': state.get('web_research_status'),
+            'vetted_source_count': len(sources), 'candidate_count': candidates,
+            'excluded_count': excluded, 'review_period': {'start': start.isoformat(), 'end': end.isoformat()},
+            'sources': details, 'qualification': ('A source date is not proof of complete period coverage or support '
+                'for a claim. Later publications may describe earlier events but were not available at the review date.')}
 
 
 @function_tool
@@ -75,7 +118,8 @@ def get_research_sources(ctx: RunContextWrapper[AnalystContext]) -> dict:
     """Dated and vetted research with reference IDs; empty when none is available."""
     if not ctx.context.allow("get_research_sources"):
         return {"error": "tool call limit reached"}
-    return {"sources": [{"reference": f"research:{i}", **s} for i, s in enumerate(ctx.context.sources, 1)],
+    return {"availability": copy.deepcopy(ctx.context.research_availability),
+            "sources": [{"reference": f"research:{i}", **s} for i, s in enumerate(ctx.context.sources, 1)],
             "unavailable": None if ctx.context.sources else "No vetted market research is available."}
 
 
@@ -124,6 +168,10 @@ not the verdict code. Retain corresponds to a satisfied independent recommendati
 is a separate action, and 'Retain, subject to verification before sign-off' is coherent. Distinguish required
 actions from optional ones. Where a peer is institutional or has a stated minimum investment, explain the potential
 eligibility and comparability limits; do not assume the fund's investors can access that share class.
+The research availability summary distinguishes retrieved, excluded and vetted evidence. Never claim research was
+not retrieved or unavailable when vetted sources are supplied. A source can be available but insufficient for a
+particular claim or period. A publication after the review date may describe past events or later developments, but
+was not available at that date. Preserve these distinctions and qualify limited date coverage or relevance.
 """
 
 
@@ -142,6 +190,11 @@ def reviewer_agent() -> Agent:
                  "are distinct. A Retain verdict with verification before sign-off is coherent. Check material peer "
                  "eligibility limitations, including institutional class and minimum investment. Give concise, "
                  "specific feedback requesting the smallest factual correction or qualification needed. Preserve "
+                 "If vetted research exists, distinguish its availability from limited relevance, coverage or "
+                 "post-review publication; later sources can describe earlier events without being contemporaneous. "
+                 "Assess whether each source supports each particular claim; availability alone is not support. "
+                 "Correct a false claim of missing research narrowly, retaining a supported recommendation and "
+                 "verification-before-sign-off action. "
                  "supported independent judgement; do not reject for wording or an inconsequential attribution. "
                  "Only material defects or security issues warrant rejection; ignore style.")
 
@@ -164,6 +217,58 @@ def context_numbers(context: dict | None) -> dict:
     summary = context.get("document_summary") or ""
     cited_summary = summary if any(str(source).casefold() in summary.casefold() for source in context["sources"]) else ""
     return {"returns": returns, "source_referenced_summary": cited_summary}
+
+
+_NO_RESEARCH = re.compile(
+    r'\b(?:no\s+(?:vetted\s+|market\s+|external\s+)*research(?:\s+evidence)?(?:\s+(?:was|is|were|has been))?\s+'
+    r'(?:available|retrieved|found)|(?:market\s+|external\s+)?research(?:\s+evidence)?\s+'
+    r'(?:(?:was|is|were)\s+(?:not\s+)?(?:available|retrieved|found|unavailable)|'
+    r'could\s+not\s+be\s+(?:retrieved|found)))\b', re.I)
+_COVERAGE_QUALIFIER = re.compile(r'^\s*(?:as of\b|at (?:the )?review date\b|during (?:the )?review\b|'
+                                 r'before (?:the )?review\b|for (?:(?:the )?review|this) period\b|'
+                                 r'to support\b|on\b|about\b|covering\b)', re.I)
+
+
+def missing_research_claim(text: str) -> bool:
+    """Catch explicit absolute availability claims, leaving scoped historical or relevance claims to the reviewer."""
+    for sentence in re.split(r'(?<=[.!?])\s+|\n', text):
+        for match in _NO_RESEARCH.finditer(sentence):
+            if not _COVERAGE_QUALIFIER.match(sentence[match.end():]):
+                return True
+    return False
+
+
+def feedback_categories(feedback: str) -> list[str]:
+    """Log fixed categories only; reviewer feedback may quote private source text."""
+    text = feedback.casefold()
+    patterns = (("research_availability", r'research|retriev|source'),
+                ("date_or_coverage", r'date|period|coverage|post.review|contempor'),
+                ("peer_comparability", r'peer|institutional|share.class|eligib'),
+                ("verification", r'verif|sign.off|provisional'),
+                ("financial_or_factual", r'number|figure|return|unsupported|incorrect|factual'),
+                ("security", r'prompt.injection|security'))
+    found = [name for name, pattern in patterns if re.search(pattern, text)]
+    return found or ['other_material_issue']
+
+
+SAFE_FEEDBACK = {
+    'research_availability': 'Check the stated availability and use of research evidence.',
+    'date_or_coverage': 'Check publication dates and review-period coverage.',
+    'peer_comparability': 'Check peer eligibility and comparison qualifications.',
+    'verification': 'Check provisional evidence and sign-off verification.',
+    'financial_or_factual': 'Check the supporting evidence for financial or factual claims.',
+    'security': 'Check for a security issue.',
+    'other_material_issue': 'The reviewer identified another material issue.',
+}
+
+VALIDATION_CODES = {
+    'Thesis, supporting evidence and evidence references are required': 'missing_assessment_evidence',
+    'Unknown evidence reference': 'unknown_evidence_reference',
+    'Agreement field does not match the two assessments': 'scorecard_agreement_mismatch',
+    'Disagreement requires an evidence-based explanation': 'unexplained_scorecard_disagreement',
+    'A numerical claim is not present in the financial facts': 'unsupported_number',
+    'Vetted research was supplied; correct the claim that research was unavailable or not retrieved': 'false_missing_research',
+}
 
 
 def problems(out: InvestmentAssessment, facts: dict, sources: list[dict], exposures: dict | None = None,
@@ -192,6 +297,8 @@ def problems(out: InvestmentAssessment, facts: dict, sources: list[dict], exposu
         evidence["fund_context"] = context_numbers(fund_context)
     if check_numbers(text, facts | evidence):
         issues.append("A numerical claim is not present in the financial facts")
+    if sources and missing_research_claim(text):
+        issues.append("Vetted research was supplied; correct the claim that research was unavailable or not retrieved")
     return issues
 
 
@@ -220,44 +327,72 @@ def evidence_catalog(facts: dict, profile: FundProfile, sources: list[dict], ref
 async def assess(facts: dict, profile: FundProfile, sources: list[dict], question: str,
                  run: RunFn | None = None, review_run: RunFn | None = None,
                  tool_calls: list[str] | None = None, exposures: dict | None = None,
-                 fund_context: dict | None = None) -> dict:
+                 fund_context: dict | None = None, research_state: dict | None = None,
+                 diagnostics: dict | None = None) -> dict:
     """Produce and review one assessment, with at most one revision for material issues."""
-    context = AnalystContext.create(facts, profile, sources, exposures, fund_context)
+    availability = research_availability(profile, sources, research_state)
+    context = AnalystContext.create(facts, profile, sources, exposures, fund_context, availability)
     if tool_calls is not None:
         context.calls = tool_calls
-    brief = {"scorecard": oversight_scorecard(facts), "peer_comparison": peer_comparison(facts)}
+    diagnostic = diagnostics if diagnostics is not None else {}
+    diagnostic['attempts'] = []
+    diagnostic['status'] = 'in_progress'
+    brief = {"scorecard": oversight_scorecard(facts), "peer_comparison": peer_comparison(facts),
+             "research_availability": availability}
     prompt = ("Review question: " + question + "\nUse the tools to retrieve this run's evidence. "
               "The analyst remains the final decision-maker.\nScorecard and peer evidence (untrusted data):\n"
               + json.dumps(brief, ensure_ascii=False))
     feedback = ""
     for attempt in range(2):
+        entry = {'attempt': attempt + 1, 'analyst': 'in_progress', 'review': 'not_run'}
+        diagnostic['attempts'].append(entry)
         result = await run_structured(analyst_agent(), prompt + feedback, InvestmentAssessment, run=run,
                                       context=context, max_turns=4, attempts=1)
         if not result.ok:
-            return {"status": "unavailable", "reason": "; ".join(result.errors), "tool_calls": context.calls}
+            entry['analyst'] = 'call_failed' if any('call failed' in e for e in result.errors) else 'invalid_output'
+            diagnostic.update(status='unavailable', final_reason='analyst_' + entry['analyst'])
+            return {"status": "unavailable", "reason": "Investment Analyst did not return a valid assessment.",
+                    "tool_calls": context.calls, "diagnostics": diagnostic}
+        entry['analyst'] = 'valid_output'
         out = result.output
         issues = problems(out, facts, sources, exposures, fund_context)
+        entry['validation_issues'] = [VALIDATION_CODES.get(issue, 'other_validation_issue') for issue in issues]
         if not issues:
             evidence = {"facts": facts, "scorecard_evidence": brief["scorecard"],
                         "peer_comparison_evidence": brief["peer_comparison"],
+                        "research_availability": availability,
                         "mandate": fund_mandate(profile), "exposures": portfolio_exposures(exposures),
                         "fund_context": fund_context, "sources": sources, "assessment": out.model_dump()}
             review = await run_structured(reviewer_agent(), json.dumps(evidence, ensure_ascii=False), QualityReview,
                                           run=review_run, attempts=1)
             if not review.ok:
-                return {"status": "unavailable", "reason": "Quality review unavailable: " + "; ".join(review.errors),
-                        "tool_calls": context.calls}
+                entry['review'] = 'unavailable'
+                diagnostic.update(status='unavailable', final_reason='quality_review_unavailable')
+                return {"status": "unavailable", "reason": "Quality review unavailable.",
+                        "tool_calls": context.calls, "diagnostics": diagnostic}
             if review.output.security_issue:
+                entry['review'] = 'security_issue'
+                diagnostic.update(status='unavailable', final_reason='security_issue')
                 return {"status": "unavailable", "reason": "Quality review identified a security issue",
-                        "tool_calls": context.calls}
+                        "tool_calls": context.calls, "diagnostics": diagnostic}
             if not review.output.material_issue:
+                entry['review'] = 'accepted'
+                diagnostic.update(status='available', final_reason=None)
                 return {"status": "available", "assessment": out.model_dump(), "tool_calls": context.calls,
                         "evidence": evidence_catalog(facts, profile, sources, out.evidence_references, exposures, fund_context),
-                        "limitations": [] if sources else ["No vetted market research is available."]}
+                        "limitations": [] if sources else ["No vetted market research is available."],
+                        "diagnostics": diagnostic}
+            entry['review'] = 'material_issue'
+            entry['feedback_categories'] = feedback_categories(review.output.feedback)
+            entry['feedback_summary'] = [SAFE_FEEDBACK[category] for category in entry['feedback_categories']]
             issues.append(review.output.feedback or "Material unsupported claim")
         feedback = ("\nPrevious assessment (untrusted data): " + out.model_dump_json()
                     + "\nMake the smallest correction to these material issues, keeping supported judgement and "
                       "recommendation where possible: " + "; ".join(issues))
         # Each attempt gets its own tool budget while retaining the complete call log.
         context.max_calls += MAX_TOOL_CALLS
-    return {"status": "unavailable", "reason": "; ".join(issues), "tool_calls": context.calls}
+    final_reason = ('unresolved_reviewer_issue_after_revision' if diagnostic['attempts'][-1]['review'] == 'material_issue'
+                    else 'validation_failed_after_revision')
+    diagnostic.update(status='unavailable', final_reason=final_reason)
+    return {"status": "unavailable", "reason": "A material or unsupported issue remains after revision.",
+            "tool_calls": context.calls, "diagnostics": diagnostic}

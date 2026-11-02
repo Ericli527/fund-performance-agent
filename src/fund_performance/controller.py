@@ -613,9 +613,13 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
 
     # 7. Web research results: wait for the Search Agent, then code vets each summary against the facts
     vetted: list[dict] = []
+    research_state = {'attempted': research_task is not None, 'completed': False,
+                      'candidate_count': 0, 'excluded_count': 0, 'retrieved_pages': 0,
+                      'web_research_status': 'in_progress' if research_task is not None else 'not_requested'}
     if research_task is not None:
         found, failure = await research_task
         if found is None:
+            research_state['web_research_status'] = 'unavailable'
             flags.append(DataFlag(check="research", level="info", message=(
                 f"Web research {failure or 'did not finish'}, so the report has no market context (the financial "
                 "review is complete without it)")))
@@ -625,6 +629,9 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                                                        market_grace_days=sources_config.vetting.market_grace_days,
                                                        exposures=review_exposures)
             vetted = with_timing(vetted, profile)
+            research_state.update(completed=True, candidate_count=len(found.summaries),
+                                  excluded_count=len(found.summaries) - len(vetted),
+                                  retrieved_pages=getattr(found, 'retrieved_pages', 0), web_research_status='completed')
             flags += found.flags + vet_flags
             text_log += found.log + vet_log
             research_step.inputs += [f"web search: {p.query}" for p in found.plan]
@@ -673,6 +680,9 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         doc_sources, doc_flags, doc_log = vet_summaries(documents, profile, facts,
             market_grace_days=load_sources().vetting.market_grace_days)
         vetted += with_timing(doc_sources, profile)
+        research_state.update(attempted=True, completed=True,
+                              candidate_count=research_state['candidate_count'] + len(benchmark_documents),
+                              excluded_count=research_state['excluded_count'] + len(benchmark_documents) - len(doc_sources))
         flags += doc_flags
         text_log += doc_log
         research_step.outputs["benchmark_documents_kept"] = len(doc_sources)
@@ -684,14 +694,18 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         log.end(step, "skipped", notes=[assessment["reason"]])
     else:
         assessment_calls: list[str] = []
+        assessment_diagnostics: dict = {}
         assessment = await _timed(assess_investment(facts, profile, vetted, question, r.investment_analyst,
                                                    r.investment_reviewer, assessment_calls,
-                                                   review_exposures, context_brief), s.timeouts_seconds.narrative)
+                                                   review_exposures, context_brief, research_state,
+                                                   assessment_diagnostics), s.timeouts_seconds.narrative)
         if assessment is None:
+            assessment_diagnostics.update(status='unavailable', final_reason='assessment_timeout')
             assessment = {"status": "unavailable", "reason": _why(s.timeouts_seconds.narrative),
-                          "tool_calls": assessment_calls}
+                          "tool_calls": assessment_calls, "diagnostics": assessment_diagnostics}
         log.end(step, "ok" if assessment["status"] == "available" else "unavailable",
-                outputs={"status": assessment["status"], "tool_calls": assessment.get("tool_calls", [])},
+                outputs={"status": assessment["status"], "tool_calls": assessment.get("tool_calls", []),
+                         "diagnostics": assessment.get("diagnostics", {})},
                 notes=[assessment.get("reason", "") ] if assessment["status"] != "available" else [])
     (run_dir / "investment_assessment.json").write_text(json.dumps(assessment, indent=1, ensure_ascii=False), encoding="utf-8")
     # One read-only presentation package for the dashboard and both reports.

@@ -107,6 +107,7 @@ class Research:
     summaries: list[dict] = field(default_factory=list)       # {query, topic, summary, url, date, date_basis}
     flags: list[DataFlag] = field(default_factory=list)
     log: list[str] = field(default_factory=list)
+    retrieved_pages: int = 0
 
 
 def search_agent() -> Agent:
@@ -291,6 +292,7 @@ async def research(profile: FundProfile, planned: list[PlannedSearch], max_searc
     max_searches = min(max(max_searches, 0), 5)
     out = Research()
     readable = [p for p in pages if p.ok]
+    out.retrieved_pages = len(readable)
     fallbacks: list[PlannedSearch] = []
     for page in pages:
         if page.ok:
