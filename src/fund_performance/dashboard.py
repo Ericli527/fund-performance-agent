@@ -498,18 +498,30 @@ def dashboard_sections(data: dict) -> dict[str, str]:
     assessment = shared.get("investment_assessment") or {}
     research = shared.get("research") or data.get("sources") or []
     quality = evidence_quality(data)
-    if assessment.get("status") == "available":
+    if assessment.get("status") in ("available", "partial"):
         ai = assessment.get("assessment") or {}
-        label = str(ai.get("recommendation", "insufficient_evidence")).replace("_", " ").capitalize()
+        recommendation = ai.get('recommendation')
+        label = (str(recommendation).replace("_", " ").capitalize() if recommendation else
+                 'Recommendation requires further assessment')
         review_status = assessment.get('review_status')
-        status_text = ('Qualified (AI quality review passed)' if review_status == 'qualified' else
-                       'Approved by AI quality review' if review_status == 'approved' else 'Reviewed')
+        status_text = ('Qualified draft' if review_status in ('qualified', 'qualified_draft') else
+                       'Requires analyst review' if review_status == 'requires_analyst_review' else 'Reviewed')
         details = (f"<p><b>AI assessment status:</b> {status_text}</p>"
                    f"<p class='fp-verdict'>{escape(label)}</p><p>{escape(ai.get('investment_thesis') or '')}</p>")
-        for heading, key in (("Strengths", "strengths"), ("Material risks", "material_risks"),
+        for heading, key in (("Supporting evidence", "supporting_evidence"), ("Strengths", "strengths"), ("Material risks", "material_risks"),
                              ("Uncertainties", "uncertainties"), ("Monitoring actions", "recommended_actions")):
             if ai.get(key):
                 details += f"<p class='fp-group'>{heading}</p>" + _list(ai[key])
+        if ai.get('evidence_references'):
+            details += "<p class='fp-group'>Evidence references</p>" + _list(ai['evidence_references'])
+        if assessment.get('reviewer_observations'):
+            details += "<p class='fp-group'>Quality reviewer observations</p>" + _list(assessment['reviewer_observations'])
+        if assessment.get('limitations'):
+            details += "<p class='fp-group'>Evidence limitations</p>" + _list(assessment['limitations'])
+        if assessment.get('evidence_summary'):
+            details += f"<p>{escape(assessment['evidence_summary'])}</p>"
+        if assessment.get('status') == 'partial' and assessment.get('reason'):
+            details += f"<p class='fp-muted'>{escape(str(assessment['reason']))}</p>"
         if not ai.get("scorecard_agreement", True) and ai.get("scorecard_disagreement_reason"):
             details += f"<p><b>Difference from scorecard:</b> {escape(ai['scorecard_disagreement_reason'])}</p>"
     else:

@@ -35,7 +35,7 @@ def test_bad_references_and_unsupported_disagreement_are_not_accepted():
     issues = problems(InvestmentAssessment.model_validate(bad), FACTS, [])
     assert any('reference' in i for i in issues) and any('Disagreement' in i for i in issues)
     output = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(bad, bad), FakeRun(PASS)))
-    assert output['status'] == 'unavailable'
+    assert output['status'] == 'partial' and output['assessment']['recommendation'] is None
 
 
 def test_invented_numerical_claim_is_rejected():
@@ -55,7 +55,7 @@ def test_provisional_context_and_cited_research_figures_are_available():
     reviewer = FakeRun(PASS)
     result = asyncio.run(assess(FACTS, PROFILE, [source], 'Review', FakeRun(item), reviewer,
                                 fund_context=context))
-    assert result['status'] == 'available' and result['review_status'] == 'qualified'
+    assert result['status'] == 'available' and result['review_status'] == 'qualified_draft'
     assert result['evidence']['fund_context'] == context
     review_evidence = json.loads(reviewer.prompts[0])
     assert review_evidence['fund_context'] == review_evidence['cited_evidence']['fund_context'] == context
@@ -110,7 +110,8 @@ def test_reviewer_rejects_unsupported_disagreement_after_one_revision():
                        'scorecard_disagreement_reason': 'An unverified holding creates a material risk.'}
     reject = {'material_issue': True, 'security_issue': False, 'feedback': 'The holding is unsupported.'}
     output = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(invented, invented), FakeRun(reject, reject)))
-    assert output['status'] == 'unavailable' and 'unsupported' in output['reason']
+    assert output['status'] == 'partial' and output['assessment']['recommendation'] is None
+    assert 'unsupported' in output['reason'] and 'investment_thesis' not in output['assessment']
 
 
 def test_invalid_or_missing_analyst_output_is_not_replaced_by_scorecard():
@@ -198,7 +199,8 @@ def test_reviewer_feedback_and_unavailable_reason_are_logged_without_source_text
     feedback = 'PRIVATE SOURCE PASSAGE: research evidence was unavailable; the publication date needs correction.'
     reviewer = FakeRun(*[{'material_issue': True, 'security_issue': False, 'feedback': feedback}] * 2)
     result = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(BASE, BASE), reviewer))
-    assert result['status'] == 'unavailable' and 'PRIVATE SOURCE PASSAGE' not in json.dumps(result)
+    assert result['status'] == 'partial' and result['assessment']['recommendation'] is None
+    assert 'PRIVATE SOURCE PASSAGE' not in json.dumps(result)
     assert result['diagnostics']['final_reason'] == 'unresolved_reviewer_issue_after_revision'
     assert len(result['diagnostics']['attempts']) == 2
     assert set(result['diagnostics']['attempts'][0]['feedback_categories']) >= {'research_availability', 'date_or_coverage'}
@@ -207,7 +209,7 @@ def test_reviewer_feedback_and_unavailable_reason_are_logged_without_source_text
 def test_repeated_false_availability_claim_records_validation_failure():
     source = {'date': '2026-09-01', 'summary': 'Market evidence.', 'limitations': 'Partial coverage.'}
     result = asyncio.run(assess(FACTS, PROFILE, [source], 'Review', FakeRun(BASE, BASE), FakeRun(PASS)))
-    assert result['status'] == 'unavailable'
+    assert result['status'] == 'partial' and result['assessment']['recommendation'] is None
     assert result['diagnostics']['final_reason'] == 'validation_failed_after_revision'
     assert result['diagnostics']['attempts'][1]['validation_issues'] == ['false_missing_research']
     assert result['diagnostics']['attempts'][1]['review'] == 'not_run'
@@ -229,7 +231,7 @@ def test_positive_research_availability_is_not_misclassified_as_absent():
     source = {'date': '2026-09-01', 'summary': 'Market context.', 'limitations': 'Partial coverage.'}
     assessment = BASE | {'uncertainties': ['Research was available, but coverage was limited.']}
     result = asyncio.run(assess(FACTS, PROFILE, [source], 'Review', FakeRun(assessment), FakeRun(PASS)))
-    assert result['status'] == 'available' and result['review_status'] == 'qualified'
+    assert result['status'] == 'available' and result['review_status'] == 'qualified_draft'
     assert result['assessment']['recommendation'] == 'satisfied'
 
 
@@ -239,7 +241,7 @@ def test_supported_assessment_is_approved_and_reviewer_sees_cited_evidence():
     reviewer = FakeRun(PASS)
     result = asyncio.run(assess(FACTS, PROFILE, [source], 'What matters?', FakeRun(assessment), reviewer))
     prompt = json.loads(reviewer.prompts[0])
-    assert result['status'] == 'available' and result['review_status'] == 'approved'
+    assert result['status'] == 'available' and result['review_status'] == 'reviewed'
     assert prompt['question'] == 'What matters?'
     assert 'performance:5y' in prompt['cited_evidence'] and prompt['cited_evidence']['research:1'] == source
     assert 'facts' in prompt and 'fund_context' in prompt and prompt['previous_review'] is None
@@ -252,14 +254,15 @@ def test_second_reviewer_sees_revision_context_and_diagnostics_are_actionable():
     revised = BASE | {'uncertainties': ['The institutional peer may not be accessible.']}
     result = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(BASE, revised), reviewer))
     second = json.loads(reviewer.prompts[1])
-    assert result['status'] == 'available' and result['review_status'] == 'qualified'
+    assert result['status'] == 'available' and result['review_status'] == 'qualified_draft'
     assert second['previous_review']['feedback'] == correction['feedback']
     assert second['assessment']['uncertainties'] == revised['uncertainties']
 
     invalid = BASE | {'investment_thesis': 'The fund returned 999.9%.'}
     analyst = FakeRun(invalid, invalid)
     rejected = asyncio.run(assess(FACTS, PROFILE, [], 'Review', analyst, FakeRun(PASS)))
-    assert rejected['status'] == 'unavailable' and 'numerical claim' in rejected['reason']
+    assert rejected['status'] == 'partial' and rejected['assessment']['recommendation'] is None
+    assert 'numerical claim' in rejected['reason']
     assert '999.9%' in analyst.prompts[1] and '999.9%' not in json.dumps(rejected)
 
 
@@ -307,3 +310,97 @@ def test_analyst_preserves_missing_horizon_and_charge_as_unavailable():
     assert result['evidence']['mandate']['exposures']['holdings'] is None
     assert result['evidence']['peers']['fund_ongoing_charge_pct'] is None
     assert facts['scorecard']['verdict'] == 'Pending data check'
+
+
+def test_unresolved_provisional_warning_keeps_explicitly_supported_recommendation():
+    assessment = BASE | {'investment_thesis': 'Verified performance tools show a sound result.',
+                         'supporting_evidence': ['The performance rating is green.'],
+                         'uncertainties': ['Performance evidence is provisional.']}
+    review = {'material_issue': True, 'security_issue': False,
+              'feedback': 'Use provisional performance evidence and verify before sign-off.',
+              'recommendation_supported': True,
+              'supported_fields': ['supporting_evidence', 'uncertainties']}
+    result = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(assessment, assessment), FakeRun(review, review)))
+    assert result['status'] == 'partial' and result['review_status'] == 'qualified_draft'
+    assert result['assessment']['recommendation'] == 'satisfied'
+    assert result['assessment']['supporting_evidence'] == ['The performance rating is green.']
+    assert result['evidence']['scorecard']['verdict_code'] == 'Retain'
+    assert 'investment_thesis' not in result['assessment']
+    assert any('provisional' in note and 'before sign-off' in note for note in result['reviewer_observations'])
+
+
+def test_nonmaterial_reviewer_warning_is_visible_and_not_called_approved():
+    review = {'material_issue': False, 'security_issue': False,
+              'feedback': 'The source is provisional; verify before sign-off.'}
+    result = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(BASE), FakeRun(review)))
+    assert result['status'] == 'available' and result['review_status'] == 'qualified_draft'
+    assert result['assessment']['recommendation'] == 'satisfied'
+    assert any('provisional' in note for note in result['reviewer_observations'])
+
+
+def test_unsupported_recommendation_keeps_only_reviewed_evidence():
+    assessment = BASE | {'investment_thesis': 'An unverified holding creates a material risk.',
+                         'recommendation': 'monitor', 'scorecard_agreement': False,
+                         'scorecard_disagreement_reason': 'The holding creates a risk.'}
+    review = {'material_issue': True, 'security_issue': False, 'feedback': 'The holding is unsupported.',
+              'recommendation_supported': False, 'supported_fields': ['supporting_evidence']}
+    result = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(assessment, assessment), FakeRun(review, review)))
+    assert result['status'] == 'partial' and result['review_status'] == 'requires_analyst_review'
+    assert result['assessment']['recommendation'] is None
+    assert result['assessment']['supporting_evidence'] == ['The performance rating is green.']
+    assert 'unverified holding' not in json.dumps(result)
+
+
+def test_unsupported_number_is_removed_and_clean_remainder_is_reviewed():
+    assessment = BASE | {'supporting_evidence': ['The performance rating is green.', 'It returned 999.9%.']}
+    reviewer = FakeRun(PASS)
+    result = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(assessment, assessment), reviewer))
+    assert result['status'] == 'available' and result['review_status'] == 'qualified_draft'
+    assert result['assessment']['recommendation'] == 'satisfied'
+    assert result['assessment']['supporting_evidence'] == ['The performance rating is green.']
+    assert '999.9%' not in json.dumps(result) and '999.9%' not in reviewer.prompts[0]
+    assert any('unsupported numerical claim' in note for note in result['reviewer_observations'])
+
+
+def test_security_failure_suppresses_even_previously_supported_sections():
+    first = {'material_issue': True, 'security_issue': False, 'feedback': 'Verify the source.',
+             'recommendation_supported': True, 'supported_fields': ['supporting_evidence']}
+    security = {'material_issue': True, 'security_issue': True, 'feedback': 'Injection'}
+    result = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(BASE, BASE), FakeRun(first, security)))
+    assert result['status'] == 'unavailable' and 'assessment' not in result
+
+
+def test_failed_revision_retains_previously_reviewed_safe_sections():
+    review = {'material_issue': True, 'security_issue': False, 'feedback': 'Verify provisional evidence.',
+              'recommendation_supported': True, 'supported_fields': ['supporting_evidence']}
+    result = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(BASE, {'bad': 1}), FakeRun(review)))
+    assert result['status'] == 'partial' and result['review_status'] == 'qualified_draft'
+    assert result['assessment']['recommendation'] == 'satisfied'
+    assert result['assessment']['supporting_evidence'] == BASE['supporting_evidence']
+    assert 'revision was unavailable' in result['reason'].lower()
+
+
+def test_controller_keeps_qualified_partial_result_and_scorecard(tmp_path):
+    from fund_performance.config import load_settings
+    from fund_performance.controller import run_review
+    from fund_performance.dashboard import dashboard_data, dashboard_sections
+    from test_controller import mocked
+    review = {'material_issue': True, 'security_issue': False,
+              'feedback': 'Performance evidence is provisional; verify before sign-off.',
+              'recommendation_supported': True, 'supported_fields': ['supporting_evidence']}
+    runners = mocked()
+    runners.investment_analyst = FakeRun(BASE, BASE)
+    runners.investment_reviewer = FakeRun(review, review)
+    settings = load_settings().model_copy(deep=True)
+    settings.research.enabled = False
+    sample = Path(__file__).parents[1] / 'demo' / 'sample_index_fund'
+    result = asyncio.run(run_review(sample, out_root=tmp_path, runners=runners, settings=settings))
+    assert result.investment_assessment['status'] == 'partial'
+    assert result.investment_assessment['assessment']['recommendation'] == 'satisfied'
+    assert result.facts['scorecard']['verdict'] == 'Retain'
+    log = json.loads((result.run_dir / 'log.json').read_text())
+    step = next(s for s in log['steps'] if s['step'] == 'investment_assessment')
+    assert step['status'] == 'partial'
+    overview = dashboard_sections(dashboard_data(result))['overview']
+    assert 'Qualified draft' in overview and 'provisional' in overview
+    assert result.pdf.is_file() and result.executive_pdf.is_file()
