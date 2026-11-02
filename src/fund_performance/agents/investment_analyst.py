@@ -15,7 +15,7 @@ from fund_performance.agents.reporting_tools import (MAX_TOOL_CALLS, ReviewConte
                                                       fund_performance, oversight_scorecard, peer_comparison)
 from fund_performance.models import FundProfile
 from fund_performance.number_guard import check_numbers
-from fund_performance.presentation import comparison_invalid
+from fund_performance.presentation import comparison_invalid, missing_evidence
 
 
 class InvestmentAssessment(BaseModel):
@@ -189,13 +189,16 @@ def reviewer_agent() -> Agent:
                  "The deterministic scorecard verdict code, reader-facing suggested conclusion and sign-off actions "
                  "are distinct. A Retain verdict with verification before sign-off is coherent. Check material peer "
                  "eligibility limitations, including institutional class and minimum investment. Give concise, "
-                 "specific feedback requesting the smallest factual correction or qualification needed. Preserve "
+                 "specific feedback requesting the smallest factual correction or qualification needed. "
                  "If vetted research exists, distinguish its availability from limited relevance, coverage or "
                  "post-review publication; later sources can describe earlier events without being contemporaneous. "
                  "Assess whether each source supports each particular claim; availability alone is not support. "
                  "Correct a false claim of missing research narrowly, retaining a supported recommendation and "
                  "verification-before-sign-off action. "
-                 "supported independent judgement; do not reject for wording or an inconsequential attribution. "
+                 "For a revision, assess the revised text against the evidence and untrusted previous feedback; do not "
+                 "repeat an issue that has been corrected. Identify the specific remaining claim and the evidence "
+                 "or qualification needed, rather than rejecting a defensible qualified conclusion. "
+                 "Preserve supported independent judgement; do not reject for wording or inconsequential attribution. "
                  "Only material defects or security issues warrant rejection; ignore style.")
 
 
@@ -222,10 +225,12 @@ def context_numbers(context: dict | None) -> dict:
 _NO_RESEARCH = re.compile(
     r'\b(?:no\s+(?:vetted\s+|market\s+|external\s+)*research(?:\s+evidence)?(?:\s+(?:was|is|were|has been))?\s+'
     r'(?:available|retrieved|found)|(?:market\s+|external\s+)?research(?:\s+evidence)?\s+'
-    r'(?:(?:was|is|were)\s+(?:not\s+)?(?:available|retrieved|found|unavailable)|'
+    r'(?:(?:was|is|were)\s+(?:not\s+(?:available|retrieved|found)|unavailable)|'
     r'could\s+not\s+be\s+(?:retrieved|found)))\b', re.I)
 _COVERAGE_QUALIFIER = re.compile(r'^\s*(?:as of\b|at (?:the )?review date\b|during (?:the )?review\b|'
                                  r'before (?:the )?review\b|for (?:(?:the )?review|this) period\b|'
+                                 r'for (?:this|the|a) (?:(?:specific|particular) )?'
+                                 r'(?:claim|question|topic|market|fund|benchmark)\b|'
                                  r'to support\b|on\b|about\b|covering\b)', re.I)
 
 
@@ -271,6 +276,20 @@ VALIDATION_CODES = {
 }
 
 
+def unsupported_numbers(out: InvestmentAssessment, facts: dict, sources: list[dict], exposures: dict | None = None,
+                        fund_context: dict | None = None) -> list[str]:
+    text = " ".join([out.investment_thesis, *out.supporting_evidence, *out.strengths, *out.material_risks,
+                     *out.uncertainties, *out.recommended_actions, *out.manager_questions,
+                     out.scorecard_disagreement_reason or ""])
+    allowed = {f"research:{i}" for i in range(1, len(sources) + 1)}
+    cited = [sources[int(ref.split(":", 1)[1]) - 1] for ref in out.evidence_references
+             if ref in allowed]
+    evidence = {"portfolio_exposures": exposures or {}, "research": cited}
+    if "fund_context" in out.evidence_references:
+        evidence["fund_context"] = context_numbers(fund_context)
+    return check_numbers(text, facts | evidence)
+
+
 def problems(out: InvestmentAssessment, facts: dict, sources: list[dict], exposures: dict | None = None,
              fund_context: dict | None = None) -> list[str]:
     allowed = {"mandate", "fund_context", "scorecard", "peers", "risk_quality", *(f"performance:{p}" for p in ("1y", "3y", "5y", "since_launch")),
@@ -290,12 +309,7 @@ def problems(out: InvestmentAssessment, facts: dict, sources: list[dict], exposu
     text = " ".join([out.investment_thesis, *out.supporting_evidence, *out.strengths, *out.material_risks,
                      *out.uncertainties, *out.recommended_actions, *out.manager_questions,
                      out.scorecard_disagreement_reason or ""])
-    cited_research = [sources[int(ref.split(":", 1)[1]) - 1] for ref in out.evidence_references
-                      if ref.startswith("research:") and ref in allowed]
-    evidence = {"portfolio_exposures": exposures or {}, "research": cited_research}
-    if "fund_context" in out.evidence_references:
-        evidence["fund_context"] = context_numbers(fund_context)
-    if check_numbers(text, facts | evidence):
+    if unsupported_numbers(out, facts, sources, exposures, fund_context):
         issues.append("A numerical claim is not present in the financial facts")
     if sources and missing_research_claim(text):
         issues.append("Vetted research was supplied; correct the claim that research was unavailable or not retrieved")
@@ -343,6 +357,7 @@ async def assess(facts: dict, profile: FundProfile, sources: list[dict], questio
               "The analyst remains the final decision-maker.\nScorecard and peer evidence (untrusted data):\n"
               + json.dumps(brief, ensure_ascii=False))
     feedback = ""
+    previous_review = None
     for attempt in range(2):
         entry = {'attempt': attempt + 1, 'analyst': 'in_progress', 'review': 'not_run'}
         diagnostic['attempts'].append(entry)
@@ -358,11 +373,14 @@ async def assess(facts: dict, profile: FundProfile, sources: list[dict], questio
         issues = problems(out, facts, sources, exposures, fund_context)
         entry['validation_issues'] = [VALIDATION_CODES.get(issue, 'other_validation_issue') for issue in issues]
         if not issues:
-            evidence = {"facts": facts, "scorecard_evidence": brief["scorecard"],
+            evidence = {"question": question, "facts": facts, "scorecard_evidence": brief["scorecard"],
                         "peer_comparison_evidence": brief["peer_comparison"],
                         "research_availability": availability,
                         "mandate": fund_mandate(profile), "exposures": portfolio_exposures(exposures),
-                        "fund_context": fund_context, "sources": sources, "assessment": out.model_dump()}
+                        "fund_context": fund_context, "sources": sources, "assessment": out.model_dump(),
+                        "cited_evidence": evidence_catalog(facts, profile, sources, out.evidence_references,
+                                                           exposures, fund_context),
+                        "previous_review": previous_review}
             review = await run_structured(reviewer_agent(), json.dumps(evidence, ensure_ascii=False), QualityReview,
                                           run=review_run, attempts=1)
             if not review.ok:
@@ -378,21 +396,43 @@ async def assess(facts: dict, profile: FundProfile, sources: list[dict], questio
             if not review.output.material_issue:
                 entry['review'] = 'accepted'
                 diagnostic.update(status='available', final_reason=None)
+                limitations = [] if sources else ["No vetted market research is available."]
+                provisional = any(f.get('source') in ('ai_extracted', 'calculated_provisional')
+                                  for f in facts.get('figures', []))
+                source_limits = any(s.get('limitations') for s in sources) or any(
+                    s.get('date_relation') == 'after_review' for s in availability['sources'])
+                blocking = any(f.get('level') == 'blocking' for f in facts.get('data_flags', []))
+                provisional_context = 'fund_context' in out.evidence_references and bool(fund_context)
+                review_status = ('qualified' if out.uncertainties or limitations or provisional or source_limits
+                                 or blocking or provisional_context or missing_evidence(facts) else 'approved')
                 return {"status": "available", "assessment": out.model_dump(), "tool_calls": context.calls,
+                        "review_status": review_status,
                         "evidence": evidence_catalog(facts, profile, sources, out.evidence_references, exposures, fund_context),
-                        "limitations": [] if sources else ["No vetted market research is available."],
+                        "limitations": limitations,
                         "diagnostics": diagnostic}
             entry['review'] = 'material_issue'
             entry['feedback_categories'] = feedback_categories(review.output.feedback)
             entry['feedback_summary'] = [SAFE_FEEDBACK[category] for category in entry['feedback_categories']]
             issues.append(review.output.feedback or "Material unsupported claim")
+            previous_review = {"assessment": out.model_dump(), "feedback": review.output.feedback}
+        numbers = unsupported_numbers(out, facts, sources, exposures, fund_context)
+        correction_detail = (" Unsupported numeric values to verify or remove: " + ", ".join(numbers)
+                             if numbers else "")
         feedback = ("\nPrevious assessment (untrusted data): " + out.model_dump_json()
                     + "\nMake the smallest correction to these material issues, keeping supported judgement and "
-                      "recommendation where possible: " + "; ".join(issues))
+                      "recommendation where possible: " + "; ".join(issues) + correction_detail)
         # Each attempt gets its own tool budget while retaining the complete call log.
         context.max_calls += MAX_TOOL_CALLS
     final_reason = ('unresolved_reviewer_issue_after_revision' if diagnostic['attempts'][-1]['review'] == 'material_issue'
                     else 'validation_failed_after_revision')
     diagnostic.update(status='unavailable', final_reason=final_reason)
-    return {"status": "unavailable", "reason": "A material or unsupported issue remains after revision.",
+    final = diagnostic['attempts'][-1]
+    if final_reason == 'unresolved_reviewer_issue_after_revision':
+        details = final.get('feedback_summary') or [SAFE_FEEDBACK['other_material_issue']]
+    else:
+        messages = {code: issue for issue, code in VALIDATION_CODES.items()}
+        details = [messages.get(code, 'An assessment validation check failed.')
+                   for code in final.get('validation_issues', [])]
+    reason = "A material or unsupported issue remains after revision. " + " ".join(details)
+    return {"status": "unavailable", "reason": reason,
             "tool_calls": context.calls, "diagnostics": diagnostic}

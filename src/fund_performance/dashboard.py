@@ -501,7 +501,11 @@ def dashboard_sections(data: dict) -> dict[str, str]:
     if assessment.get("status") == "available":
         ai = assessment.get("assessment") or {}
         label = str(ai.get("recommendation", "insufficient_evidence")).replace("_", " ").capitalize()
-        details = f"<p class='fp-verdict'>{escape(label)}</p><p>{escape(ai.get('investment_thesis') or '')}</p>"
+        review_status = assessment.get('review_status')
+        status_text = ('Qualified (AI quality review passed)' if review_status == 'qualified' else
+                       'Approved by AI quality review' if review_status == 'approved' else 'Reviewed')
+        details = (f"<p><b>AI assessment status:</b> {status_text}</p>"
+                   f"<p class='fp-verdict'>{escape(label)}</p><p>{escape(ai.get('investment_thesis') or '')}</p>")
         for heading, key in (("Strengths", "strengths"), ("Material risks", "material_risks"),
                              ("Uncertainties", "uncertainties"), ("Monitoring actions", "recommended_actions")):
             if ai.get(key):
@@ -509,7 +513,9 @@ def dashboard_sections(data: dict) -> dict[str, str]:
         if not ai.get("scorecard_agreement", True) and ai.get("scorecard_disagreement_reason"):
             details += f"<p><b>Difference from scorecard:</b> {escape(ai['scorecard_disagreement_reason'])}</p>"
     else:
-        details = "<p class='fp-muted'>Independent assessment unavailable; use the scorecard and evidence below.</p>"
+        reason = assessment.get('reason') or 'The independent assessment was not produced.'
+        details = ("<p class='fp-muted'><b>AI assessment status: Unavailable.</b> "
+                   f"{escape(str(reason))} Use the scorecard and evidence below.</p>")
     ai_card = "<div class='fp-card'><h3>AI Investment Analyst</h3>" + details + "</div>"
     overview = _header(data, quality, True) + _summary(data, quality, "Answer to your question", True) + _ratings(data, True, True) + ai_card + _metrics(facts)
     chart = ("<figure><img style='width:100%;max-width:720px' alt='Yearly tracking analysis from the review' "
