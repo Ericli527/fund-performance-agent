@@ -48,10 +48,20 @@ def content_from(inp, out_dir: Path) -> ExecutiveContent:
     from fund_performance.report import plain_reason
     data = {"facts": facts, "reasons": {name: plain_reason(inp, name) for name in inp.card.pillars},
             "findings": list(out.key_findings) if out else [], "actions": list(out.action_texts) if out else [],
-            "flags": flag_dicts(inp.flags)}
+            "flags": flag_dicts(inp.flags), "presentation_context": inp.presentation_context or {}}
     if comparison_problems(inp.flags):
         return ExecutiveContent(data, None, CHART_LEFT_OUT, True)
+    # The dashboard also uses this chart, even when the executive report has a
+    # separately confirmed five-year line chart.
     chart, caption = _chart(inp, out_dir)
+    status = (inp.presentation_context or {}).get('performance_chart')
+    if status is not None:
+        path = out_dir / 'dashboard_growth.png'
+        if status.get('available') and path.is_file():
+            return ExecutiveContent(data, path, status.get('caption') or 'Five-year growth of 100.')
+        return ExecutiveContent(data, None, 'Comparable five-year line chart unavailable: '
+                                + str(status.get('reason') or 'total-return basis not confirmed')
+                                + ' See the period-return comparison on page 2.')
     return ExecutiveContent(data, chart, caption)
 
 
@@ -123,12 +133,18 @@ def _statuses(data: dict) -> str:
     colour = next((c for k, c in VERDICT_STYLE.items() if code.startswith(k)), NAVY)
     q_colour = {"check": "#6d4c9f", "warnings": "#b7791f", "clear": "#4c5966"}[quality.level]
     caveat = assessment_caveat(quality)
+    assessment = (data.get('presentation_context') or {}).get('investment_assessment') or {}
+    ai = (assessment.get('assessment') or {}) if assessment.get('status') == 'available' else {}
+    ai_label = str(ai.get('recommendation', 'unavailable')).replace('_', ' ').capitalize()
+    ai_note = (f"<br/><b>AI Investment Analyst:</b> {escape(ai_label)}"
+               + (f" — {escape(str(ai['scorecard_disagreement_reason']))}" if not ai.get('scorecard_agreement', True)
+                  and ai.get('scorecard_disagreement_reason') else ''))
     return (f"<table class='x-status'><tr>"
             f"<td width='50%' class='x-box' style='border-left: 4px solid {colour}'><span class='x-label'>INVESTMENT "
-            f"ASSESSMENT (SUGGESTED)</span><br/><span class='x-big' style='color:{colour}'>{escape(verdict_name(code))}</span>"
+            f"SCORECARD (SUGGESTED)</span><br/><span class='x-big' style='color:{colour}'>{escape(code)} · {escape(verdict_name(code))}</span>"
             f"<br/>{escape(assessment_meaning(code, quality, verdict_meaning(code)))}. From fixed rules on the four "
             "ratings; the analyst decides."
-            f"{('<br/><b>' + escape(caveat) + '</b>') if caveat else ''}</td><td width='2%'></td>"
+            f"{ai_note}{('<br/><b>' + escape(caveat) + '</b>') if caveat else ''}</td><td width='2%'></td>"
             f"<td width='48%' class='x-box' style='border-left: 4px solid {q_colour}'><span class='x-label'>EVIDENCE "
             f"QUALITY (DATA CHECKS)</span><br/><span class='x-big' style='color:{q_colour}'>{escape(quality.label)}</span>"
             f"<br/>{escape(quality.detail)}.</td></tr></table>")
@@ -166,7 +182,19 @@ def _scorecard(data: dict) -> str:
         elif p["rating"] == "CHECK DATA":
             why = "Not rated yet: the data check on page 2 must be resolved first."
         else:
-            why = data["reasons"].get(p["name"]) or p["reason"]
+            index = data['facts'].get('fund', {}).get('objective_type') == 'index_tracker'
+            if p['name'] == 'Mandate':
+                why = ('Co-movement and sensitivity are assessed; review the tracking gap as well.' if index else
+                       'Assess the evidence against the documented investment policy.')
+            elif p['name'] == 'Performance':
+                why = ('The benchmark return gap and tracking variability are assessed against the limits.' if index else
+                       'Performance is assessed against the documented objective and available benchmark.')
+            elif p.get('summary') == 'Add peer':
+                why = 'A suitable peer is needed to complete the comparison.'
+            elif p['name'] == 'Value for investors':
+                why = 'Fund outcomes are compared with available peers after fees; peer suitability matters.'
+            else:
+                why = 'The fund charge is compared with available peer fees; a single peer is not the market.'
         rows += (f"<tr><td class='x-q'><b>{escape(p['name'])}</b><br/><span class='x-src'>"
                  f"{escape(SHORT_QUESTIONS.get(p['name'], ''))}</span></td>{_chip(p['rating'])}<td>{escape(why)}</td></tr>")
     return ("<table class='x-grid'><tr><th width='24%' class='l'>Question</th><th width='12%'>Rating</th>"
@@ -222,6 +250,7 @@ def page1(inp, content: ExecutiveContent) -> str:
 {_banner(inp)}
 <h1>{PAGE1}</h1>
 {_statuses(data)}
+<p><b>Review question:</b> {escape(inp.question)}</p>
 {_metrics(data['facts'])}
 {narrative}
 <h2>The four ratings</h2>{_scorecard(data)}
@@ -361,8 +390,23 @@ def page2(inp, content: ExecutiveContent) -> str:
     questions = facts.get("manager_questions", [])[:MAX_QUESTIONS]
     blocking = evidence_quality(data).blocking
     actions = merge_resolve_actions([report_action(point_to_data_issues(a, blocking)) for a in data.get("actions", [])])
+    verification = [a for a in actions if 'before signing off' in a.lower() or 'before sign-off' in a.lower()]
+    actions = [a for a in actions if a not in verification]
     if checks := signoff_checks(facts):
-        actions.insert(0, checks)
+        verification.insert(0, checks)
+    assessment = (inp.presentation_context or {}).get('investment_assessment') or {}
+    ai = (assessment.get('assessment') or {}) if assessment.get('status') == 'available' else {}
+    insights = ([f'Strength: {x}' for x in (ai.get('strengths') or [])[:2]]
+                + [f'Risk: {x}' for x in (ai.get('material_risks') or [])[:2]])
+    research = (inp.presentation_context or {}).get('research') or []
+    research_items = []
+    if not _market_context(inp):
+        for i, source in enumerate(research[:2], 1):
+            summary = re.split(r'(?<=[.!?])\s+(?=[A-Z])', str(source.get('summary') or ''), maxsplit=1)[0]
+            day = str(source.get('date') or 'date unavailable')
+            timing = ' (source date after review)' if source.get('date') and day > inp.profile.as_of_date.isoformat() else ''
+            if summary:
+                research_items.append(f'[{i}] {day}{timing}: {summary}')
     suggested = verdict_name(facts["scorecard"]["verdict"])
     # Tick boxes as characters in one cell: a nested table of 12px box cells could be squeezed below its padding
     # when the box crosses a page break, and ReportLab then stops the whole report (Stage 6C Live run)
@@ -374,8 +418,11 @@ def page2(inp, content: ExecutiveContent) -> str:
 <h1>{PAGE2}</h1>
 <h2>Benchmark and peers</h2>{_comparison(inp, facts)}
 {_fees_and_risk(inp, facts)}
-{_market_context(inp)}<h2>Material issues</h2>{material_issues(data)}
+{_market_context(inp)}{('<h2>Research insights</h2>' + _ul(research_items)) if research_items else ''}
+{('<h2>Investment strengths and concerns</h2>' + _ul(insights)) if insights else ''}
+<h2>Material issues</h2>{material_issues(data)}
 <h2>Recommended actions</h2>{_ul(actions) or '<p>None.</p>'}
+{('<h2>Verification before sign-off</h2>' + _ul(verification)) if verification else ''}
 {'<h2>Questions for the manager</h2>' + _ul(questions) if questions else ''}
 <h2>Analyst sign-off</h2>
 <table class="x-approval">

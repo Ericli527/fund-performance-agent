@@ -203,6 +203,7 @@ class RunResult:
     executive_pdf: Path | None = None          # report_executive.pdf (2 pages), or None if it could not fit
     investment_assessment: dict | None = None
     presentation_context: dict | None = None
+    research_pdf: Path | None = None
 
 
 def new_run_dir(root: Path) -> Path:
@@ -805,7 +806,8 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                           narrative=narrative, thresholds=t, flags=flags, promises=promises, peers=peers,
                           peer_comparison=peer_comparison, evidence=evidence, sector_ocf=_sector_ocf(profile),
                           prices=checked.prices, run_note=OFFLINE_NOTE if offline else None,
-                          input_files=input_files, web_sources=web_sources,
+                          input_files=input_files, web_sources=numbered_sources(vetted) if vetted else web_sources,
+                          presentation_context=presentation_context,
                           entered_by_user=[r["label"] for r in (intake or {}).get("rows", [])
                                            if r.get("status") == "Entered by user"])
     # The Executive Report (2 pages) first: if it cannot fit without losing information it is not produced, and a
@@ -824,9 +826,19 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         pdf = build_report(inputs, run_dir)
     except ReportLayoutError as e:
         _stop(log, step, f"Run stopped: the report does not fit its pages ({e})")
+    research_pdf = None
+    try:
+        from fund_performance.research_brief import build_research_brief
+        research_pdf, research_pages = build_research_brief(inputs, run_dir)
+        if research_pages > 1:
+            flags.append(DataFlag(check='report_layout', level='info', message=(
+                f'Research Brief: {research_pages} pages (target 1) to keep the evidence readable.')))
+    except Exception:  # A failed Research Brief must not prevent the other downloads.
+        flags.append(DataFlag(check='report_layout', level='warning', message='Research Brief could not be generated.'))
     (run_dir / "facts.json").write_text(json.dumps(facts, indent=1, ensure_ascii=False), encoding="utf-8")
     text_log += [f"[{f.level}] {f.message}" for f in flags]
-    log.end(step, outputs={"pdf": str(pdf), "executive_pdf": str(executive_pdf) if executive_pdf else None})
+    log.end(step, outputs={"pdf": str(pdf), "executive_pdf": str(executive_pdf) if executive_pdf else None,
+                           "research_pdf": str(research_pdf) if research_pdf else None})
 
     # 10. Email (plain code, off by default; recipients from EMAIL_TO only)
     step = log.start("email", announce=False)
@@ -841,4 +853,4 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     log.end(step, "ok" if line.startswith("Email: sent") else "failed" if s.email.enabled else "skipped", notes=[line])
     return RunResult(pdf, run_dir, log, narrative, facts, {name: plain_reason(inputs, name) for name in card.pillars},
                      list({(f.level, f.message): f for f in flags}.values()), executive_pdf, assessment,
-                     presentation_context)
+                     presentation_context, research_pdf)
