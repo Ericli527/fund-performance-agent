@@ -52,6 +52,12 @@ def content_from(inp, out_dir: Path) -> ExecutiveContent:
     if comparison_problems(inp.flags):
         return ExecutiveContent(data, None, CHART_LEFT_OUT, True)
     chart, caption = _chart(inp, out_dir)
+    status = (inp.presentation_context or {}).get("performance_chart")
+    if status is not None:
+        primary = out_dir / "dashboard_growth.png"
+        if status.get("available") and primary.is_file():
+            return ExecutiveContent(data, primary, status.get("caption") or "")
+        return ExecutiveContent(data, None, "Comparison unavailable: " + str(status.get("reason") or "insufficient evidence"))
     return ExecutiveContent(data, chart, caption)
 
 

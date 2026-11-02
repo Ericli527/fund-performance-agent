@@ -13,57 +13,106 @@ plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 8, "axes.titlesi
 
 def dashboard_five_year_chart(prices: pd.DataFrame, as_of, fund_currency: str, fund_pricing: str | None,
                               evidence: dict | None, path: Path) -> dict:
-    """Plot only confirmed, aligned total-return observations; never fill missing prices."""
-    unavailable = lambda why: {'available': False, 'reason': why}
+    """Classify and plot observed common dates, without interpolating or assuming missing metadata.
+
+    Endpoints within 35 days of the five-year window accommodate monthly and holiday calendars.
+    Shorter series must span at least a year and are labelled with their actual dates.
+    """
+    def unavailable(why):
+        return {'available': False, 'state': 'unavailable', 'reason': why}
+
     e = evidence or {}
-    if (e.get('confirmed') is not True or e.get('benchmark_identity_confirmed') is not True
-            or e.get('fund_total_return') is not True or e.get('benchmark_total_return') is not True):
-        return unavailable('The benchmark identity, shared currency and total-return basis have not been confirmed.')
     currency = str(e.get('currency') or '').strip().upper()
-    if not currency or currency != str(fund_currency or '').upper():
-        return unavailable('The confirmed series currency does not match the fund currency.')
-    fund_time, index_time = e.get('fund_pricing'), e.get('benchmark_pricing')
-    if fund_time not in ('midday', 'market_close') or index_time not in ('midday', 'market_close'):
-        return unavailable('The pricing times for both series have not been confirmed.')
-    if fund_pricing and fund_pricing != fund_time:
-        return unavailable('The confirmed fund pricing time conflicts with the fund profile.')
-    if not {'date', 'nav', 'index_level'} <= set(prices.columns):
-        return unavailable('The price history does not contain an aligned benchmark series.')
-    end = pd.Timestamp(as_of)
-    start = end - pd.DateOffset(years=5)
-    p = prices.loc[(prices['date'] >= start) & (prices['date'] <= end), ['date', 'nav', 'index_level']].copy()
-    if p.empty or p['date'].duplicated().any() or not p['date'].is_monotonic_increasing:
-        return unavailable('The five-year observations are missing, duplicated or not ordered.')
-    if p['date'].iloc[0] != start or p['date'].iloc[-1] != end or len(p) < 3:
-        return unavailable('Aligned observations are not available at both exact five-year endpoints.')
+    if currency and currency != str(fund_currency or '').upper():
+        return unavailable('The benchmark series currency differs from the fund currency.')
+    if e.get('benchmark_identity_confirmed') is False:
+        return unavailable('The benchmark identity conflicts with the fund benchmark.')
+    ft, bt = e.get('fund_total_return'), e.get('benchmark_total_return')
+    if ft is not None and bt is not None and ft != bt:
+        return unavailable('The fund and benchmark have incompatible price and total-return treatments.')
+    fund_time, index_time = fund_pricing or e.get('fund_pricing'), e.get('benchmark_pricing')
+    if fund_pricing and e.get('fund_pricing') and fund_pricing != e['fund_pricing']:
+        return unavailable('The fund pricing time conflicts with the fund profile.')
+    if not isinstance(prices, pd.DataFrame) or not {'date', 'nav', 'index_level'} <= set(prices.columns):
+        return unavailable('The price history does not contain a benchmark series.')
+    p = prices[['date', 'nav', 'index_level']].copy()
+    p['date'] = pd.to_datetime(p['date'], errors='coerce')
+    p['nav'] = pd.to_numeric(p['nav'], errors='coerce')
+    p['index_level'] = pd.to_numeric(p['index_level'], errors='coerce')
+    end = pd.Timestamp(as_of).normalize()
+    p = p.loc[p['date'].notna() & (p['date'] <= end)].sort_values('date')
+    if p.empty or p['date'].duplicated().any():
+        return unavailable('Historical dates are missing or duplicated.')
+    # A missing observation is not invented; alignment uses only dates with both actual values.
+    if ((p[['nav', 'index_level']] <= 0).any().any()
+            or np.isinf(p[['nav', 'index_level']].to_numpy()).any()):
+        return unavailable('The historical series contains invalid prices.')
+    p = p.dropna(subset=['nav', 'index_level'])
+    if len(p) < 3:
+        return unavailable('There are too few common fund and benchmark observations.')
+    if end - p['date'].iloc[-1] > pd.Timedelta(days=35):
+        return unavailable('The latest common observation is too far from the review date.')
+    target = end - pd.DateOffset(years=5)
+    candidates = p.loc[(p['date'] >= target - pd.Timedelta(days=35)) &
+                       (p['date'] <= target + pd.Timedelta(days=35))]
+    if not candidates.empty:
+        first = (candidates['date'] - target).abs().idxmin()
+        p = p.loc[p['date'] >= p.loc[first, 'date']]
+        full_period = True
+    else:
+        p = p.loc[p['date'] > target]
+        full_period = False
+    if len(p) < 3 or p['date'].iloc[-1] - p['date'].iloc[0] < pd.Timedelta(days=365):
+        return unavailable('There is insufficient common fund and benchmark history.')
     if p['date'].diff().dropna().max() > pd.Timedelta(days=45):
-        return unavailable('The five-year series has a gap too large for a continuous comparison.')
-    if p[['nav', 'index_level']].isna().any().any() or not np.isfinite(p[['nav', 'index_level']].to_numpy()).all() or (p[['nav', 'index_level']] <= 0).any().any():
-        return unavailable('The five-year series contains missing or invalid observations.')
-    labels = [f'{d:%b %Y}' for d in p['date']]
-    fund = (p['nav'] / p['nav'].iloc[0] * 100).tolist()
-    benchmark = (p['index_level'] / p['index_level'].iloc[0] * 100).tolist()
+        return unavailable('The common series contains a gap too large for a continuous comparison.')
+    notes = []
+    if not e.get('benchmark_identity_confirmed'):
+        notes.append('Benchmark identity requires verification')
+    if not currency:
+        notes.append('Benchmark currency is not independently confirmed')
+    if ft is None or bt is None:
+        notes.append('Return treatment requires verification')
+    elif ft is False and bt is False:
+        notes.append('Both series are price-only and exclude distributions')
+    if not fund_time or not index_time:
+        words = {'midday': 'noon', 'market_close': 'market close'}
+        if fund_time:
+            notes.append(f"Fund NAV at {words.get(fund_time, fund_time)}; benchmark pricing time is not established")
+        elif index_time:
+            notes.append(f"Benchmark at {words.get(index_time, index_time)}; fund pricing time is not established")
+        else:
+            notes.append('Fund and benchmark pricing times are not established')
+    elif fund_time != index_time:
+        words = {'midday': 'noon', 'market_close': 'market close'}
+        notes.append(f"Fund NAV at {words.get(fund_time, fund_time)} and benchmark at "
+                     f"{words.get(index_time, index_time)} differ; timing can affect tracking")
+    if not full_period:
+        notes.append('Less than five years of common history is available')
+    verified = not notes and ft is True and bt is True
+    state = 'verified' if verified else 'indicative'
+    period = 'Five-Year Cumulative Performance' if full_period else 'Cumulative Performance (Shorter Period)'
+    title = f"{period} — {'Fund vs Benchmark' if verified else 'Indicative Comparison'}"
     fig, ax = plt.subplots(figsize=(7.2, 3.4), dpi=150)
-    x = np.arange(len(labels))
-    ax.plot(x, fund, color=NAVY, linewidth=2, label='Fund NAV-based total return')
-    ax.plot(x, benchmark, color='#447c9d', linewidth=1.8, linestyle='--', label='Benchmark total return')
-    step = max(1, -(-len(labels) // 6))
-    ax.set_xticks(x[::step], [labels[i] for i in range(0, len(labels), step)])
+    x = np.arange(len(p))
+    ax.plot(x, p['nav'] / p['nav'].iloc[0] * 100, color=NAVY, linewidth=2, label='Fund NAV')
+    ax.plot(x, p['index_level'] / p['index_level'].iloc[0] * 100, color='#447c9d',
+            linewidth=1.8, linestyle='--', label='Benchmark')
+    step = max(1, -(-len(p) // 6))
+    ax.set_xticks(x[::step], [f'{d:%b %Y}' for d in p['date'].iloc[::step]])
     ax.set_ylabel('Growth of 100')
-    ax.set_title('Five-year cumulative performance', loc='left', fontweight='bold', color=NAVY)
-    ax.grid(axis='y', alpha=0.25)
+    ax.set_title(title, loc='left', fontweight='bold', color=NAVY)
+    ax.grid(axis='y', alpha=.25)
     ax.legend(frameon=False)
     fig.tight_layout()
     fig.savefig(path)
     plt.close(fig)
-    words = {'midday': 'noon', 'market_close': 'market close'}
-    timing = f"Fund NAV-based series: {words[fund_time]}; benchmark: {words[index_time]}."
-    if fund_time != index_time:
-        timing += ' Pricing times differ, which can affect the comparison.'
-    return {'available': True, 'file': path.name,
-            'caption': f"Growth of 100 from {start:%d %b %Y} to {end:%d %b %Y}, {currency}. "
-                       f"User-confirmed total-return basis; observed prices, no interpolation. {timing}"}
-
+    caption = (f"{'Verified' if verified else 'Indicative'} historical comparison, growth of 100 from "
+               f"{p['date'].iloc[0]:%d %b %Y} to {p['date'].iloc[-1]:%d %b %Y}; "
+               'observed common dates, no interpolation.')
+    if notes:
+        caption += ' ' + '; '.join(notes) + '. Verify before sign-off.'
+    return {'available': True, 'state': state, 'file': path.name, 'title': title, 'caption': caption}
 
 def growth_chart(labels: list[str], fund: list[float], index: list[float], path: Path,
                  fund_label: str, index_label: str, title: str) -> Path:

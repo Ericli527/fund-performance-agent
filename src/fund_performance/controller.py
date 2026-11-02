@@ -27,6 +27,7 @@ import re
 from pathlib import Path
 import time
 import traceback
+import pandas as pd
 from contextlib import nullcontext
 from contextvars import ContextVar
 import uuid
@@ -713,16 +714,18 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                             "investment_assessment": assessment, "research": vetted}
     from fund_performance.presentation import comparison_invalid, historical_price_warning
     if comparison_invalid(facts):
-        chart_status = {'available': False, 'reason': 'A benchmark or currency data check makes the comparison unreliable.'}
-    elif (chart_evidence and benchmark_inputs.get('series') and
-          (chart_evidence.get('benchmark_pricing') != benchmark_inputs.get('pricing_point') or
-           str(chart_evidence.get('currency') or '').strip().upper() != str(benchmark_inputs.get('currency') or '').strip().upper())):
-        chart_status = {'available': False, 'reason': 'Chart confirmations conflict with the separate benchmark inputs.'}
+        chart_status = {'available': False, 'state': 'unavailable', 'reason': 'A benchmark or currency data check makes the comparison unreliable.'}
     else:
         try:
             from fund_performance.charts import dashboard_five_year_chart
-            chart_status = dashboard_five_year_chart(checked.prices, profile.as_of_date, profile.currency,
-                                                      profile.pricing_point, chart_evidence,
+            metadata = dict(chart_evidence or {})
+            if benchmark_inputs.get('series'):
+                metadata.update(benchmark_identity_confirmed=True, currency=benchmark_inputs.get('currency'),
+                                benchmark_pricing=benchmark_inputs.get('pricing_point'))
+            # Pre-launch prices can be simulated; chart only the share class's observed lifetime.
+            chart_prices = data.prices.loc[data.prices['date'] >= pd.Timestamp(profile.launch_date)]
+            chart_status = dashboard_five_year_chart(chart_prices, profile.as_of_date, profile.currency,
+                                                      profile.pricing_point, metadata,
                                                       run_dir / 'dashboard_growth.png')
             if chart_status['available']:
                 chart_status['caption'] += f" Source: {data.source_file}"
@@ -733,7 +736,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                        and not historical_price_warning(f) for f in facts.get('data_flags', [])):
                     chart_status['caption'] += ' Price-data warnings may affect this period; see Evidence & Actions.'
         except Exception:  # Presentation failure must not block the financial review.
-            chart_status = {'available': False, 'reason': 'The performance chart could not be prepared.'}
+            chart_status = {'available': False, 'state': 'unavailable', 'reason': 'The performance chart could not be prepared.'}
     presentation_context['performance_chart'] = chart_status
     log.step('data_checks').outputs['dashboard_chart'] = chart_status
 
@@ -805,7 +808,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
                           narrative=narrative, thresholds=t, flags=flags, promises=promises, peers=peers,
                           peer_comparison=peer_comparison, evidence=evidence, sector_ocf=_sector_ocf(profile),
                           prices=checked.prices, run_note=OFFLINE_NOTE if offline else None,
-                          input_files=input_files, web_sources=web_sources,
+                          input_files=input_files, web_sources=web_sources, presentation_context=presentation_context,
                           entered_by_user=[r["label"] for r in (intake or {}).get("rows", [])
                                            if r.get("status") == "Entered by user"])
     # The Executive Report (2 pages) first: if it cannot fit without losing information it is not produced, and a

@@ -523,7 +523,8 @@ def dashboard_sections(data: dict) -> dict[str, str]:
                if data.get('primary_chart') else
                f"<p class='fp-muted'>Five-year line chart unavailable: {escape(status.get('reason') or 'Comparable total-return series have not been confirmed.')}</p>")
     financial_detail = _returns_table(facts) + _risk_rows(facts) + _statistics(facts)
-    performance = ("<div class='fp-card'><h3>Five-year cumulative performance — fund vs benchmark</h3>" + primary
+    chart_title = status.get("title") or "Five-year cumulative performance — fund vs benchmark"
+    performance = (f"<div class='fp-card'><h3>{escape(chart_title)}</h3>" + primary
                    + "</div><div class='fp-card'><h3>Period returns &amp; risk</h3>" + (financial_detail or
                    "<p class='fp-muted'>Performance and risk figures are unavailable for this review.</p>")
                    + "</div>" + _details('Tracking analysis', chart) + _peers(facts))
