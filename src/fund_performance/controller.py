@@ -722,8 +722,6 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
             if benchmark_inputs.get('series'):
                 metadata.update(benchmark_identity_confirmed=True, currency=benchmark_inputs.get('currency'),
                                 benchmark_pricing=benchmark_inputs.get('pricing_point'))
-            elif factsheet and factsheet.series.get('index'):
-                metadata.setdefault('benchmark_pricing', factsheet.series['index'].pricing)
             # Pre-launch prices can be simulated; chart only the share class's observed lifetime.
             chart_prices = data.prices.loc[data.prices['date'] >= pd.Timestamp(profile.launch_date)]
             chart_status = dashboard_five_year_chart(chart_prices, profile.as_of_date, profile.currency,

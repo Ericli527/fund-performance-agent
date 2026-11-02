@@ -76,7 +76,13 @@ def dashboard_five_year_chart(prices: pd.DataFrame, as_of, fund_currency: str, f
     elif ft is False and bt is False:
         notes.append('Both series are price-only and exclude distributions')
     if not fund_time or not index_time:
-        notes.append('Fund or benchmark pricing time is not established')
+        words = {'midday': 'noon', 'market_close': 'market close'}
+        if fund_time:
+            notes.append(f"Fund NAV at {words.get(fund_time, fund_time)}; benchmark pricing time is not established")
+        elif index_time:
+            notes.append(f"Benchmark at {words.get(index_time, index_time)}; fund pricing time is not established")
+        else:
+            notes.append('Fund and benchmark pricing times are not established')
     elif fund_time != index_time:
         words = {'midday': 'noon', 'market_close': 'market close'}
         notes.append(f"Fund NAV at {words.get(fund_time, fund_time)} and benchmark at "
