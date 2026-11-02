@@ -174,6 +174,9 @@ not the verdict code. Retain corresponds to a satisfied independent recommendati
 is a separate action, and 'Retain, subject to verification before sign-off' is coherent. Distinguish required
 actions from optional ones. Where a peer is institutional or has a stated minimum investment, explain the potential
 eligibility and comparability limits; do not assume the fund's investors can access that share class.
+Do not compare peer returns expressed in a different currency with the fund's returns; a trading-listing currency
+does not change the share-class or return currency. Distinguish a peer's TER from the fund's OCF and note ETF
+dealing-cost differences when the evidence establishes them.
 The research availability summary distinguishes retrieved, excluded and vetted evidence. Never claim research was
 not retrieved or unavailable when vetted sources are supplied. A source can be available but insufficient for a
 particular claim or period. A publication after the review date may describe past events or later developments, but

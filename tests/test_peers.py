@@ -238,3 +238,86 @@ def test_an_uploaded_peer_factsheet_carries_its_date_into_the_peer():
     record = peer_record({"name": "P", "ocf_pct": 0.1, "currency": "GBP", "share_class": "C",
                           "as_of_date": "2026-05-31", "1y": 1.0}, "uploaded")
     assert str(Peer.model_validate(record).as_of_date) == "2026-05-31"
+
+
+def test_global_etf_usd_returns_are_excluded_but_ter_can_be_compared():
+    peer = Peer.model_validate({'name': 'State Street SPDR MSCI All Country World UCITS ETF (Acc)',
+        'isin': 'IE00B44Z5B48', 'share_class': 'Acc', 'currency': 'USD', 'distribution': 'accumulation',
+        'ocf_pct': 0.12, 'fee_type': 'ter', 'product_type': 'etf', 'benchmark_name': 'MSCI ACWI',
+        'as_of_date': '2026-09-30', 'returns': {'1y': 16.85, '3y': 21.84, '5y': 11.63, 'basis': 'annualised'}})
+    fund = profile(currency='GBP', benchmark_name='FTSE Global All Cap Index', ocf_pct=0.10,
+                   objective_type='index_tracker', performance_fee=False)
+    data = figures(fund_nav__ann__5y=9.0)
+    comparison = compare_peers([peer], fund, data)
+    row = comparison.rows[0]
+    assert not row.used_for_returns and row.gap is None and row.excluded == 'returns in USD, not GBP'
+    assert all(flag.level == 'info' and flag.check == 'peers' for flag in comparison.flags)
+    assert any('large- and mid-cap' in note and 'small caps' in note for note in row.notes)
+    assert any('TER rather than OCF' in note for note in row.notes)
+    assert any('ETF' in note and 'brokerage' in note for note in row.notes)
+    value = sc.value_rating(data, fund, T, [peer], comparison)
+    fees = sc.fees_rating(fund, T, [peer], sc.GREEN)
+    assert value.rating == sc.MANUAL_CHECK and 'returns in USD, not GBP' in value.reason
+    assert 'gap_pp' not in value.values and fees.values['peer_ocf'] == 0.12
+    assert '0.12% TER' in fees.reason and any('TER' in n and 'OCF' in n for n in fees.notes)
+    pillars = {'Mandate': sc.Pillar('Mandate', sc.GREEN, ''), 'Performance': sc.Pillar('Performance', sc.GREEN, ''),
+               'Value for investors': value, 'Fees': fees}
+    assert sc.verdict(pillars)[0] == 'Retain' and 'reviewer check' in sc.verdict(pillars)[1]
+
+
+def test_peer_factsheet_extraction_preserves_benchmark_currency_and_fee_label(tmp_path):
+    from conftest import FakeRun
+    from fund_performance.intake import read_peer, peer_record, _peer_fee_type
+    from test_agent_extractor import output
+    doc = tmp_path / 'peer.txt'
+    doc.write_text('State Street SPDR MSCI All Country World UCITS ETF (Acc)\n'
+                   'Factsheet 30 September 2026\nISIN IE00B44Z5B48\nShare Class Currency USD\n'
+                   'London Stock Exchange ACWI GBP\nIndex Name MSCI ACWI\nTER 0.12%\n')
+    response = output(as_of_date='2026-09-30', currency='USD', series=[], calendar_years=[], risk=[])
+    response['profile'] |= {'fund_name': 'State Street SPDR MSCI All Country World UCITS ETF (Acc)',
+        'isin': 'IE00B44Z5B48', 'share_class': 'Acc', 'currency': 'USD', 'benchmark_name': 'MSCI ACWI',
+        'ocf_pct': 0.12, 'distribution': 'accumulation', 'minimum_investment': None}
+    values, _, pages = asyncio.run(read_peer(doc, FakeRun(response)))
+    peer = Peer.model_validate(peer_record(values, 'uploaded'))
+    assert (peer.isin, peer.currency, peer.benchmark_name) == ('IE00B44Z5B48', 'USD', 'MSCI ACWI')
+    assert peer.fee_type == 'ter' and peer.product_type == 'etf' and peer.investor_type is None
+    assert peer.as_of_date.isoformat() == '2026-09-30'
+    assert _peer_fee_type(pages, 0.13) == 'unknown'
+    assert _peer_fee_type(['TER 0.12% OCF 0.12%'], 0.12) == 'unknown'
+
+
+def test_usd_etf_peer_is_fee_only_across_review_and_reports(tmp_path):
+    from pathlib import Path
+    from fund_performance.controller import run_review
+    from fund_performance.dashboard import dashboard_data, dashboard_sections
+    from fund_performance.report import page_texts
+    from fund_performance.agents.reporting_tools import peer_comparison
+    sample = Path(__file__).parents[1] / 'demo' / 'sample_index_fund'
+    folder = tmp_path / 'sample'
+    shutil.copytree(sample, folder)
+    profile_path = folder / 'fund_profile.json'
+    fund = json.loads(profile_path.read_text())
+    profile_path.write_text(json.dumps(fund | {'benchmark_name': 'FTSE Global All Cap Index'}))
+    peer = {'name': 'State Street SPDR MSCI All Country World UCITS ETF (Acc)', 'isin': 'IE00B44Z5B48',
+            'share_class': 'Acc', 'currency': 'USD', 'distribution': 'accumulation', 'ocf_pct': 0.12,
+            'fee_type': 'ter', 'product_type': 'etf', 'benchmark_name': 'MSCI ACWI',
+            'as_of_date': '2026-09-30', 'returns': {'1y': 16.85, '3y': 21.84, '5y': 11.63, 'basis': 'annualised'}}
+    (folder / 'peer.json').write_text(json.dumps(peer))
+    result = asyncio.run(run_review(folder, out_root=tmp_path / 'runs', offline=True))
+    facts = result.facts
+    [record] = facts['peers']
+    assert facts['fund']['benchmark_name'] == 'FTSE Global All Cap Index'
+    assert record['currency'] == 'USD' and record['fee_type'] == 'ter' and not record['used_for_returns']
+    assert record['excluded'] == 'returns in USD, not GBP'
+    tool_peer = peer_comparison(facts)['peers'][0]
+    assert tool_peer['returns_pct_a_year'] is None and tool_peer['fee_type'] == 'ter'
+    assert not any(f['check'] == 'currency_match' for f in facts['data_flags'])
+    pillars = {p['name']: p for p in facts['scorecard']['pillars']}
+    assert pillars['Value for investors']['rating'] == 'MANUAL CHECK'
+    assert pillars['Fees']['values']['peer_ocf'] == 0.12 and 'TER' in pillars['Fees']['reason']
+    display = dashboard_sections(dashboard_data(result))['performance']
+    assert '0.12% TER' in display and 'returns in USD, not GBP' in display
+    assert 'small caps' in display and 'brokerage' in display and '11.63%' not in display
+    detail = ' '.join(' '.join(page_texts(result.pdf)).split())
+    assert '0.12% TER' in detail and 'returns in USD, not GBP' in detail and 'small caps' in detail
+    assert '11.63%' not in detail

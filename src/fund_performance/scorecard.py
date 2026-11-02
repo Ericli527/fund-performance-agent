@@ -234,6 +234,10 @@ def value_rating(reported: ReportedFigures, profile: FundProfile, t: Thresholds,
     used = comparison.used
     if not used:
         why = "; ".join(f"{r.peer.name}: {r.excluded}" for r in comparison.rows)
+        if comparison.rows and all(r.excluded and r.excluded.startswith('returns in ') for r in comparison.rows):
+            return Pillar("Value for investors", MANUAL_CHECK,
+                          f"Peer returns are not comparable ({why}); obtain a same-currency comparison or assess value manually",
+                          summary=ADD_PEER, notes=comparison.notes)
         return Pillar("Value for investors", AMBER, f"{NO_PEER_RETURNS} ({why})", summary=ADD_PEER,
                       notes=comparison.notes)
     gap = comparison.average_gap
@@ -262,6 +266,9 @@ def fees_rating(profile: FundProfile, t: Thresholds, peers, performance: str) ->
     peer_ocf = two_dp(sum(p.ocf_pct for p in peers) / len(peers))
     gap = two_dp(profile.ocf_pct - peer_ocf)
     notes = [f"{p.name}: {INSTITUTIONAL_NOTE}" for p in peers if p.investor_type == "institutional"]
+    notes += [f"{p.name}: TER is compared with the fund's OCF; check cost coverage and methodology." for p in peers if p.fee_type == 'ter']
+    notes += [f"{p.name}: ETF trading spreads and brokerage costs can differ from those of an open-ended fund." for p in peers if p.product_type == 'etf']
+    notes += [f"{p.name}: verify the peer's fee measure before relying on this comparison." for p in peers if p.fee_type == 'unknown']
     if profile.objective_type == "index_tracker":
         f = t.fees_index
         rating = _band(gap, f.green_max_ocf_over_peer_pp, f.amber_max_ocf_over_peer_pp)
@@ -283,7 +290,8 @@ def fees_rating(profile: FundProfile, t: Thresholds, peers, performance: str) ->
                 rating = AMBER
     who = peers[0].name if len(peers) == 1 else f"the average of {len(peers)} peers"
     each = "" if len(peers) == 1 else " (" + ", ".join(f"{p.name} {p.ocf_pct:.2f}%" for p in peers) + ")"
-    reason = f"OCF {profile.ocf_pct:.2f}% vs {who} {peer_ocf:.2f}%{each} (gap {_fmt(gap, ' pp')})"
+    fee_label = ' TER' if len(peers) == 1 and peers[0].fee_type == 'ter' else ''
+    reason = f"OCF {profile.ocf_pct:.2f}% vs {who} {peer_ocf:.2f}%{fee_label}{each} (gap {_fmt(gap, ' pp')})"
     if profile.performance_fee is None:
         # Not established: an unrecorded performance fee would cap Fees at Amber, so Green cannot be supported;
         # Amber and Red stand (an unknown fee cannot improve them) with the missing evidence noted
@@ -295,7 +303,8 @@ def fees_rating(profile: FundProfile, t: Thresholds, peers, performance: str) ->
                   notes=notes,
                   values={"peer": who, "peers": [p.name for p in peers], "count": len(peers),
                           "peer_fees": [p.ocf_pct for p in peers], "fund_ocf": profile.ocf_pct, "peer_ocf": peer_ocf,
-                          "gap_pp": gap} | ({"limits": [_limit("Fee gap", gap, t.fees_index.green_max_ocf_over_peer_pp,
+                          "gap_pp": gap} | ({"peer_fee_type": 'ter'} if len(peers) == 1 and peers[0].fee_type == 'ter' else {})
+                                            | ({"limits": [_limit("Fee gap", gap, t.fees_index.green_max_ocf_over_peer_pp,
                                                                t.fees_index.amber_max_ocf_over_peer_pp, "max", "pp")]}
                                             if profile.objective_type == "index_tracker" else {}))
 

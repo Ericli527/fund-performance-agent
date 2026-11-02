@@ -55,6 +55,11 @@ distribution, minimum investment, pricing time, ongoing charge, benchmark, as-of
 1, 3 and 5 year periods and their basis, and 3-year fund volatility when stated. Leave other profile values null.
 Return empty calendar_years, discrete_12m, exposures and return_evidence lists and an empty document_summary.
 Do not generate a fund context brief. Keep the same exact-copy and no-guessing rules above.
+Use the share-class currency for profile.currency, never the currency of an exchange listing. If the document
+states a TER rather than an OCF, put the stated TER in profile.ocf_pct for the existing fee comparison; do not
+infer a fee. Code will retain the disclosed fee label separately. Use the factsheet's performance date for
+as_of_date, not a separate rating's date. If the ETF only states an accumulating share class, use that as its
+share_class rather than inventing a separate class name.
 """
 
 

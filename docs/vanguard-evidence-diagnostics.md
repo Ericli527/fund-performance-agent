@@ -1,6 +1,6 @@
 # Vanguard live-review evidence diagnostics
 
-The Vanguard preset resolves its private files under `FUND_DEMO_DATA/vanguard_global` (or `data/demos/vanguard_global` when that variable is unset). Its Live AI inputs are the NAV workbook in `quick/`, the fund factsheet and KIID in `documents/`, and the HSBC peer factsheet. The preset does not separately provide a benchmark price file; whether the workbook itself contains an index series must be checked from the actual file.
+The Vanguard preset resolves its private files under `FUND_DEMO_DATA/vanguard_global` (or `data/demos/vanguard_global` when that variable is unset). Its Live AI inputs are the NAV workbook in `quick/`, the fund factsheet and KIID in `documents/`, and the State Street SPDR peer factsheet. The preset does not separately provide a benchmark price file; whether the workbook itself contains an index series must be checked from the actual file.
 
 The private source pack and the reported live-run logs were unavailable in this development workspace. Consequently the document contents, extracted values, selected runtime inputs and reason for the Vanguard risk gaps could not be independently verified. The preset manifest describes the intended inputs and prior assumptions; it is not evidence that those files were read in a particular run.
 

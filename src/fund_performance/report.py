@@ -590,8 +590,9 @@ def _peers_table(inp: ReportInputs) -> str:
                 "approved peer for this benchmark, so value for investors and the fee cannot be judged. Add comparable "
                 "funds' factsheets (or their name, ongoing charge and 1, 3 and 5-year returns).</td></tr></table>")
     fund = [_f(inp, "fund_nav.cum.1y"), _f(inp, "fund_nav.ann.3y"), _f(inp, "fund_nav.ann.5y")]
+    fee_header = 'Annual fee' if any(peer.fee_type != 'ocf' for peer in inp.peers) else 'Fee (OCF)'
     head = ("<tr><th class='l' width='25%'>Fund</th><th class='l'>Share class</th><th class='l'>Currency, pricing"
-            "</th><th>Fee (OCF)</th><th>1 year</th><th>3 years, a year</th><th>5 years, a year</th>"
+            f"</th><th>{fee_header}</th><th>1 year</th><th>3 years, a year</th><th>5 years, a year</th>"
             "<th class='l'>Used for</th></tr>")
     rows = (f"<tr class='total'><td class='l'>{escape(p.fund_name)}</td><td class='l'>{escape(p.share_class)}, "
             f"{p.distribution}</td><td class='l'>{p.currency}, {PRICING_TIME.get(p.pricing_point, 'pricing time not stated')}</td><td>{_pct(p.ocf_pct, 2)}</td>"
@@ -603,10 +604,12 @@ def _peers_table(inp: ReportInputs) -> str:
         kind = ", ".join(x for x in (peer.investor_type, peer.distribution) if x)
         minimum = f"; min {peer.minimum_investment}" if peer.minimum_investment else ""
         used = f"Fees and returns ({r.basis})" if r.used_for_returns else f"Fees only: {r.excluded}"
+        currency_excluded = not r.used_for_returns and (r.excluded or '').startswith('returns in ')
+        peer_fee_label = ' TER' if peer.fee_type == 'ter' else ''
         rows += (f"<tr><td class='l'>{escape(peer.name)}</td><td class='l'>{escape(peer.share_class)}"
                  f"{', ' + kind if kind else ''}{escape(minimum)}</td><td class='l'>{peer.currency}"
-                 f"{', ' + PRICING_TIME[peer.pricing_point] if peer.pricing_point else ''}</td><td>{peer.ocf_pct:.2f}%</td>"
-                 + "".join(f"<td>{_pct(r.returns[k], 2)}</td>" for k in (1, 3, 5)) + f"<td class='l'>{escape(used)}</td></tr>")
+                 f"{', ' + PRICING_TIME[peer.pricing_point] if peer.pricing_point else ''}</td><td>{peer.ocf_pct:.2f}%{peer_fee_label}</td>"
+                 + "".join(f"<td>{_pct(None if currency_excluded else r.returns[k], 2)}</td>" for k in (1, 3, 5)) + f"<td class='l'>{escape(used)}</td></tr>")
         notes += [f"{peer.name}: {x}." for x in r.notes]
     value, fees = inp.card.pillars["Value for investors"].values, inp.card.pillars["Fees"].values
     if len(inp.peers) > 1:

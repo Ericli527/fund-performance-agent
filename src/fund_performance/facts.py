@@ -110,6 +110,8 @@ def peer_rows(comparison) -> list[dict]:
              "used_for_returns": r.used_for_returns, "excluded": r.excluded or "", "notes": r.notes,
              "returns_pct_a_year": {f"{n}y": None if v is None else round(v, 2) for n, v in r.returns.items()}}
             | ({"benchmark_name": r.peer.benchmark_name} if r.peer.benchmark_name else {})
+            | ({"fee_type": r.peer.fee_type} if r.peer.fee_type != 'ocf' else {})
+            | ({"product_type": r.peer.product_type} if r.peer.product_type else {})
             for r in comparison.rows]
 
 

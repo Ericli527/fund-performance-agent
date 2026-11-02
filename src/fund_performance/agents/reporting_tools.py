@@ -126,9 +126,15 @@ def peer_comparison(facts: dict) -> dict:
     peers = [{"name": p.get("name"), "isin": p.get("isin"), "share_class": p.get("share_class"),
               "currency": p.get("currency"), "ongoing_charge_pct": p.get("ocf_pct"),
               "investor_type": p.get("investor_type"), "minimum_investment": p.get("minimum_investment"),
-              "returns_pct_a_year": p.get("returns_pct_a_year"), "used_for_returns": p.get("used_for_returns"),
+              "returns_pct_a_year": (None if not p.get('used_for_returns') and
+                                     str(p.get('excluded') or '').startswith('returns in ')
+                                     else p.get("returns_pct_a_year")), "used_for_returns": p.get("used_for_returns"),
               "returns_left_out_because": p.get("excluded") or None, "basis": p.get("basis"),
-              "comparability_notes": list(p.get("notes") or [])} for p in facts.get("peers", [])]
+              "comparability_notes": list(p.get("notes") or [])}
+             | ({"fee_type": p["fee_type"]} if p.get("fee_type") else {})
+             | ({"product_type": p["product_type"]} if p.get("product_type") else {})
+             | ({"benchmark_name": p["benchmark_name"]} if p.get("benchmark_name") else {})
+             for p in facts.get("peers", [])]
     out = {"peers": peers,
            "value_for_investors": {k: pillars.get("Value for investors", {}).get(k) for k in ("rating", "reason")},
            "fees": {k: pillars.get("Fees", {}).get(k) for k in ("rating", "reason")},
