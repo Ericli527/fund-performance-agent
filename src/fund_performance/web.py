@@ -906,16 +906,6 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             benchmark_confirmed = gr.Checkbox(label="I confirm the benchmark series name, currency and pricing time")
         case_info = gr.Markdown()
         attachment_status = gr.Markdown()
-        with gr.Accordion("Optional: confirm data for the five-year chart", open=False):
-            gr.Markdown("For a fund-versus-benchmark chart, the uploaded prices must contain both series. Confirm that "
-                        "the benchmark matches this fund and that both series are total return, including reinvested "
-                        "distributions, in the same currency. Unconfirmed data uses the return table instead.")
-            chart_confirmed = gr.Checkbox(label="I confirm both series match the fund and benchmark, use the same currency and include reinvested distributions; the fund series uses dealing NAV, not hypothetical PNAV")
-            chart_currency = gr.Textbox(label="Currency of both series (three-letter code)")
-            chart_fund_pricing = gr.Dropdown([('Noon', 'midday'), ('Market close', 'market_close')],
-                                             label="Fund NAV-based series pricing time")
-            chart_index_pricing = gr.Dropdown([('Noon', 'midday'), ('Market close', 'market_close')],
-                                              label="Benchmark pricing time")
         run = gr.Button("Run Fund Review", variant="primary", interactive=False, elem_classes="fp-run")
         with gr.Accordion("Help & methodology", open=False):
             gr.Markdown("Upload the fund price history and factsheet. A KID and peer factsheets are optional. "
@@ -1035,7 +1025,7 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             return state, rows(state), demo_id, mode, f"{demo.title} loaded."
 
         async def on_run(q, state, table, demo_id, mode, name='', currency='', confirmed=False, pricing=None,
-                         chart_ok=False, chart_ccy='', chart_fund_time=None, chart_index_time=None):
+                         ):
             selected, error = apply_roles(state or [], table)
             demo = find_demo(demo_id) if demo_id else None
             synthetic = bool(demo and demo.fallback)
@@ -1060,10 +1050,6 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                     kwargs['benchmark_inputs'] = benchmark
                 if supporting:
                     kwargs['supporting_documents'] = supporting
-                if chart_ok:
-                    kwargs['chart_evidence'] = {'confirmed': True, 'currency': chart_ccy,
-                        'benchmark_identity_confirmed': True, 'fund_total_return': True, 'benchmark_total_return': True,
-                        'fund_pricing': chart_fund_time, 'benchmark_pricing': chart_index_time}
                 return start_review(q, price, factsheet, kid, peer, jsons, offline, limits, say, **kwargs)
             async for kind, item in with_progress(work):
                 if kind == "progress":
@@ -1147,16 +1133,13 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                 fn.api_visibility = "private"
 
         attachments.change(show_benchmark, [entries, attachments], benchmark_fields, **private)
-        # A confirmation applies only to the current uploaded series, not later attachment edits.
-        attachments.change(lambda: False, outputs=chart_confirmed, **private)
         for control in (question, attachments, demo_state, benchmark_name, benchmark_currency,
                         benchmark_confirmed, benchmark_pricing):
             control.change(update_status, [question, entries, attachments, demo_state, benchmark_name,
                                            benchmark_currency, benchmark_confirmed, benchmark_pricing, upload_busy],
                            [attachment_status, run], trigger_mode="always_last", **private)
         run.click(on_run, [question, entries, attachments, demo_state, mode_state, benchmark_name,
-                           benchmark_currency, benchmark_confirmed, benchmark_pricing, chart_confirmed,
-                           chart_currency, chart_fund_pricing, chart_index_pricing],
+                           benchmark_currency, benchmark_confirmed, benchmark_pricing],
                   [progress, message, results, overview, performance, portfolio, evidence,
                    executive_pdf, pdf, technical, log, plain], **private)
     return ui

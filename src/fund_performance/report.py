@@ -81,6 +81,7 @@ class ReportInputs:
     evidence: Evidence | None = None
     sector_ocf: dict | None = None          # config/peers.yaml sector_average_ocf: value_pct, source, date
     prices: pd.DataFrame | None = None
+    presentation_context: dict = field(default_factory=dict)
     run_note: str | None = None             # e.g. "Offline run: AI steps skipped"
     prepared: date = field(default_factory=date.today)
 
@@ -530,6 +531,11 @@ def _page2(inp: ReportInputs, out_dir: Path) -> str:
     notes = "".join(f"<li>{mark}{escape(plain_note(n))}<br/><span class='small'>{escape(note_source_line(n))}</span></li>"
                     for n in inp.facts.get("data_notes", []))
     growth, yearly, caption = _chart_images(inp, out_dir)
+    status = (inp.presentation_context or {}).get("performance_chart")
+    if status is not None:
+        candidate = out_dir / "dashboard_growth.png"
+        growth = candidate if status.get("available") and candidate.is_file() else None
+        caption = status.get("caption") if growth else "Comparison unavailable: " + str(status.get("reason") or "insufficient evidence")
     return f"""
 <h1>Appendix B: Mandate and performance</h1>
 {_not_reliable(inp)}

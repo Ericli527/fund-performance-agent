@@ -140,45 +140,52 @@ def test_strategy_and_research_use_progressive_disclosure_and_safe_links():
     assert 'published after review date' in page and 'Full research summaries' in page
 
 
-def test_five_year_chart_uses_only_confirmed_compatible_observations(tmp_path):
+def test_chart_evidence_states_and_observed_date_alignment(tmp_path):
     import pandas as pd
     from fund_performance.charts import dashboard_five_year_chart
     dates = pd.date_range('2021-09-30', '2026-09-30', freq='ME')
     prices = pd.DataFrame({'date': dates, 'nav': range(100, 100 + len(dates)),
                            'index_level': range(200, 200 + len(dates))})
-    evidence = {'confirmed': True, 'benchmark_identity_confirmed': True, 'fund_total_return': True,
-                'benchmark_total_return': True, 'currency': 'GBP', 'fund_pricing': 'midday',
-                'benchmark_pricing': 'market_close'}
+    evidence = {'benchmark_identity_confirmed': True, 'fund_total_return': True,
+                'benchmark_total_return': True, 'currency': 'GBP', 'benchmark_pricing': 'midday'}
+    def chart(frame=prices, ev=evidence, date='2026-09-30'):
+        return dashboard_five_year_chart(frame, date, 'GBP', 'midday', ev, tmp_path / 'chart.png')
     before = prices.copy(deep=True)
-    chart = dashboard_five_year_chart(prices, '2026-09-30', 'GBP', 'midday', evidence, tmp_path / 'chart.png')
-    assert chart['available'] and (tmp_path / 'chart.png').is_file()
-    assert 'Pricing times differ' in chart['caption'] and 'no interpolation' in chart['caption']
+    verified = chart()
+    assert verified['state'] == 'verified' and 'Verified historical' in verified['caption']
+    indicative = chart(ev={})
+    assert indicative['state'] == 'indicative' and 'Return treatment requires verification' in indicative['caption']
+    timed = chart(ev=evidence | {'benchmark_pricing': 'market_close'})
+    assert timed['state'] == 'indicative' and 'Fund NAV at noon' in timed['caption']
+    assert not chart(ev=evidence | {'currency': 'USD'})['available']
+    assert not chart(ev=evidence | {'benchmark_total_return': False})['available']
+    assert not chart(frame=prices.drop(columns='index_level'))['available']
+    assert not chart(frame=pd.concat([prices, prices.iloc[[0]]]))['available']
+    invalid = prices.copy()
+    invalid.loc[2, 'nav'] = 0
+    assert not chart(frame=invalid)['available']
+    assert not chart(frame=prices.drop(index=[2, 3]))['available']
+    holiday = chart(date='2026-10-03')
+    assert holiday['available'] and '30 Sep 2026' in holiday['caption']
+    shorter = chart(frame=prices.iloc[12:])
+    assert shorter['state'] == 'indicative' and 'Shorter Period' in shorter['title']
     pd.testing.assert_frame_equal(prices, before)
-    assert not dashboard_five_year_chart(prices, '2026-09-30', 'USD', 'midday', evidence, tmp_path / 'x.png')['available']
-    assert not dashboard_five_year_chart(prices, '2026-09-30', 'GBP', 'market_close', evidence, tmp_path / 'x.png')['available']
-    assert not dashboard_five_year_chart(prices, '2026-09-30', 'GBP', 'midday', evidence | {'benchmark_total_return': False}, tmp_path / 'x.png')['available']
-    assert not dashboard_five_year_chart(prices, '2026-09-30', 'GBP', 'midday', None, tmp_path / 'x.png')['available']
-    assert not dashboard_five_year_chart(prices.drop(columns='index_level'), '2026-09-30', 'GBP', 'midday', evidence, tmp_path / 'x.png')['available']
-    missing = prices.copy()
-    missing.loc[2, 'index_level'] = None
-    assert not dashboard_five_year_chart(missing, '2026-09-30', 'GBP', 'midday', evidence, tmp_path / 'x.png')['available']
-    assert not dashboard_five_year_chart(prices.iloc[1:], '2026-09-30', 'GBP', 'midday', evidence, tmp_path / 'x.png')['available']
-    assert not dashboard_five_year_chart(prices.drop(index=[2, 3]), '2026-09-30', 'GBP', 'midday', evidence, tmp_path / 'x.png')['available']
 
 
-def test_review_surfaces_confirmed_five_year_chart_and_keeps_gap_chart(tmp_path):
+def test_review_surfaces_automatic_chart_and_qualifies_reports(tmp_path):
     from fund_performance.controller import run_review
     from fund_performance.dashboard import dashboard_data, dashboard_sections
+    from fund_performance.report import page_texts
     sample = Path(__file__).parents[1] / 'demo' / 'sample_index_fund'
-    evidence = {'confirmed': True, 'benchmark_identity_confirmed': True, 'fund_total_return': True,
-                'benchmark_total_return': True, 'currency': 'GBP', 'fund_pricing': 'market_close',
-                'benchmark_pricing': 'market_close'}
-    result = asyncio.run(run_review(sample, out_root=tmp_path, offline=True, chart_evidence=evidence))
+    result = asyncio.run(run_review(sample, out_root=tmp_path, offline=True))
     displayed = dashboard_data(result)
     html = dashboard_sections(displayed)['performance']
-    assert displayed['primary_chart_status']['available'] and displayed['primary_chart']
-    assert 'Five-year cumulative performance' in html and 'Growth of 100' in html
+    assert displayed['primary_chart_status']['state'] == 'indicative' and displayed['primary_chart']
+    assert 'Indicative Comparison' in html and 'Return treatment requires verification' in html
     assert 'Tracking analysis' in html and result.pdf.is_file() and result.executive_pdf.is_file()
+    for report in (result.pdf, result.executive_pdf):
+        text = ' '.join(' '.join(page_texts(report)).split())
+        assert 'Indicative historical comparison' in text and 'Return treatment requires verification' in text
 
 
 def test_a_suggested_satisfied_with_open_data_issues_is_never_shown_as_final():
