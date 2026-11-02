@@ -84,6 +84,21 @@ def test_four_sections_show_question_separate_assessments_and_partial_evidence()
     assert 'No vetted research' in views['portfolio'] and 'Returns to' in views['performance']
 
 
+def test_ai_assessment_status_and_unavailable_reason_are_clear_and_escaped():
+    from fund_performance.dashboard import dashboard_sections
+    d = data()
+    assessment = {'recommendation': 'satisfied', 'investment_thesis': 'The fund tracks its index.'}
+    for status, label in [('approved', 'Approved'), ('qualified', 'Qualified')]:
+        d['presentation_context'] = {'investment_assessment': {'status': 'available', 'review_status': status,
+                                                                'assessment': assessment}}
+        overview = text(dashboard_sections(d)['overview'])
+        assert f'AI assessment status: {label}' in overview and 'Satisfied' in overview and 'Retain' in overview
+    d['presentation_context'] = {'investment_assessment': {'status': 'unavailable',
+        'reason': 'Check the evidence <script>unsafe</script>.'}}
+    raw = dashboard_sections(d)['overview']
+    assert 'AI assessment status: Unavailable' in raw and 'Check the evidence' in raw and '<script>' not in raw
+
+
 def test_sourced_allocation_bars_and_qualitative_fallback():
     from fund_performance.dashboard import dashboard_sections
     d = data()

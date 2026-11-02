@@ -52,9 +52,14 @@ def test_provisional_context_and_cited_research_figures_are_available():
     item = BASE | {'investment_thesis': 'The provisional 3-year return was 17.3%; the index change was 2.7%.',
                    'uncertainties': ['The source is limited.'],
                    'evidence_references': ['fund_context', 'research:1']}
-    result = asyncio.run(assess(FACTS, PROFILE, [source], 'Review', FakeRun(item), FakeRun(PASS),
+    reviewer = FakeRun(PASS)
+    result = asyncio.run(assess(FACTS, PROFILE, [source], 'Review', FakeRun(item), reviewer,
                                 fund_context=context))
-    assert result['status'] == 'available' and result['evidence']['fund_context'] == context
+    assert result['status'] == 'available' and result['review_status'] == 'qualified'
+    assert result['evidence']['fund_context'] == context
+    review_evidence = json.loads(reviewer.prompts[0])
+    assert review_evidence['fund_context'] == review_evidence['cited_evidence']['fund_context'] == context
+    assert review_evidence['sources'] == [source] and review_evidence['cited_evidence']['research:1'] == source
     no_source = context | {'sources': []}
     assert any('numerical' in x for x in problems(InvestmentAssessment.model_validate(item), FACTS, [source],
                                                     fund_context=no_source))
@@ -212,6 +217,50 @@ def test_absolute_research_absence_is_not_excused_by_a_later_coverage_caveat():
     from fund_performance.agents.investment_analyst import missing_research_claim
     assert missing_research_claim('Research evidence could not be retrieved, and period coverage is limited.')
     assert not missing_research_claim('No research was available before the review date.')
+
+
+def test_positive_research_availability_is_not_misclassified_as_absent():
+    from fund_performance.agents.investment_analyst import missing_research_claim
+    assert not missing_research_claim('Research was available, but its historical coverage was limited.')
+    assert not missing_research_claim('Research is available for the review.')
+    assert not missing_research_claim('No research was available for a particular claim.')
+    assert missing_research_claim('Research was not available.')
+    assert missing_research_claim('Research was unavailable.')
+    source = {'date': '2026-09-01', 'summary': 'Market context.', 'limitations': 'Partial coverage.'}
+    assessment = BASE | {'uncertainties': ['Research was available, but coverage was limited.']}
+    result = asyncio.run(assess(FACTS, PROFILE, [source], 'Review', FakeRun(assessment), FakeRun(PASS)))
+    assert result['status'] == 'available' and result['review_status'] == 'qualified'
+    assert result['assessment']['recommendation'] == 'satisfied'
+
+
+def test_supported_assessment_is_approved_and_reviewer_sees_cited_evidence():
+    source = {'date': '2026-09-01', 'summary': 'Market context.'}
+    assessment = BASE | {'uncertainties': [], 'evidence_references': ['scorecard', 'performance:5y', 'research:1']}
+    reviewer = FakeRun(PASS)
+    result = asyncio.run(assess(FACTS, PROFILE, [source], 'What matters?', FakeRun(assessment), reviewer))
+    prompt = json.loads(reviewer.prompts[0])
+    assert result['status'] == 'available' and result['review_status'] == 'approved'
+    assert prompt['question'] == 'What matters?'
+    assert 'performance:5y' in prompt['cited_evidence'] and prompt['cited_evidence']['research:1'] == source
+    assert 'facts' in prompt and 'fund_context' in prompt and prompt['previous_review'] is None
+
+
+def test_second_reviewer_sees_revision_context_and_diagnostics_are_actionable():
+    correction = {'material_issue': True, 'security_issue': False,
+                  'feedback': 'Qualify the institutional peer eligibility.'}
+    reviewer = FakeRun(correction, PASS)
+    revised = BASE | {'uncertainties': ['The institutional peer may not be accessible.']}
+    result = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(BASE, revised), reviewer))
+    second = json.loads(reviewer.prompts[1])
+    assert result['status'] == 'available' and result['review_status'] == 'qualified'
+    assert second['previous_review']['feedback'] == correction['feedback']
+    assert second['assessment']['uncertainties'] == revised['uncertainties']
+
+    invalid = BASE | {'investment_thesis': 'The fund returned 999.9%.'}
+    analyst = FakeRun(invalid, invalid)
+    rejected = asyncio.run(assess(FACTS, PROFILE, [], 'Review', analyst, FakeRun(PASS)))
+    assert rejected['status'] == 'unavailable' and 'numerical claim' in rejected['reason']
+    assert '999.9%' in analyst.prompts[1] and '999.9%' not in json.dumps(rejected)
 
 
 def test_controller_persists_redacted_diagnostics_for_both_attempts(tmp_path):
