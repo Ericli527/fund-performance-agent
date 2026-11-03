@@ -75,6 +75,40 @@ def test_made_up_reports_layout(tmp_path):
     assert pages == sorted(pages)                                       # each appendix, in order, from a new page
 
 
+
+def test_proposed_ai_ratings_have_clear_comparison_and_governance_without_approval(tmp_path):
+    inp = made_up_inputs()
+    ratings = []
+    for index, pillar in enumerate(inp.facts['scorecard']['pillars']):
+        python_rating = pillar['rating']
+        ai_rating = 'AMBER' if index == 0 else python_rating.replace(' ', '_')
+        ratings.append({
+            'dimension': pillar['name'],
+            'quantitative_scorecard_rating': python_rating,
+            'proposed_rating': ai_rating,
+            'agreement': False if index == 0 else ai_rating == python_rating.replace(' ', '_'),
+            'rationale': 'The evidence supports continued oversight and monitoring.',
+            'supporting_evidence': ['scorecard', 'performance:5y'],
+            'limitations': ['The review needs verified pricing evidence.'],
+            'further_review_required': index == 0
+        })
+    inp.presentation_context = {'investment_assessment': {'status': 'available',
+                                'assessment': {'investment_ratings': ratings}}}
+    executive_pages = page_texts(build_executive(inp, tmp_path / 'exec'))
+    executive_text = ' '.join(' '.join(executive_pages).split())
+    assert 'AI investment rating proposals' in executive_text
+    assert 'AI:' in executive_text and 'Python:' in executive_text
+    assert 'human sign-off required' in executive_text
+    assert 'APPROVED WITH DISTINCTION' not in executive_text
+
+    detail_pages = page_texts(build_report(inp, tmp_path / 'detail'))
+    detail_text = ' '.join(' '.join(detail_pages).split())
+    assert 'Independent AI investment rating proposals' in detail_text
+    assert 'Governance insight' in detail_text and 'Review difference' in detail_text
+    assert 'The evidence supports continued oversight and monitoring.' in detail_text
+    assert 'The review needs verified pricing evidence.' in detail_text
+    assert 'not committee approval' in detail_text
+
 def test_many_flags_keep_two_executive_pages_and_every_flag_in_the_detailed_report(tmp_path):
     flags = [DataFlag(check="x", level="info", message=f"Note number {i} about the data, kept for the record.")
              for i in range(160)]
