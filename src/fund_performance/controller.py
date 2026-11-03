@@ -288,6 +288,7 @@ async def run_review(folder: Path, question: str = DEFAULT_QUESTION, out_root: P
     """ One review. `intake` is the documents route (intake.read_documents + code's self-check of the values):
     the Extractor and Mandate agents have already run, so they are not run again. `on_step` gets a short message
     as each step starts, for the page's progress line """
+    started = time.monotonic()
     t = thresholds or load_thresholds()
     s = settings or load_settings()
     r = runners or Runners()
@@ -327,6 +328,8 @@ async def run_review(folder: Path, question: str = DEFAULT_QUESTION, out_root: P
         for task in log.background:              # a run that stopped early does not leave research running
             task.cancel()
         log.run["ai_calls"] = {"total": len(calls), "by_agent": _count(calls), "calls": calls}
+        from fund_performance.performance_metrics import configured_prices, summary
+        log.run['performance'] = summary(calls, time.monotonic() - started + (intake or {}).get('intake_seconds', 0), configured_prices())
         AI_CALLS.reset(token)
         (run_dir / "log.json").write_text(json.dumps(log.to_json(), indent=1, ensure_ascii=False), encoding="utf-8")
         if text_log:

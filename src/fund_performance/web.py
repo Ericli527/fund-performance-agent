@@ -30,6 +30,7 @@ from pathlib import Path
 import re
 import shutil
 import tempfile
+import time
 import traceback
 import uuid
 from typing import Awaitable, Callable
@@ -525,6 +526,7 @@ async def start_review(question: str, price, factsheet, kid, peer_factsheets, js
             if on_step:
                 on_step(progress_line(*DOCUMENTS_STAGE))
             calls: list[dict] = []
+            intake_started = time.monotonic()
             token = AI_CALLS.set(calls)             # the reading agents' calls count towards this review
             try:
                 kwargs = {"supporting_documents": [Path(p) for p in supporting]} if supporting else {}
@@ -557,6 +559,7 @@ async def start_review(question: str, price, factsheet, kid, peer_factsheets, js
             prepare_inputs([price], folder)
             return await _run_controller(folder, question, False, on_step, out_root, runner,
                                          intake=intake | {"rows": built.rows,
+                                                          "intake_seconds": time.monotonic() - intake_started,
                                                           "benchmark_inputs": benchmark_inputs or {},
                                                           "flags": intake.get("flags", []) + built.flags},
                                          chart_evidence=chart_evidence)
