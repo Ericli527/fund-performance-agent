@@ -171,6 +171,19 @@ def _metrics(facts: dict) -> str:
     return f"<div class='fp-metrics'>{cards}</div>"
 
 
+def _material_limits(items: list[str]) -> list[str]:
+    def priority(item):
+        text = item.casefold()
+        if any(word in text for word in ('institutional', 'eligibility', 'minimum investment')):
+            return 0
+        if any(word in text for word in ('currency', 'comparab', 'benchmark', 'pricing')):
+            return 1
+        if any(word in text for word in ('provisional', 'verif', 'ai-extracted')):
+            return 2
+        return 3
+    return sorted(_unique_items(items), key=priority)[:3]
+
+
 def _ratings(data: dict, analyst: bool, explanatory: bool = False) -> str:
     rows = ""
     for p in data["facts"].get("scorecard", {}).get("pillars", []):
@@ -183,7 +196,7 @@ def _ratings(data: dict, analyst: bool, explanatory: bool = False) -> str:
             content = (f"<p><b>{escape(explanation['conclusion'])}</b></p>"
                        f"<p><b>Why this rating?</b> {escape(explanation['why'])}</p>"
                        + ("<p><b>Supporting evidence</b></p>" + _list(explanation['evidence']) if explanation['evidence'] else "")
-                       + ("<p><b>Limitations</b></p>" + _list(explanation['limitations']) if explanation['limitations'] else "")
+                       + ("<p><b>Limitations</b></p>" + _list(_material_limits(explanation['limitations'])) + _details('All rating qualifications', _list(explanation['limitations'])) if explanation['limitations'] else "")
                        + _details("Rating methodology", methodology))
             rows += (f"<div class='fp-rating'><div class='fp-rating-name'><b>{escape(p['name'])}</b></div>"
                      f"{_chip(p['rating'])}<div class='fp-rating-why'>{content}</div></div>")
@@ -352,7 +365,9 @@ def technical_html(data: dict) -> str:
     """ The plan, the drafts with the Judge's checklist, and info flags: for the Technical details section """
     facts = data["facts"]
     plan = facts.get("plan") or {}
-    body = ""
+    assessment = (data.get('presentation_context') or {}).get('investment_assessment') or {}
+    body = ("<h4>Investment assessment diagnostics</h4><pre style='white-space:pre-wrap;overflow-wrap:anywhere'>"
+            + escape(json.dumps(assessment, ensure_ascii=False, indent=2, default=str)) + '</pre>') if assessment else ''
     if plan:
         body += (f"<p><b>Plan</b> ({escape('Task Planner Agent' if plan.get('source') == 'planner' else str(plan.get('source')))}): "
                  f"{escape(REPORT_TYPE_WORDS.get(plan.get('report_type'), str(plan.get('report_type'))))}; focus "
@@ -554,7 +569,7 @@ def _analyst_card(assessment: dict) -> str:
                     disagreements.append(dimension)
                 rationale = escape(str(rating.get('rationale') or 'No rationale supplied.'))
                 evidence = escape(', '.join(str(ref) for ref in rating.get('supporting_evidence') or []))
-                notes = _list(rating.get('limitations') or [], 'fp-sub')
+                notes = _list(_material_limits(rating.get('limitations') or []), 'fp-sub')
                 if rating.get('further_review_required'):
                     notes += '<p class="fp-muted">Further investigation is required.</p>'
                 rows.append(
@@ -587,12 +602,22 @@ def _analyst_card(assessment: dict) -> str:
         if assessment.get('status') == 'partial' and assessment.get('reason'):
             details += f"<p class='fp-muted'>{escape(str(assessment['reason']))}</p>"
     # Only fields already made available by the review pipeline are rendered, including partial redactions.
-    full = {key: assessment[key] for key in ('assessment', 'evidence', 'limitations', 'reviewer_observations',
-                                               'diagnostics') if key in assessment}
-    if full:
-        payload = escape(json.dumps(full, ensure_ascii=False, indent=2, default=str))
-        details += _details('Detailed AI Analysis',
-                            "<pre style='white-space:pre-wrap;overflow-wrap:anywhere'>" + payload + '</pre>')
+    ai = assessment.get('assessment') or {}
+    readable = '<p>' + escape(ai.get('investment_thesis') or '') + '</p>'
+    for title, key in [('Supporting evidence', 'supporting_evidence'), ('Strengths', 'strengths'),
+                       ('Material risks', 'material_risks'), ('Uncertainties', 'uncertainties'),
+                       ('Oversight actions', 'recommended_actions'), ('Questions for the fund manager', 'manager_questions')]:
+        if ai.get(key):
+            readable += '<h4>' + title + '</h4>' + _list(ai[key])
+    for rating in ai.get('investment_ratings') or []:
+        readable += '<h4>' + escape(rating['dimension']) + '</h4><p>' + escape(rating['rationale']) + '</p>'
+        readable += _list(rating.get('limitations') or [])
+    for reference, evidence in (assessment.get('evidence') or {}).items():
+        readable += '<p><b>' + escape(reference) + '</b></p>'
+        if isinstance(evidence, dict) and evidence.get('summary'):
+            readable += '<p>' + escape(str(evidence['summary'])) + '</p>'
+    if readable:
+        details += _details('Detailed AI Analysis', readable)
     return "<div class='fp-card'><h3>AI Investment Analyst</h3>" + details + '</div>'
 
 def dashboard_sections(data: dict) -> dict[str, str]:

@@ -40,6 +40,14 @@ def rating_explanation(facts: dict, pillar: dict) -> dict:
         names = (('relative.r2.', 'risk.pnav.r2.', 'risk.nav.r2.'),
                  ('relative.beta.', 'risk.pnav.beta.', 'risk.nav.beta.'), ('comparison.td.5y',))
     elif name == 'Performance':
+        from fund_performance.agents.reporting_tools import fund_performance
+        performance = fund_performance(facts, '5y')
+        for key, label in [('fund_return_a_year', 'Five-year fund annualised return'),
+                           ('benchmark_return_a_year', 'Five-year benchmark annualised return')]:
+            figure = performance.get(key)
+            if figure and figure.get('display'):
+                basis = str(performance.get('fund_benchmark_basis') or 'basis unavailable').replace('_', ' ')
+                evidence.append(f"{label}: {figure['display']}; {basis}, to {performance.get('as_of_date') or 'date unavailable'}. Historical, not a forecast.")
         why = ('The scorecard assesses the benchmark-relative return gap and tracking variability against its limits; '
                'together they help assess whether tracking outcomes suit the index mandate.' if objective == 'index_tracker'
                else 'The scorecard considers performance against the fund’s documented objective and available '
@@ -89,6 +97,16 @@ def rating_explanation(facts: dict, pillar: dict) -> dict:
                            if note.get('kind') in ('pricing', 'timing') and note.get('note'))
     if not evidence:
         limitations.append('The supporting figures are unavailable in the current review; consult the methodology and data checks.')
+    fund = facts.get('fund') or {}
+    if name == 'Mandate' and fund.get('benchmark_name') and objective == 'index_tracker':
+        why = (f"The fund aims to track {fund['benchmark_name']} through an index-tracking strategy. "
+               'Assess return differences and portfolio policy alongside co-movement and market sensitivity; '
+               'R² and beta alone do not establish mandate delivery.')
+    if rating == 'GREEN':
+        conclusion = {'Mandate': 'The quantitative evidence supports a preliminary positive mandate assessment.',
+                      'Performance': 'The benchmark-relative evidence supports the performance assessment.',
+                      'Value for investors': 'The selected peer comparison supports investor value, subject to comparability.',
+                      'Fees': 'The selected charge comparison supports the fee assessment.'}.get(name, conclusion)
     return {'conclusion': conclusion, 'why': why, 'evidence': evidence[:3],
             'limitations': list(dict.fromkeys(limitations)), 'methodology': pillar.get('reason') or ''}
 
