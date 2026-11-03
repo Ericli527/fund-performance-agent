@@ -835,9 +835,36 @@ CSS = f"""
 .fp-dashboard table, .fp-dashboard th, .fp-dashboard td {{ border-left: none !important; border-right: none !important;
   border-bottom: none !important; }}
 .fp-dashboard table {{ border-top: none !important; }}
+
+/* Stage 7: compact rating comparison and independent assurance inspection */
+.fp-ai-rating-table th, .fp-ai-rating-table td {{ text-align: left !important; vertical-align: top; }}
+.fp-ai-rating-table td:first-child {{ width: 38%; }}
+.fp-ai-rating-table p {{ margin: 3px 0; }}
+.fp-governance-note {{ margin: 12px 0; border-left: 4px solid {BLUE}; background: #eef3fa;
+  padding: 10px 12px; border-radius: 5px; font-size: 14px; }}
+.fp-assurance {{ font-size: 14px; color: #1d2733; line-height: 1.5; }}
+.fp-assurance h3 {{ color: {NAVY_TEXT}; font-size: 18px; margin: 12px 0; }}
+.fp-assurance h4 {{ color: {NAVY_TEXT}; font-size: 15px; margin: 18px 0 7px; }}
+.fp-assurance p {{ margin: 5px 0; }}
+.fp-assurance-overview {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }}
+.fp-assurance-overview > div {{ border: 1px solid {BORDER}; border-radius: 10px; background: #fff;
+  padding: 12px 14px; }}
+.fp-assurance-overview strong {{ font-size: 19px; color: {NAVY_TEXT}; }}
+.fp-assurance-label {{ color: {MUTED}; font-weight: 600; font-size: 12px; text-transform: uppercase; }}
+.fp-assurance-muted {{ color: {MUTED}; font-size: 12.5px; }}
+.fp-assurance-signoff {{ background: #eef3fa; border-left: 4px solid {BLUE}; padding: 10px 12px; }}
+.fp-assurance-scroll {{ overflow-x: auto; }}
+.fp-assurance-table {{ border-collapse: collapse; width: 100%; min-width: 580px; font-size: 13px; }}
+.fp-assurance-table th {{ background: #eef3fa; color: {NAVY_TEXT}; text-align: left; font-weight: 600; }}
+.fp-assurance-table th, .fp-assurance-table td {{ border-bottom: 1px solid #e6ebf0; padding: 9px 10px; vertical-align: top; }}
+.fp-assurance-table td:last-child {{ min-width: 230px; }}
+.fp-assurance-actions {{ padding-left: 22px; }}
+.fp-assurance-actions li {{ padding: 6px 0; }}
+
 .fp-tech, .fp-small {{ font-size: 13.5px; }}
 .fp-download button, button.fp-download {{ max-width: 320px; }}
 @media (max-width: 760px) {{
+  .fp-assurance-overview {{ grid-template-columns: 1fr; }}
   .fp-cards .wrap {{ grid-template-columns: 1fr; }}
   .fp-header h1 {{ font-size: 24px; }}
   .fp-status-row, .fp-metrics {{ grid-template-columns: 1fr; }}
