@@ -1,5 +1,10 @@
 # Fund Performance Agent — Coding Handover
 
+Hybrid investment decision work is stacked on PR #51. Python retains financial calculations and the quantitative
+scorecard; the existing Investment Analyst proposes evidence-referenced ratings, its Quality Reviewer checks them,
+and the optional Assurance Judge independently challenges both. Human sign-off remains required. A Research Brief
+is unavailable on the current main branch and is disclosed as unavailable.
+
 Read `AGENTS.md` for shared rules; `CLAUDE.md` is a short Claude-specific entrypoint. This file is a **working map**, not an instruction to rebuild past stages. Confirm the current branch, merged PRs and tests before making changes.
 
 ## Project Summary

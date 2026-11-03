@@ -224,6 +224,13 @@ def page1(inp, content: ExecutiveContent) -> str:
     else:
         narrative = (f"<table width='100%'><tr><td width='52%' valign='top'>{summary}{findings_html}</td>"
                      f"<td width='3%'></td><td valign='top' align='center'>{chart}</td></tr></table>")
+    assessment = (inp.presentation_context or {}).get('investment_assessment') or {}
+    proposed = (assessment.get('assessment') or {}).get('investment_ratings') if assessment.get('status') == 'available' else None
+    ai_summary = ("<h2>AI investment rating proposals</h2><p>" + ' · '.join(
+        f"{escape(str(r['dimension']))}: {escape(str(r['proposed_rating']))}"
+        + (" (differs from scorecard)" if not r['agreement'] else '') for r in proposed)
+        + ". Independent proposals; human sign-off required. See the Detailed Report for evidence and reasoning.</p>"
+        if proposed else '')
     return f"""
 {_banner(inp)}
 <h1>{PAGE1}</h1>
@@ -231,6 +238,7 @@ def page1(inp, content: ExecutiveContent) -> str:
 {_metrics(data['facts'])}
 {narrative}
 <h2>The four ratings</h2>{_scorecard(data)}
+{ai_summary}
 """
 
 
@@ -396,8 +404,9 @@ def page2(inp, content: ExecutiveContent) -> str:
 <tr><td>Reviewer name</td><td class="x-line" width="38%">&nbsp;</td><td width="10%" class="x-right">Date</td><td class="x-line">&nbsp;</td></tr>
 <tr><td>Signature</td><td class="x-line" colspan="3">&nbsp;</td></tr>
 </table>
-<p class="x-src x-after">Draft for oversight review from public data, prepared with AI assistance; every figure and rating comes
-from code. Not investment advice. Full tables, sources, data checks and audit evidence: the Detailed Report.</p>
+<p class="x-src x-after">Draft for oversight review from public data, prepared with AI assistance. Quantitative figures and
+scorecard ratings come from code; any AI rating proposals are separate and require human sign-off. Not investment advice.
+Full tables, sources, data checks and audit evidence: the Detailed Report.</p>
 """
 
 

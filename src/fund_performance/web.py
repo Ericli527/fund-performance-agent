@@ -933,7 +933,7 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
         run = gr.Button("Run Fund Review", variant="primary", interactive=False, elem_classes="fp-run")
         with gr.Accordion("Help & methodology", open=False):
             gr.Markdown("Upload the fund price history and factsheet. A KID and peer factsheets are optional. "
-                        "The synthetic case uses prevalidated inputs. All four ratings are always calculated.")
+                        "The synthetic case uses prevalidated inputs. All four quantitative scorecard ratings are always calculated.")
             gr.HTML(how_it_works_html())
         progress = gr.Markdown(elem_classes="fp-progress")
         message = gr.Markdown()

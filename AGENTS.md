@@ -9,7 +9,7 @@ Fund Performance Agent is a Python/Gradio application for investment oversight. 
 - Make routine analysis and reporting faster without replacing analyst judgement.
 
 ## Success Criteria
-- Figures, ratings and conclusions agree across saved facts, dashboard and PDFs.
+- Figures and quantitative scorecard ratings agree across saved facts, dashboard and PDFs; AI proposals are separately attributed and disagreements explained.
 - Every material claim has a traceable source or a clearly stated limitation.
 - Incompatible currencies, pricing bases, dates and peer classes are never silently compared.
 - Important checks pass; the app remains usable with missing optional evidence.
@@ -17,7 +17,7 @@ Fund Performance Agent is a Python/Gradio application for investment oversight. 
 
 ## Code Standards and Guidelines
 1. **Simpler is better.** Prefer small changes and reuse existing helpers; do not overengineer.
-2. **Code calculates; AI explains.** Python owns numbers, scorecard thresholds and ratings. AI may extract, research and draft text, not invent figures or override deterministic decisions.
+2. **Python calculates; AI proposes; humans decide.** Python owns quantitative calculations, numerical validation and deterministic scorecard outputs. LLMs may propose evidence-grounded investment ratings and conclusions. The independent Judge reviews the proposed decisions. Human analysts retain final approval.
 3. **Evidence before confidence.** Clearly distinguish verified, indicative, missing and incompatible evidence. Never fabricate history, sources, returns or approvals.
 4. **Be concise.** Write short, useful documentation and comments only where they help. Do not add decorative emojis to code or documentation.
 5. **Avoid needless defensive programming.** Validate at real input/trust boundaries; handle expected failures without blanket exception handling or repeated checks.

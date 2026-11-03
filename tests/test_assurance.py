@@ -20,7 +20,7 @@ def answer(facts=FACTS):
             'confidence': 'MEDIUM', 'decision_reason': 'The evidence needs further qualification.',
             'likelihood_explanation': 'An estimate is not justified with limited evidence.',
             'supporting_factors': ['The scorecard records its rationale.'], 'uncertainties': ['Evidence needs review.'],
-            'rating_reviews': [{'dimension': d, 'original_rating': ratings[d],
+            'rating_reviews': [{'dimension': d, 'original_rating': ratings[d], 'proposed_rating': None,
                                 'judgement': 'SUPPORTED_WITH_QUALIFICATIONS', 'reason': 'Review the evidence.',
                                 'evidence_references': ['scorecard'], 'recommended_action': 'Check sources.'}
                                for d in DIMENSIONS],
@@ -150,6 +150,24 @@ def test_report_missing_risks_can_be_flagged_without_changing_ratings():
     assert result['status'] == 'available'
     assert result['review']['material_findings'][0]['evidence_references'] == ['report:detailed']
     assert result['review']['rating_reviews'] == a['rating_reviews']
+
+
+def test_assurance_reviews_proposals_without_overwriting_disagreement():
+    data = evidence()
+    a = answer()
+    proposals = []
+    for i, rating in enumerate(a['rating_reviews']):
+        proposal = 'AMBER' if rating['original_rating'] != 'AMBER' else 'GREEN'
+        proposals.append({'dimension': rating['dimension'], 'proposed_rating': proposal,
+                          'rationale': 'Evidence supports a qualified disagreement.'})
+        rating['proposed_rating'] = proposal
+    data['investment_assessment'] = {'status': 'available', 'assessment': {'investment_ratings': proposals}}
+    before = copy.deepcopy(data)
+    result = asyncio.run(inspect(data, run=FakeRun(a)))
+    assert result['status'] == 'available' and data == before
+    assert result['review']['rating_reviews'][0]['proposed_rating'] == proposals[0]['proposed_rating']
+    a['rating_reviews'][0]['proposed_rating'] = None
+    assert asyncio.run(inspect(data, run=FakeRun(a)))['status'] == 'unavailable'
 
 
 def test_optional_ui_inspection_respects_switch_and_shared_limits(tmp_path, monkeypatch):

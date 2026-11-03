@@ -51,8 +51,9 @@ KNOWN_LIMITATIONS = [
 ]
 PUBLIC_DATA_NOTE = ("Public data only: this review uses published documents and public web sources. The AI service "
                     "used has data sharing on, so no confidential or client data is uploaded.")
-DISCLAIMER = ("Draft for oversight review, prepared with AI assistance. All figures and ratings come from code using "
-              "the sources listed; AI text is checked against them. Thresholds are illustrative. Not investment "
+DISCLAIMER = ("Draft for oversight review, prepared with AI assistance. Figures and quantitative scorecard ratings come "
+              "from code using the sources listed; AI investment rating proposals are separate and checked against evidence. "
+              "Thresholds are illustrative. Not investment "
               "advice. The verdict is final only when signed by the reviewer.")
 FONT = Path(matplotlib.get_data_path()) / "fonts" / "ttf"
 
@@ -829,6 +830,18 @@ def build_html(inp: ReportInputs, out_dir: Path) -> str:
               f'{inp.profile.as_of_date:%d %b %Y} · Public data only · Page <pdf:pagenumber> of <pdf:pagecount></div>')
     p1, p2 = executive_html(inp, out_dir)
     appendices = [_dashboard(inp, out_dir), _page2(inp, out_dir), _page3(inp)]
+    assessment = (inp.presentation_context or {}).get('investment_assessment') or {}
+    ratings = ((assessment.get('assessment') or {}).get('investment_ratings') or []
+               if assessment.get('status') == 'available' else [])
+    if ratings:
+        items = ''.join('<li><b>' + escape(str(r['dimension'])) + ': ' + escape(str(r['proposed_rating']))
+            + '</b> — quantitative scorecard: ' + escape(str(r['quantitative_scorecard_rating']))
+            + (' (agreement). ' if r['agreement'] else ' (disagreement). ') + escape(str(r['rationale']))
+            + ' Evidence: ' + escape(', '.join(r['supporting_evidence'])) + '. Limitations: '
+            + escape('; '.join(r['limitations']) or 'None stated') + '. Further review: '
+            + ('required' if r['further_review_required'] else 'not specifically requested') + '.</li>' for r in ratings)
+        appendices.append('<h1>Independent AI investment rating proposals</h1><p>These proposals are separate '
+                          'from the quantitative scorecard and require human sign-off.</p><ul>' + items + '</ul>')
     appendices.append(_appendix(inp, False, plain_text("".join([p1, p2] + appendices))))
     separator = '' if long_commentary(inp.facts) else '<div style="page-break-before: always"></div>'
     body = p1 + separator + p2 + '<div style="page-break-before: always"></div>' + \
