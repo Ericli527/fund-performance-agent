@@ -132,6 +132,7 @@ def _header(data: dict, quality: EvidenceQuality, institutional: bool = False) -
 def _summary(data: dict, quality: EvidenceQuality, title: str = "Summary", concise: bool = False) -> str:
     """ The analyst's answer: Answer, Supporting evidence and Recommended next step. The verdict and ratings are shown
     in their own sections; data-quality items are listed once, in a collapsible section """
+    from fund_performance.presentation import answer_paragraphs
     facts = data["facts"]
     concl = facts.get("suggested_conclusion") or {}
     who = conclusion_origin(concl)
@@ -139,7 +140,8 @@ def _summary(data: dict, quality: EvidenceQuality, title: str = "Summary", conci
     if parts:
         answer, evidence = parts
         shown = evidence[:3] if concise else evidence
-        body = (f"<p class='fp-concern-title'>Answer</p><p class='fp-conclusion'>{escape(answer)}</p>"
+        body = ("<p class='fp-concern-title'>Answer</p>" + ''.join(
+                    f"<p class='fp-conclusion'>{escape(p)}</p>" for p in answer_paragraphs(answer))
                 + (f"<p class='fp-concern-title'>{'Key findings' if concise else 'Supporting evidence'}</p>"
                    + _list(shown, "fp-evidence") if shown else ""))
         if concise and len(evidence) > 3:

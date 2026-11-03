@@ -365,7 +365,7 @@ def test_dashboard_points_must_not_repeat_each_other_or_the_answer():
             "Over 5 years the fund was 0.10% a year behind its index, mostly because of its 0.06% yearly fee."]
     assert any("evidence point 2 repeats an earlier point" in p for p in draft_problems("Yes.", facts(), evidence=same))
     assert not any("repeats" in p for p in draft_problems("Yes, it met its objective.", facts(), evidence=POINTS))
-    assert any("answer has 5 sentences" in p for p in draft_problems("A. B. C. D. E.", facts()))
+    assert any("answer has 13 sentences" in p for p in draft_problems(" ".join(["Sentence."] * 13), facts()))
 
 
 def test_the_executive_commentary_must_be_distinct_cited_and_end_with_the_verdict():

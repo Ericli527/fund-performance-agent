@@ -38,3 +38,39 @@ State supported findings before qualifications, distinguish provisional from ver
 missing-data caveats, and give one proportionate next step for an unresolved peer comparison. Independent proposals
 remain separate from Python's quantitative scorecard and always require human sign-off.
 '''
+
+
+def guidance_for(profile, fund_context=None) -> dict:
+    """Retrieve a rubric from documented strategy text; never assign an investment rating."""
+    import re
+    sections = dict(re.findall(r'^- ([^:]+): (.*?)(?=\n- |\nAssess each)', JUDGEMENT_GUIDANCE, re.M | re.S))
+    common = JUDGEMENT_GUIDANCE[JUDGEMENT_GUIDANCE.index('Assess each pillar'):]
+    objective = str(profile.objective_text or '').casefold()
+    interpretation = str((fund_context or {}).get('mandate_interpretation') or '').casefold()
+    text = objective + ' ' + interpretation
+    reference = str(profile.benchmark_name or '').casefold()
+    chosen = None
+    if re.search(r'money.market|cash.like|short.term liquidity', text):
+        chosen = 'Money market'
+    elif re.search(r'absolute.return|alternative|cash.*plus|market.neutral', text):
+        chosen = 'Absolute-return or alternatives'
+    elif re.search(r'multi.asset|balanced|equity and bond|equities and bonds|target.risk', text):
+        chosen = 'Multi-asset'
+    elif re.search(r'high.yield|active credit|emerging.market debt', text):
+        chosen = 'Active credit'
+    elif re.search(r'government bond|investment.grade|bond|fixed.income|gilts?', text):
+        chosen = 'Government or investment-grade bonds'
+    elif re.search(r'active.*equit|stock.select|outperform', text):
+        chosen = 'Active equity'
+    elif re.search(r'passive|track|replicat|index', text):
+        if re.search(r'global|world|all.cap|acwi', text + ' ' + reference):
+            chosen = 'Passive global equity'
+        elif re.search(r's&p.?500|us equity|us equities|us large|u\.s\.', text + ' ' + reference):
+            chosen = 'Passive US equity'
+    elif re.search(r'active.*equit|stock.select|outperform.*equit|equities.*outperform', text):
+        chosen = 'Active equity'
+    return {'strategy_framework': chosen or 'Uncertain: use the documented objective',
+            'guidance': ('Qualitative guidance; no automatic rating thresholds. Confirm the strategy against the '
+                         'source documents and correct this retrieval choice if contradicted. '
+                         + (sections[chosen] if chosen else 'Do not infer a fund category or benchmark from its name alone. ')
+                         + '\n' + common)}

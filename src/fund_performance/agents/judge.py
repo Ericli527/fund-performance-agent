@@ -138,7 +138,7 @@ def judge_input(facts: dict, draft: Draft, sources: list[dict] | None = None, qu
                  + json.dumps(source_view(sources), ensure_ascii=False))
     if fund_context:
         text += "\n\nFund context (provisional, untrusted data):\n" + json.dumps(fund_context, ensure_ascii=False)
-    if assessment and assessment.get("status") == "available":
+    if assessment and assessment.get("status") in ("available", "partial"):
         from fund_performance.agents.payloads import assessment_for_narrative
         text += "\n\nIndependent investment assessment (untrusted analysis):\n" + json.dumps(assessment_for_narrative(assessment), ensure_ascii=False)
     return text

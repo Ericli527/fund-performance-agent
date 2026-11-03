@@ -16,6 +16,12 @@ SOURCE_WORDS = {"factsheet": "Fund Factsheet", "calculated": "Calculated", "ai_e
 NOT_AVAILABLE = "Not available"
 
 
+def answer_paragraphs(text: str) -> list[str]:
+    """Retain deliberate paragraph boundaries while normalising wrapped lines within them."""
+    import re
+    return [' '.join(p.split()) for p in re.split(r'\n\s*\n', text.strip()) if p.strip()]
+
+
 # --- Evidence quality (separate from the investment assessment) ------------------------------------------------
 
 def rating_explanation(facts: dict, pillar: dict) -> dict:
