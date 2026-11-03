@@ -848,7 +848,7 @@ def build_html(inp: ReportInputs, out_dir: Path) -> str:
             comparisons.append(
                 f"<tr><td class='l'>{escape(dimension)}</td><td>{escape(code)}</td>"
                 f"<td>{escape(ai)}</td><td>{'Agrees' if agreement else 'Review difference'}</td></tr>")
-            sources = ', '.join(str(ref) for ref in rating.get('supporting_evidence') or [])
+            sources = ', '.join(str(ref) for ref in rating.get('evidence_references', rating.get('supporting_evidence')) or [])
             limits = rating.get('limitations') or []
             explanation = (f"<h3>{escape(dimension)} — AI proposal: {escape(ai)}</h3>"
                            f"<p>{escape(str(rating.get('rationale') or 'No rationale provided.'))}</p>"
@@ -856,6 +856,9 @@ def build_html(inp: ReportInputs, out_dir: Path) -> str:
             if limits:
                 explanation += "<p><b>Qualifications</b></p><ul class='tight'>" + ''.join(
                     f"<li>{escape(str(item))}</li>" for item in limits) + "</ul>"
+            if 'evidence_references' in rating:
+                explanation += '<ul>' + ''.join('<li>' + escape(str(claim)) + '</li>'
+                                                for claim in rating.get('supporting_evidence') or []) + '</ul>'
             if rating.get('further_review_required'):
                 explanation += '<p><b>Further investigation required before sign-off.</b></p>'
             explanations.append(explanation)

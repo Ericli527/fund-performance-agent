@@ -568,8 +568,10 @@ def _analyst_card(assessment: dict) -> str:
                 if not rating.get('agreement'):
                     disagreements.append(dimension)
                 rationale = escape(str(rating.get('rationale') or 'No rationale supplied.'))
-                evidence = escape(', '.join(str(ref) for ref in rating.get('supporting_evidence') or []))
+                evidence = escape(', '.join(str(ref) for ref in rating.get('evidence_references', rating.get('supporting_evidence')) or []))
                 notes = _list(_material_limits(rating.get('limitations') or []), 'fp-sub')
+                if 'evidence_references' in rating:
+                    notes = _list(rating.get('supporting_evidence') or []) + notes
                 if rating.get('further_review_required'):
                     notes += '<p class="fp-muted">Further investigation is required.</p>'
                 rows.append(
