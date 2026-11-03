@@ -696,10 +696,13 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     else:
         assessment_calls: list[str] = []
         assessment_diagnostics: dict = {}
+        assessment_audit: list[dict] = []
         assessment = await _timed(assess_investment(facts, profile, vetted, question, r.investment_analyst,
                                                    r.investment_reviewer, assessment_calls,
                                                    review_exposures, context_brief, research_state,
-                                                   assessment_diagnostics), s.timeouts_seconds.narrative)
+                                                   assessment_diagnostics, assessment_audit), s.timeouts_seconds.narrative)
+        (run_dir / "investment_assessment_audit.json").write_text(
+            json.dumps(assessment_audit, indent=1, ensure_ascii=False), encoding="utf-8")
         if assessment is None:
             assessment_diagnostics.update(status='unavailable', final_reason='assessment_timeout')
             assessment = {"status": "unavailable", "reason": _why(s.timeouts_seconds.narrative),

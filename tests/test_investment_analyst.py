@@ -15,7 +15,15 @@ BASE = {'recommendation': 'satisfied', 'investment_thesis': 'The fund tracks its
         'supporting_evidence': ['The performance rating is green.'], 'strengths': ['Tracking'],
         'material_risks': [], 'uncertainties': ['Market research is unavailable.'],
         'recommended_actions': ['Continue monitoring.'], 'manager_questions': ['How is tracking monitored?'],
-        'scorecard_agreement': True, 'scorecard_disagreement_reason': None, 'evidence_references': ['scorecard']}
+        'scorecard_agreement': True, 'scorecard_disagreement_reason': None, 'evidence_references': ['scorecard'],
+        'human_review_required': True,
+        'investment_ratings': [{'dimension': p['name'], 'proposed_rating': p['rating'] if p['rating'] in
+                                ('GREEN', 'AMBER', 'RED', 'MANUAL_CHECK') else 'MANUAL_CHECK',
+                                'quantitative_scorecard_rating': p['rating'],
+                                'agreement': p['rating'] in ('GREEN', 'AMBER', 'RED', 'MANUAL_CHECK'),
+                                'rationale': 'Consider the evidence and its limitations.',
+                                'supporting_evidence': ['scorecard'], 'limitations': [],
+                                'further_review_required': True} for p in FACTS['scorecard']['pillars']]}
 
 
 def test_agreement_and_supported_disagreement_are_distinct_from_scorecard():
@@ -27,6 +35,48 @@ def test_agreement_and_supported_disagreement_are_distinct_from_scorecard():
     output = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(disagreement), FakeRun(PASS)))
     assert output['status'] == 'available' and not output['assessment']['scorecard_agreement']
     assert FACTS == before
+
+
+def test_rating_disagreement_is_preserved_and_reviewed_against_evidence():
+    item = copy.deepcopy(BASE)
+    rating = item['investment_ratings'][0]
+    rating.update(proposed_rating='AMBER' if rating['quantitative_scorecard_rating'] != 'AMBER' else 'GREEN',
+                  agreement=False, rationale='The available evidence warrants a different investment judgement.',
+                  supporting_evidence=['mandate', 'risk_quality'], limitations=['Tracking error is unavailable.'])
+    reviewer, audit = FakeRun(PASS), []
+    output = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(item), reviewer, audit_outputs=audit))
+    assert output['status'] == 'available' and output['assessment']['investment_ratings'] == item['investment_ratings']
+    assert audit == [item] and json.loads(reviewer.prompts[0])['assessment']['investment_ratings'] == item['investment_ratings']
+    assert {'mandate', 'risk_quality'} <= set(output['evidence'])
+
+
+def test_ratings_require_all_dimensions_authentic_scorecard_and_known_evidence():
+    item = copy.deepcopy(BASE)
+    item['investment_ratings'][0]['supporting_evidence'] = ['research:99']
+    item['investment_ratings'][1]['quantitative_scorecard_rating'] = 'RED'
+    item['investment_ratings'][2]['dimension'] = item['investment_ratings'][3]['dimension']
+    issues = problems(InvestmentAssessment.model_validate(item), FACTS, [])
+    assert 'Unknown evidence reference' in issues
+    assert 'Exactly four distinct investment rating dimensions are required' in issues
+
+
+def test_invented_number_in_rating_is_rejected():
+    item = copy.deepcopy(BASE)
+    item['investment_ratings'][0]['rationale'] = 'The fund returned 999.9%.'
+    assert any('numerical' in issue for issue in problems(InvestmentAssessment.model_validate(item), FACTS, []))
+
+
+def test_quality_reviewer_can_withhold_unsupported_green_rating():
+    item = copy.deepcopy(BASE)
+    item['investment_ratings'][0].update(proposed_rating='GREEN',
+        agreement=item['investment_ratings'][0]['quantitative_scorecard_rating'] == 'GREEN',
+        rationale='The mandate is fully met.')
+    feedback = {'material_issue': True, 'security_issue': False,
+                'feedback': 'The proposed green mandate rating is unsupported; tracking evidence is missing.',
+                'recommendation_supported': True, 'supported_fields': ['investment_thesis']}
+    result = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(item, item), FakeRun(feedback, feedback)))
+    assert result['status'] == 'partial'
+    assert 'investment_ratings' not in result['assessment']
 
 
 def test_bad_references_and_unsupported_disagreement_are_not_accepted():

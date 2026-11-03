@@ -542,6 +542,21 @@ def _analyst_card(assessment: dict) -> str:
         details = (f"<p><b>AI assessment status:</b> {status_text}</p>"
                    f"<p class='fp-verdict'>{escape(label)}</p>"
                    f"<p>{escape(_short_text(ai.get('investment_thesis') or ''))}</p>")
+        ratings = ai.get('investment_ratings') or []
+        if ratings:
+            details += "<p class='fp-group'>Proposed investment ratings — AI</p>"
+            for rating in ratings:
+                agreement = 'agrees' if rating.get('agreement') else 'differs'
+                details += (f"<p><b>{escape(str(rating['dimension']))}: {escape(str(rating['proposed_rating']))}</b> "
+                            f"({agreement} with quantitative scorecard: "
+                            f"{escape(str(rating['quantitative_scorecard_rating']))}). "
+                            f"{escape(str(rating['rationale']))} "
+                            f"Evidence: {escape(', '.join(rating['supporting_evidence']))}.</p>")
+                if rating.get('limitations'):
+                    details += _list(rating['limitations'])
+                if rating.get('further_review_required'):
+                    details += '<p>Further investigation is required.</p>'
+            details += '<p>Proposed ratings require human analyst review and sign-off.</p>'
         findings = _unique_items(ai.get('supporting_evidence'), ai.get('strengths'))
         risks = _unique_items(ai.get('material_risks'))
         actions = _unique_items(ai.get('recommended_actions'))
