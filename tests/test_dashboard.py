@@ -97,6 +97,8 @@ def test_independent_rating_disagreement_is_attributed_and_qualified():
     assert 'Performance: AMBER' in rendered and 'differs with quantitative scorecard: GREEN' in rendered
     assert 'Recent tracking requires investigation.' in rendered and 'Risk data is incomplete.' in rendered
     assert 'human analyst review and sign-off' in rendered
+    assert "fp-ai-rating-table" in dashboard_sections(d)['overview']
+    assert 'Governance insight:' in rendered and 'Review the supporting evidence' in rendered
 
 
 def test_ai_assessment_status_and_unavailable_reason_are_clear_and_escaped():
