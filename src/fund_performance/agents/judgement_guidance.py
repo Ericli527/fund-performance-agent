@@ -62,7 +62,7 @@ def guidance_for(profile, fund_context=None) -> dict:
         chosen = 'Government or investment-grade bonds'
     elif re.search(r'active.*equit|stock.select|outperform.*(?:equit|s&p|ftse|msci)', text):
         chosen = 'Active equity'
-    elif re.search(r'passive|track|replicat|index', text):
+    elif re.search(r'passive|track(?:ing|s|er)?\b(?! record)|replicat', text):
         if re.search(r'global|world|all.cap|acwi', text + ' ' + reference):
             chosen = 'Passive global equity'
         elif re.search(r's&p.?500|us equity|us equities|us large|u\.s\.', text + ' ' + reference):
