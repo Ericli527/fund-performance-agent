@@ -260,3 +260,58 @@ def scatter_chart(points: list[tuple[str, float, float]], path: Path, title: str
     ax.grid(alpha=0.3)
     ax.margins(0.25)
     return _finish(fig, ax, path, title)
+
+
+def published_performance_charts(facts: dict, out_dir: Path) -> list[dict]:
+    """Plot stored period returns; never reconstruct an unobserved price path."""
+    from fund_performance.agents.reporting_tools import fund_performance
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rows = [(p, fund_performance(facts, p)) for p in ('1y', '3y', '5y')]
+    charts = []
+    for kind, key, title in [('cumulative', 'return_cumulative', 'Published cumulative returns'),
+                             ('annualised', 'return_a_year', 'Annualised returns')]:
+        usable = [(p, row) for p, row in rows if any(row.get(f'{who}_{key}') for who in ('fund', 'benchmark'))]
+        if not usable:
+            continue
+        # A single available side remains useful, but is never labelled as a comparison.
+        series = {label: [(row.get(f'{who}_{key}') or {}).get('value') for _, row in usable]
+                  for who, label in [('fund', 'Fund'), ('benchmark', 'Benchmark')]}
+        series = {label: values for label, values in series.items() if any(v is not None for v in values)}
+        if len(series) == 1:
+            title += ' — ' + next(iter(series)) + ' only'
+        path = out_dir / f'published_{kind}.png'
+        fig, ax = plt.subplots(figsize=(7, 3.5), dpi=160)
+        x = np.arange(len(usable)); width = .7 / len(series)
+        for i, (label, values) in enumerate(series.items()):
+            ax.bar(x - .35 + width * (i + .5), [np.nan if v is None else v for v in values],
+                   width, label=label, color=[NAVY, GREY][i])
+        ax.set_xticks(x, [p.replace('y', ' years').replace('1 years', '1 year') for p, _ in usable])
+        ax.set_ylabel('Cumulative return (%)' if kind == 'cumulative' else 'Return (% a year)')
+        ax.axhline(0, color=GREY, linewidth=.7); ax.grid(axis='y', alpha=.18)
+        ax.legend(frameon=False); _finish(fig, ax, path, title)
+        basis = next((row.get('fund_benchmark_basis') for _, row in usable if row.get('fund_benchmark_basis')), 'fund_nav')
+        charts.append({'path': path, 'kind': kind, 'title': title,
+            'caption': 'Indicative period comparison based on published figures; each bar covers a different trailing period, not an observed price path. '
+                       + 'Fund basis: ' + str(basis).replace('fund_', '').upper() + '. Source: Fund Factsheet / Calculated.'})
+    from fund_performance.agents.investment_analyst import risk_quality
+    candidates = risk_quality(facts)['figures']
+    selected = []
+    for term, label in [('tracking_error', 'Tracking error'), ('beta', 'Beta'), ('r2', 'R²'), ('vol', 'Volatility')]:
+        metric = next((f for f in candidates if term in f.get('name', '').split('.') and isinstance(f.get('value'), (int, float))), None)
+        if metric:
+            selected.append((label, metric))
+    if selected:
+        fig, axes = plt.subplots(len(selected), 1, figsize=(7, .85 * len(selected) + .8), dpi=160, squeeze=False)
+        for ax, (label, metric) in zip(axes[:, 0], selected):
+            ax.barh([0], [metric['value']], color=NAVY, height=.45)
+            period = str(metric.get('period') or metric.get('name', '').split('.')[-1])
+            period = period.replace('y', ' years') if period.endswith('y') else 'Reported period'
+            ax.set_yticks([0], [label]); ax.set_xlabel(period)
+            ax.set_title(str(metric.get('display') or metric['value']), loc='right', fontsize=9)
+            ax.grid(axis='x', alpha=.18)
+        path = out_dir / 'available_risk.png'
+        fig.suptitle('Risk & tracking metrics', color=NAVY, fontweight='bold')
+        fig.tight_layout(); fig.savefig(path); plt.close(fig)
+        charts.append({'path': path, 'kind': 'risk', 'title': 'Risk & tracking metrics',
+                       'caption': 'Available metrics only; each panel has its own scale. Source: Fund Factsheet / Calculated.'})
+    return charts

@@ -11,9 +11,8 @@ RATING_STYLE = {"GREEN": ("Green", "#2e7d32"), "AMBER": ("Amber", "#b7791f"), "R
 VERDICT_STYLE = {"Retain": "#2e7d32", "Monitor": "#b7791f", "Review": "#c62828", "Pending": "#6d4c9f"}
 QUESTIONS = {"Mandate": "Is the fund doing what it promised?", "Performance": "How did it do against its index?",
              "Value for investors": "Did investors get a fair outcome?", "Fees": "Is the fee justified?"}
-SOURCE_WORDS = {"factsheet": "Factsheet", "calculated": "Calculated", "ai_extracted": "AI-read from the factsheet "
-                "(verify)", "calculated_provisional": "Calculated from AI-read figures (verify)",
-                "user": "Entered by user", "web": "Web"}
+SOURCE_WORDS = {"factsheet": "Fund Factsheet", "calculated": "Calculated", "ai_extracted": "Fund Factsheet",
+                "calculated_provisional": "Calculated", "user": "Entered by user", "web": "Web"}
 NOT_AVAILABLE = "Not available"
 
 
@@ -234,7 +233,7 @@ def headline_metrics(facts: dict) -> list[Metric]:
         gap = Metric(gap_label, UNRELIABLE, period, UNRELIABLE_SOURCE, UNRELIABLE_WHY)
     else:
         gap = Metric(gap_label, _shown(td) + (" a year" if td else ""), period,
-                     _source(td) + (" from the factsheet" if td and td.get("source") == "calculated" else ""),
+                     _source(td),
                      f"{other.capitalize()} {_shown(index_ret)} a year" if index_ret else "")
     metrics = [
         Metric("Fund return", _shown(fund_ret) + (" a year" if fund_ret else ""), f"{period}, {price}",

@@ -47,6 +47,14 @@ def dashboard_data(result) -> dict:
     shared = getattr(result, 'presentation_context', None) or {}
     primary_status = shared.get('performance_chart') or {}
     chart_path = getattr(result, "run_dir", None)
+    performance_panels = []
+    if chart_path:
+        from fund_performance.charts import published_performance_charts
+        for panel in published_performance_charts(result.facts or {}, chart_path):
+            if primary_status.get('available') and panel['kind'] == 'cumulative':
+                continue
+            performance_panels.append({**{k: v for k, v in panel.items() if k != 'path'},
+                                       'image': base64.b64encode(panel['path'].read_bytes()).decode('ascii')})
     if chart_path and not comparison_invalid(result.facts or {}):
         try:
             image = (chart_path / "exec_chart.png").read_bytes()
@@ -64,6 +72,7 @@ def dashboard_data(result) -> dict:
             "market_context": output.market_context if output else None,
             "sources": sources, "performance_chart": chart, "primary_chart": primary_chart,
             "primary_chart_status": primary_status, "presentation_context": shared,
+            "performance_panels": performance_panels,
             "flags": flags or [dict(f) for f in (result.facts or {}).get("data_flags", [])],
             "offline": bool(log.run.get("offline")) if log is not None else False}
 
@@ -641,8 +650,25 @@ def dashboard_sections(data: dict) -> dict[str, str]:
                if data.get('primary_chart') else
                f"<p class='fp-muted'>Five-year line chart unavailable: {escape(status.get('reason') or 'Comparable total-return series have not been confirmed.')}</p>")
     financial_detail = _returns_table(facts) + _risk_rows(facts) + _statistics(facts)
+    panels = data.get('performance_panels') or []
+    if panels:
+        if not data.get('primary_chart'):
+            primary = ''
+        for panel in panels:
+            primary += ("<figure><h4>" + escape(panel['title']) + "</h4><img style='width:100%;max-width:900px' alt='"
+                        + escape(panel['title'], quote=True) + "' src='data:image/png;base64," + panel['image']
+                        + "'><figcaption>" + escape(panel['caption']) + '</figcaption></figure>')
+    from fund_performance.agents.reporting_tools import fund_performance
+    five = fund_performance(facts, '5y')
+    fund_return, benchmark_return = five.get('fund_return_a_year'), five.get('benchmark_return_a_year')
+    summary = ''
+    if fund_return and benchmark_return:
+        summary = ('<p><b>Performance summary:</b> Over five years, the fund returned '
+                   + escape(str(fund_return.get('display'))) + ' a year, versus '
+                   + escape(str(benchmark_return.get('display'))) + ' for the benchmark. '
+                   'These historical returns are not a forecast.</p>')
     chart_title = status.get("title") or "Five-year cumulative performance — fund vs benchmark"
-    performance = (f"<div class='fp-card'><h3>{escape(chart_title)}</h3>" + primary
+    performance = (f"<div class='fp-card'><h3>{escape(chart_title)}</h3>" + summary + primary
                    + "</div><div class='fp-card'><h3>Period returns &amp; risk</h3>" + (financial_detail or
                    "<p class='fp-muted'>Performance and risk figures are unavailable for this review.</p>")
                    + "</div>" + _details('Tracking analysis', chart) + _peers(facts))

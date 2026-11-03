@@ -52,7 +52,7 @@ def test_display_rules():
     assert fmt("comparison.td.5y", Figure(value=-0.1, exact=-0.1, unit="pp", source="calculated")) == "−0.10 pp"
     assert fmt("risk.pnav.tracking_error.3y", Figure(value=0.02, exact=0.02, unit="%", source="factsheet")) == "0.02%"
     assert fmt("risk.pnav.beta.3y", Figure(value=1.0, exact=1.0, unit="ratio", source="factsheet")) == "1.00"
-    assert fmt("index.cum.1y", Figure(value=17.1, exact=17.1, unit="%", source="ai_extracted")) == "17.1% (please verify)"
+    assert fmt("index.cum.1y", Figure(value=17.1, exact=17.1, unit="%", source="ai_extracted")) == "17.1%"
     assert fmt("x", None) == "–"
 
 
