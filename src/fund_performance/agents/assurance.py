@@ -241,34 +241,73 @@ async def inspect(evidence: dict, run: RunFn | None = None) -> dict:
 
 
 def render(result: dict) -> str:
+    """A decision-first inspection view; presentation never changes the Judge's result."""
     def e(value):
         return escape(str(value))
+
     def items(values):
-        return '<ul>' + ''.join('<li>' + e(v) + '</li>' for v in values) + '</ul>' if values else ''
+        return '<ul>' + ''.join('<li>' + e(value) + '</li>' for value in values) + '</ul>' if values else ''
+
     heading = '<h3>Investment Assurance Review</h3>'
     if result.get('status') != 'available':
-        return heading + '<p>Unavailable: ' + e(result.get('reason') or 'The inspection did not complete.') + '</p>'
-    r = result['review']
-    pct = 'Not estimated' if r['pass_likelihood_pct'] is None else f"{r['pass_likelihood_pct']:g}%"
-    html = (heading + '<p><b>Decision: ' + e(r['decision']) + '</b> · Human review and sign-off required.</p>'
-            + '<p>' + e(r['decision_reason']) + '</p><p><b>Estimated likelihood:</b> ' + e(pct)
-            + ' · Confidence: ' + e(r['confidence']) + '</p><p>' + e(DISCLAIMER) + '</p><p>'
-            + e(r['likelihood_explanation']) + '</p><h4>Supporting factors</h4>' + items(r['supporting_factors'])
-            + '<h4>Uncertainties</h4>' + items(r['uncertainties']))
-    html += '<h4>Rating review</h4>'
-    for x in r['rating_reviews']:
-        html += ('<p><b>' + e(x['dimension']) + ' (quantitative: ' + e(x['original_rating'])
-                 + '; AI proposal: ' + e(x['proposed_rating'] or 'unavailable') + '): ' + e(x['judgement'])
-                 + '</b> — ' + e(x['reason']) + ' Evidence: ' + e(', '.join(x['evidence_references']))
-                 + '. Action: ' + e(x['recommended_action']) + '</p>')
-    html += '<h4>Report quality</h4>' + items([k.replace('_', ' ').capitalize() + ': ' + v
-                                               for k, v in r['report_quality'].items()])
+        return ("<div class='fp-assurance'>" + heading + "<p>Unavailable: "
+                + e(result.get('reason') or 'The inspection did not complete.') + '</p></div>')
+
+    review = result['review']
+    pct = ('Not estimated' if review['pass_likelihood_pct'] is None
+           else f"{review['pass_likelihood_pct']:g}%")
+    html = ("<div class='fp-assurance'>" + heading
+            + "<div class='fp-assurance-overview'>"
+            + "<div><span class='fp-assurance-label'>Assurance decision</span><p><strong>Decision: "
+            + e(review['decision']) + "</strong></p><p>" + e(review['decision_reason']) + "</p></div>"
+            + "<div><span class='fp-assurance-label'>Estimated pass likelihood</span>"
+            + "<p><strong>" + e(pct) + "</strong> · Confidence: " + e(review['confidence'])
+            + "</p><p class='fp-assurance-muted'>" + e(DISCLAIMER) + "</p></div></div>"
+            + "<p class='fp-assurance-signoff'><b>Human review and sign-off required.</b> "
+            + "An AI PASS is not an approval.</p>"
+            + "<p>" + e(review['likelihood_explanation']) + "</p>")
+
+    html += '<h4>Investment rating inspection</h4>'
+    html += ("<div class='fp-assurance-scroll'><table class='fp-assurance-table'><thead><tr>"
+             "<th>Dimension</th><th>Quantitative</th><th>AI proposal</th><th>Judge review</th>"
+             "</tr></thead><tbody>")
+    for rating in review['rating_reviews']:
+        html += ("<tr><td><b>" + e(rating['dimension']) + "</b></td>"
+                 + "<td>" + e(rating['original_rating']) + "</td>"
+                 + "<td>" + e(rating['proposed_rating'] or 'Unavailable') + "</td>"
+                 + "<td><b>" + e(rating['judgement'].replace('_', ' ').title()) + "</b>"
+                 + "<p>" + e(rating['reason']) + "</p>"
+                 + "<p class='fp-assurance-muted'>Evidence: "
+                 + e(', '.join(rating['evidence_references'])) + "</p>"
+                 + "<p><b>Action:</b> " + e(rating['recommended_action']) + "</p></td></tr>")
+    html += '</tbody></table></div>'
+
+    html += ('<h4>Report standards</h4><div class="fp-assurance-scroll">'
+             '<table class="fp-assurance-table"><thead><tr><th>Standard</th><th>Assessment</th></tr></thead><tbody>')
+    for name, value in review['report_quality'].items():
+        html += ('<tr><td>' + e(name.replace('_', ' ').capitalize()) + '</td><td>'
+                 + e(value.replace('_', ' ').title()) + '</td></tr>')
+    html += '</tbody></table></div>'
+
     severity_order = {'CRITICAL': 0, 'HIGH': 1, 'MODERATE': 2, 'LOW': 3}
-    findings = sorted(r['material_findings'], key=lambda x: severity_order[x['severity']])
-    html += '<h4>Material findings</h4>' + items([x['severity'] + ': ' + x['issue'] + ' ['
-        + ', '.join(x['evidence_references']) + '] Action: ' + x['recommended_action'] for x in findings])
-    html += '<h4>Inspection coverage</h4>' + items([name.capitalize() + ': ' + x['status']
-                                                   for name, x in result['report_coverage'].items()])
-    html += '<p>Visual inspection not performed: rendered page images were not supplied.</p>'
-    html += items(r['visual_inspection']['limitations'])
-    return html
+    findings = sorted(review['material_findings'], key=lambda x: severity_order[x['severity']])
+    html += '<h4>Governance insights and corrective actions</h4>'
+    if findings:
+        html += '<ol class="fp-assurance-actions">'
+        for finding in findings:
+            html += ('<li><b>' + e(finding['severity'].title()) + ': ' + e(finding['issue'])
+                     + '</b><p>Evidence: ' + e(', '.join(finding['evidence_references']))
+                     + '</p><p><b>Next action:</b> ' + e(finding['recommended_action']) + '</p></li>')
+        html += '</ol>'
+    else:
+        html += '<p>No material findings were identified by this inspection.</p>'
+
+    html += ('<h4>Supporting factors</h4>' + items(review['supporting_factors'])
+             + '<h4>Uncertainties</h4>' + items(review['uncertainties'])
+             + '<h4>Inspection coverage</h4>'
+             + items([name.capitalize() + ': ' + entry['status']
+                      for name, entry in result['report_coverage'].items()])
+             + '<p class="fp-assurance-muted"><b>Visual inspection not performed:</b> '
+             + 'Rendered page images were not supplied.</p>'
+             + items(review['visual_inspection']['limitations']))
+    return html + '</div>'

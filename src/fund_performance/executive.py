@@ -225,12 +225,22 @@ def page1(inp, content: ExecutiveContent) -> str:
         narrative = (f"<table width='100%'><tr><td width='52%' valign='top'>{summary}{findings_html}</td>"
                      f"<td width='3%'></td><td valign='top' align='center'>{chart}</td></tr></table>")
     assessment = (inp.presentation_context or {}).get('investment_assessment') or {}
-    proposed = (assessment.get('assessment') or {}).get('investment_ratings') if assessment.get('status') == 'available' else None
-    ai_summary = ("<h2>AI investment rating proposals</h2><p>" + ' · '.join(
-        f"{escape(str(r['dimension']))}: {escape(str(r['proposed_rating']))}"
-        + (" (differs from scorecard)" if not r['agreement'] else '') for r in proposed)
-        + ". Independent proposals; human sign-off required. See the Detailed Report for evidence and reasoning.</p>"
-        if proposed else '')
+    proposed = ((assessment.get('assessment') or {}).get('investment_ratings') or []
+                if assessment.get('status') == 'available' else [])
+    ai_cells = []
+    for rating in proposed:
+        dimension = escape(str(rating.get('dimension') or ''))
+        code = escape(str(rating.get('quantitative_scorecard_rating') or 'Not available'))
+        ai = escape(str(rating.get('proposed_rating') or 'Not available'))
+        disagreement = "<br/><b class='x-ai-check'>Review disagreement</b>" if not rating.get('agreement') else ''
+        ai_cells.append(f"<td width='25%'><span class='x-ai-name'>{dimension}</span><br/>"
+                        f"<b>AI: {ai}</b><br/><span class='x-src'>Python: {code}</span>{disagreement}</td>")
+    ai_summary = (
+        "<h2>AI investment rating proposals</h2>"
+        "<table width='100%' class='x-ai-strip'><tr>" + ''.join(ai_cells) + "</tr></table>"
+        "<p class='x-src'>Independent AI proposals, not final ratings. Review rationale and sources in the Detailed "
+        "Report; human sign-off required.</p>"
+        if ai_cells else '')
     return f"""
 {_banner(inp)}
 <h1>{PAGE1}</h1>
@@ -432,6 +442,10 @@ EXEC_CSS = f"""
 .x-callout td {{ text-align: left; background-color: #f3eefa; border-left: 4px solid #6d4c9f; padding: 8px 10px; font-size: 8.8pt; }}
 .x-approval {{ background-color: #f6f8fb; }}
 .x-signoff-lead {{ font-size: 9pt; }}
+.x-ai-strip td {{ background-color: #f3f6fa; border: 0.5px solid #d9e2ec; padding: 5px 5px; vertical-align: top; font-size: 8pt; }}
+.x-ai-name {{ color: {NAVY}; font-weight: bold; font-size: 7.5pt; }}
+.x-ai-check {{ color: #8a4b00; font-size: 7.3pt; }}
+
 .x-approval td {{ padding: 8px 4px 1px 4px; }} .x-line {{ border-bottom: 0.8px solid #1d2733; }}
 .x-right {{ text-align: right; }} .x-after {{ margin-top: 8px; }}
 .x-box {{ font-size: 12pt; }} .x-tick-row {{ font-size: 9pt; }}
