@@ -98,3 +98,20 @@ def test_extra_answer_paragraphs_are_bounded_without_removing_financial_checks()
     from fund_performance.agents.reporter import draft_problems
     assert any('three answer paragraphs' in issue for issue in draft_problems('A.\n\nB.\n\nC.\n\nD.', FACTS))
     assert any('check:' in issue for issue in draft_problems('The fund returned 999.9%.', FACTS))
+
+
+def test_supported_ai_view_remains_available_with_check_data_scorecard():
+    facts = copy.deepcopy(FACTS)
+    facts['scorecard']['verdict'] = 'Pending data check'
+    facts['scorecard']['pillars'][1]['rating'] = 'CHECK DATA'
+    item = copy.deepcopy(BASE)
+    item.update(scorecard_agreement=False,
+                scorecard_disagreement_reason='A preliminary view is supported despite an incomplete quantitative check.')
+    item['investment_ratings'][1].update(quantitative_scorecard_rating='CHECK DATA', agreement=False)
+    output = asyncio.run(assess(facts, PROFILE, [], 'Give a preliminary view.', FakeRun(item), FakeRun(PASS)))
+    assert output['assessment']['recommendation'] == 'satisfied'
+    runner = FakeRun({'answer': 'The evidence supports a preliminary view.\n\nComplete the material data checks before sign-off.',
+                      'evidence': [], 'next_step': None})
+    draft = asyncio.run(write_draft(facts, 'analyst', ['Performance'], run=runner, assessment=output))
+    assert not draft.problems and 'preliminary view' in draft.answer
+    assert 'CHECK DATA' in runner.prompts[0]
