@@ -714,7 +714,7 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
     extractor_step = log.step('extractor')
     evidence_gaps = evidence_gap_summary(profile, factsheet, checked.prices, calculated, reported, card, flags,
                                          intake, extractor_step.status if extractor_step else None)
-    presentation_context = {"question": question, "fund_context": context_brief,
+    presentation_context = {"question": question, "fund_profile": profile.model_dump(mode='json'), "fund_context": context_brief,
                             "investment_assessment": assessment, "research": vetted, "evidence_gaps": evidence_gaps}
     from fund_performance.presentation import comparison_invalid, historical_price_warning
     if comparison_invalid(facts):

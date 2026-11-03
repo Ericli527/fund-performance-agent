@@ -65,3 +65,9 @@ Check the repository's actual CI workflow for its authoritative non-live command
 - Preserve `config/thresholds.yaml`, scorecard rules, financial calculations and golden facts unless explicitly asked to change them.
 - Keep credentials in ignored environment files and avoid committing files from `data/`.
 - Before handing off, record the PR/branch, what was changed, focused/full test results, blockers and the next concrete action.
+
+## Stage 7: optional investment assurance
+
+- `feat/investment-assurance-judge` adds an opt-in, one-call Investment Assurance Judge using the existing Judge model and AI limits. It reviews the completed review and extracted report text without changing calculations or ratings; human sign-off remains required.
+- Results are session-only and include a schema version and run ID for future human-review comparison. Likelihoods are explicitly uncalibrated. No PDF page images are sent, so visual inspection is not performed. Research Brief coverage is reported unavailable when no such PDF exists.
+- Details, example schema and limitations: `docs/investment-assurance.md`. Run focused assurance, web, controller and golden-facts tests before review. No live model evaluation has been performed.
