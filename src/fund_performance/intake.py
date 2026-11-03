@@ -9,6 +9,7 @@ values "entered by user". A required value that is missing blocks the run until 
 
 AI agents read; code decides where each value was found, what is missing, and what was changed.
 """
+import asyncio
 from dataclasses import dataclass, field
 from datetime import date
 import json
@@ -362,8 +363,23 @@ async def read_documents(factsheet: Path, kid: Path | None = None, peer_factshee
         if approved.files:
             log.append(f"Approved peers for {approved.group.benchmark}: " + ", ".join(p.name for p, _ in approved.files))
     origins = []
-    for i, (path, origin, where) in enumerate(peer_docs, start=1):
-        values, peer_result, pages = await read_peer(path, run_peer)
+    # Peer documents are independent. Limit concurrency and retain input order when assembling the results.
+    if len(peer_docs) <= 1:
+        peer_results = [await read_peer(path, run_peer) for path, _, _ in peer_docs]
+    else:
+        semaphore = asyncio.Semaphore(3)
+        async def extract_peer(path):
+            async with semaphore:
+                return await read_peer(path, run_peer)
+        tasks = [asyncio.create_task(extract_peer(path)) for path, _, _ in peer_docs]
+        try:
+            peer_results = await asyncio.gather(*tasks)
+        except BaseException:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+    for i, ((path, origin, where), (values, peer_result, pages)) in enumerate(zip(peer_docs, peer_results), start=1):
         doc = {path.name: pages}
         for spec in PEER_FIELDS:
             name = spec.key.removeprefix("peer.")

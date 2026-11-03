@@ -19,6 +19,11 @@ where comparable measurements and independent quality checks show no material re
 attribution; these are targets, not results. Reasoning tokens are a subset of output tokens and cached tokens a
 subset of input tokens, so they must not be billed twice.
 
+Uploaded or selected peer documents are independent after selection, so up to three can be extracted concurrently.
+Their outputs are assembled in input order and sibling tasks are cancelled on failure. This changes scheduling,
+not the extraction schema, validation or number of calls. Single-peer and no-peer paths stay sequential. The
+latency benefit and provider rate-limit behaviour remain unmeasured with real API calls.
+
 `run.performance` in `log.json` aggregates SDK-reported counts, per-agent elapsed time, retries and optional
 costs. An optional `config/model_pricing.yaml` may contain `models: {MODEL: {input: RATE, cached_input: RATE,
 output: RATE, source: URL, as_of: DATE}}` with rates in USD per million tokens. Without complete, sourced pricing
