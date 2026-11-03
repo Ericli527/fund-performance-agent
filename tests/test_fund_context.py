@@ -39,7 +39,8 @@ def test_intake_combines_document_summary_mandate_and_recovered_return(tmp_path)
     assert reported.figures['fund_nav.cum.3y'].source == 'ai_extracted'
     assert reported.figures['fund_nav.ann.3y'].source == 'calculated_provisional'
     assert reported.figures['comparison.td.3y'].source == 'calculated_provisional'
-    assert 'please verify' in fmt('fund_nav.ann.3y', reported.figures['fund_nav.ann.3y'])
+    assert fmt('fund_nav.ann.3y', reported.figures['fund_nav.ann.3y']) == '9.3%'
+    assert reported.figures['fund_nav.ann.3y'].needs_verification
 
 
 def test_recovery_does_not_accept_unsourced_or_ambiguous_returns():
