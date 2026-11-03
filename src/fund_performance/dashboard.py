@@ -544,19 +544,34 @@ def _analyst_card(assessment: dict) -> str:
                    f"<p>{escape(_short_text(ai.get('investment_thesis') or ''))}</p>")
         ratings = ai.get('investment_ratings') or []
         if ratings:
-            details += "<p class='fp-group'>Proposed investment ratings — AI</p>"
+            rows, disagreements = [], []
             for rating in ratings:
+                dimension = str(rating.get('dimension') or 'Unknown')
+                proposed = str(rating.get('proposed_rating') or 'Unavailable')
+                comparator = str(rating.get('quantitative_scorecard_rating') or 'Unavailable')
                 agreement = 'agrees' if rating.get('agreement') else 'differs'
-                details += (f"<p><b>{escape(str(rating['dimension']))}: {escape(str(rating['proposed_rating']))}</b> "
-                            f"({agreement} with quantitative scorecard: "
-                            f"{escape(str(rating['quantitative_scorecard_rating']))}). "
-                            f"{escape(str(rating['rationale']))} "
-                            f"Evidence: {escape(', '.join(rating['supporting_evidence']))}.</p>")
-                if rating.get('limitations'):
-                    details += _list(rating['limitations'])
+                if not rating.get('agreement'):
+                    disagreements.append(dimension)
+                rationale = escape(str(rating.get('rationale') or 'No rationale supplied.'))
+                evidence = escape(', '.join(str(ref) for ref in rating.get('supporting_evidence') or []))
+                notes = _list(rating.get('limitations') or [], 'fp-sub')
                 if rating.get('further_review_required'):
-                    details += '<p>Further investigation is required.</p>'
-            details += '<p>Proposed ratings require human analyst review and sign-off.</p>'
+                    notes += '<p class="fp-muted">Further investigation is required.</p>'
+                rows.append(
+                    f"<tr><td><b>{escape(dimension)}: {escape(proposed)}</b>"
+                    f"<p class='fp-muted'>{agreement} with quantitative scorecard: {escape(comparator)}</p></td>"
+                    f"<td><p>{rationale}</p><p class='fp-muted'>Evidence: {evidence or 'Not referenced'}</p>"
+                    f"{notes}</td></tr>")
+            details += ("<p class='fp-group'>Proposed investment ratings — AI</p>"
+                        "<div class='fp-scroll'><table class='fp-table fp-ai-rating-table'>"
+                        "<thead><tr><th>AI proposal / Python comparator</th><th>Investment rationale and evidence</th>"
+                        "</tr></thead><tbody>" + ''.join(rows) + "</tbody></table></div>")
+            if disagreements:
+                names = ', '.join(disagreements)
+                details += ("<div class='fp-governance-note'><b>Governance insight:</b> "
+                            f"AI and quantitative assessments differ on {escape(names)}. "
+                            "Review the supporting evidence and reasons before sign-off.</div>")
+            details += '<p class="fp-muted">AI-proposed ratings require human analyst review and sign-off.</p>'
         findings = _unique_items(ai.get('supporting_evidence'), ai.get('strengths'))
         risks = _unique_items(ai.get('material_risks'))
         actions = _unique_items(ai.get('recommended_actions'))
