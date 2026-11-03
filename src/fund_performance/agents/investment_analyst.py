@@ -402,7 +402,10 @@ def reference_feedback(out: InvestmentAssessment, sources: list[dict]) -> str:
                  *(f'research:{i}' for i in range(1, len(sources) + 1))]
     supplied = out.evidence_references + [ref for r in out.investment_ratings for ref in r.supporting_evidence]
     invalid = sorted(set(supplied) - set(permitted))
-    return (json.dumps({'invalid_references': invalid, 'permitted_references': permitted}) +
+    suggestions = {ref: ref.replace('_', ':').replace('.', ':') for ref in invalid
+                   if ref.replace('_', ':').replace('.', ':') in permitted}
+    return (json.dumps({'invalid_references': invalid, 'suggested_references': suggestions,
+                       'permitted_references': permitted}) +
             ' Correct only the affected citation fields. Preserve supported reasoning; do not invent a source.'
             if invalid else '')
 
@@ -611,6 +614,8 @@ async def assess(facts: dict, profile: FundProfile, sources: list[dict], questio
         details = final.get('feedback_summary') or [SAFE_FEEDBACK['other_material_issue']]
     else:
         messages = {code: issue for issue, code in VALIDATION_CODES.items()}
+        messages['unknown_evidence_reference'] = ('A source reference could not be verified. '
+            'The financial results remain available; review the cited sources before using the AI conclusion.')
         details = [messages.get(code, 'An assessment validation check failed.')
                    for code in final.get('validation_issues', [])]
     reason = "A material or unsupported issue remains after revision. " + " ".join(details)
