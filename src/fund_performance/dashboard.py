@@ -171,6 +171,19 @@ def _metrics(facts: dict) -> str:
     return f"<div class='fp-metrics'>{cards}</div>"
 
 
+def _material_limits(items: list[str]) -> list[str]:
+    def priority(item):
+        text = item.casefold()
+        if any(word in text for word in ('institutional', 'eligibility', 'minimum investment')):
+            return 0
+        if any(word in text for word in ('currency', 'comparab', 'benchmark', 'pricing')):
+            return 1
+        if any(word in text for word in ('provisional', 'verif', 'ai-extracted')):
+            return 2
+        return 3
+    return sorted(_unique_items(items), key=priority)[:3]
+
+
 def _ratings(data: dict, analyst: bool, explanatory: bool = False) -> str:
     rows = ""
     for p in data["facts"].get("scorecard", {}).get("pillars", []):
@@ -183,7 +196,7 @@ def _ratings(data: dict, analyst: bool, explanatory: bool = False) -> str:
             content = (f"<p><b>{escape(explanation['conclusion'])}</b></p>"
                        f"<p><b>Why this rating?</b> {escape(explanation['why'])}</p>"
                        + ("<p><b>Supporting evidence</b></p>" + _list(explanation['evidence']) if explanation['evidence'] else "")
-                       + ("<p><b>Limitations</b></p>" + _list(explanation['limitations'][:3]) + _details('All rating qualifications', _list(explanation['limitations'])) if explanation['limitations'] else "")
+                       + ("<p><b>Limitations</b></p>" + _list(_material_limits(explanation['limitations'])) + _details('All rating qualifications', _list(explanation['limitations'])) if explanation['limitations'] else "")
                        + _details("Rating methodology", methodology))
             rows += (f"<div class='fp-rating'><div class='fp-rating-name'><b>{escape(p['name'])}</b></div>"
                      f"{_chip(p['rating'])}<div class='fp-rating-why'>{content}</div></div>")
@@ -556,7 +569,7 @@ def _analyst_card(assessment: dict) -> str:
                     disagreements.append(dimension)
                 rationale = escape(str(rating.get('rationale') or 'No rationale supplied.'))
                 evidence = escape(', '.join(str(ref) for ref in rating.get('supporting_evidence') or []))
-                notes = _list(_unique_items(rating.get('limitations'))[:3], 'fp-sub')
+                notes = _list(_material_limits(rating.get('limitations') or []), 'fp-sub')
                 if rating.get('further_review_required'):
                     notes += '<p class="fp-muted">Further investigation is required.</p>'
                 rows.append(
