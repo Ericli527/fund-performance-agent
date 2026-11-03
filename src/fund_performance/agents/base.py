@@ -54,7 +54,8 @@ def build_agent(name: str, instructions: str, output_type: type[BaseModel], agen
                  **model_kwargs(agent, tool_choice))
 
 
-async def run_with_fresh_client(agent: Agent, prompt: str, *, context: Any = None, max_turns: int = 10) -> Any:
+async def run_with_fresh_client(agent: Agent, prompt: str, *, context: Any = None, max_turns: int = 10,
+                                tracing_disabled: bool = False) -> Any:
     """ Run an agent with a new OpenAI client, closed afterwards.
 
     The SDK otherwise reuses one shared client whose connections belong to the first event loop; once
@@ -63,7 +64,8 @@ async def run_with_fresh_client(agent: Agent, prompt: str, *, context: Any = Non
     client = AsyncOpenAI()          # reads OPENAI_API_KEY from the environment
     try:
         return await Runner.run(agent, prompt, context=context, max_turns=max_turns,
-                                run_config=RunConfig(model_provider=OpenAIProvider(openai_client=client)))
+                                run_config=RunConfig(model_provider=OpenAIProvider(openai_client=client),
+                                                     tracing_disabled=tracing_disabled))
     finally:
         await client.close()
 

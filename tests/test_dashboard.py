@@ -84,6 +84,21 @@ def test_four_sections_show_question_separate_assessments_and_partial_evidence()
     assert 'No vetted research' in views['portfolio'] and 'Returns to' in views['performance']
 
 
+def test_independent_rating_disagreement_is_attributed_and_qualified():
+    from fund_performance.dashboard import dashboard_sections
+    d = data()
+    d['presentation_context'] = {'investment_assessment': {'status': 'available', 'assessment': {
+        'recommendation': 'monitor', 'investment_thesis': 'Tracking requires review.',
+        'investment_ratings': [{'dimension': 'Performance', 'proposed_rating': 'AMBER',
+            'quantitative_scorecard_rating': 'GREEN', 'agreement': False,
+            'rationale': 'Recent tracking requires investigation.', 'supporting_evidence': ['performance:5y'],
+            'limitations': ['Risk data is incomplete.'], 'further_review_required': True}]}}}
+    rendered = text(dashboard_sections(d)['overview'])
+    assert 'Performance: AMBER' in rendered and 'differs with quantitative scorecard: GREEN' in rendered
+    assert 'Recent tracking requires investigation.' in rendered and 'Risk data is incomplete.' in rendered
+    assert 'human analyst review and sign-off' in rendered
+
+
 def test_ai_assessment_status_and_unavailable_reason_are_clear_and_escaped():
     from fund_performance.dashboard import dashboard_sections
     d = data()

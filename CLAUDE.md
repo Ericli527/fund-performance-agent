@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 ## Project Summary
-Fund Performance Agent is an AI-assisted investment oversight and reporting app. Python calculates returns, risk and ratings; AI assists with evidence and explanations; a human analyst makes the final decision.
+Fund Performance Agent is an AI-assisted investment oversight app. Python calculates financial evidence and the quantitative scorecard; AI proposes evidence-grounded investment ratings, an independent Judge challenges them, and a human analyst makes the final decision.
 
 ## Goals
 - Improve reliable fund analysis, clear dashboards and professional PDFs.
@@ -17,7 +17,7 @@ Fund Performance Agent is an AI-assisted investment oversight and reporting app.
 ## Code Standards and Guidelines
 1. **Keep it simple.** Avoid overengineering, unnecessary abstraction and repeated safeguards.
 2. **Use the shared rules in `AGENTS.md`.** They are the single source of truth for all coding agents.
-3. **Respect financial boundaries.** Code owns calculations and ratings; AI does not override them. Do not change thresholds or golden baselines without approval.
+3. **Respect financial boundaries.** Code owns calculations and the quantitative scorecard; AI proposals are separate and cannot override either. Do not change thresholds or golden baselines without approval.
 4. **Be concise.** Use comments only when helpful; keep documentation short and avoid emojis.
 5. **Handle real errors, not imaginary ones.** Validate inputs and external/model outputs, but avoid blanket exception handling.
 6. **Test focused changes.** Mock live AI calls in ordinary tests and run the relevant non-live checks.

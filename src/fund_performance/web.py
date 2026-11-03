@@ -345,6 +345,7 @@ class Outcome:
     data: dict | None = None                 # the finished run, for the dashboard (dashboard.dashboard_data)
     executive: str | None = None             # report_executive.pdf (stage 3); None if it could not fit
     run_info: str = ""                       # run ID, trace ID and AI calls, for the progress area
+    assurance_handle: dict | None = None      # server-side session state; never sent as a file path to the client
 
 
 def summary_markdown(result: RunResult) -> str:
@@ -424,9 +425,10 @@ async def _run_controller(folder: Path, question: str, offline: bool, on_step: P
                        "the server log has the details.")
     log = result.run_dir / "log.json"
     executive = getattr(result, "executive_pdf", None)
+    from fund_performance.agents.assurance import session_handle
     return Outcome(summary_markdown(result), _download(result, result.pdf), str(log) if log.exists() else None,
                    dashboard_data(result), _download(result, executive) if executive else None,
-                   run_info(result.log.run) if getattr(result, "log", None) else "")
+                   run_info(result.log.run) if getattr(result, "log", None) else "", session_handle(result))
 
 
 def run_info(run: dict) -> str:
@@ -437,6 +439,27 @@ def run_info(run: dict) -> str:
     if run.get("trace_id"):
         parts.append(f"OpenAI trace {run['trace_id']}")
     return " · ".join(parts)
+
+
+async def inspect_saved_review(handle: dict | None, limits: AiLimits, runner=None) -> str:
+    """Inspect the current session's completed review, subject to the existing AI budget and switch."""
+    from fund_performance.agents.assurance import inspect, render, snapshot
+    if not handle:
+        return render({'status': 'unavailable', 'reason': 'Run a fund review first.'})
+    if os.getenv(OFFLINE_ENV, '').strip().lower() in ('1', 'true', 'yes'):
+        return render({'status': 'unavailable', 'reason': 'AI inspection is disabled in offline mode.'})
+    if runner is None and not api_key_present():
+        return render({'status': 'unavailable', 'reason': 'The AI service is not configured.'})
+    if (refused := limits.start()):
+        return render({'status': 'unavailable', 'reason': refused})
+    try:
+        evidence = await asyncio.to_thread(snapshot, handle)
+        result = await asyncio.wait_for(inspect(evidence, run=runner), timeout=load_settings().timeouts_seconds.narrative)
+        return render(result)
+    except Exception:
+        return render({'status': 'unavailable', 'reason': 'The inspection could not be completed.'})
+    finally:
+        limits.finish()
 
 
 def _download(result: RunResult, pdf: Path | None) -> str | None:
@@ -888,6 +911,7 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
         upload_busy = gr.State(False)
         demo_state = gr.State(None)
         mode_state = gr.State(QUICK)
+        assurance_state = gr.State(None)
         attachments = gr.Dataframe(headers=["ID", "File", "Type", "Notes", "Document date"], datatype=["str"] * 5,
                                    value=[], type="array", interactive=True, row_count=0,
                                    column_count=(5, "fixed"), label="Attachments")
@@ -909,7 +933,7 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
         run = gr.Button("Run Fund Review", variant="primary", interactive=False, elem_classes="fp-run")
         with gr.Accordion("Help & methodology", open=False):
             gr.Markdown("Upload the fund price history and factsheet. A KID and peer factsheets are optional. "
-                        "The synthetic case uses prevalidated inputs. All four ratings are always calculated.")
+                        "The synthetic case uses prevalidated inputs. All four quantitative scorecard ratings are always calculated.")
             gr.HTML(how_it_works_html())
         progress = gr.Markdown(elem_classes="fp-progress")
         message = gr.Markdown()
@@ -926,6 +950,11 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             with gr.Row():
                 executive_pdf = gr.DownloadButton(EXECUTIVE_LABEL, variant="primary", elem_classes="fp-download")
                 pdf = gr.DownloadButton(DETAILED_LABEL, variant="secondary", elem_classes="fp-download")
+            gr.Markdown('Optional: **Inspect Report** makes one additional AI call and counts toward the daily AI limit. '
+                        'It is available when AI runs are enabled and configured. The result is an uncalibrated AI '
+                        'review; a human remains responsible for sign-off.')
+            inspect_button = gr.Button('Inspect Report', interactive=False)
+            assurance_view = gr.HTML()
             with gr.Accordion("Technical details", open=False):
                 technical = gr.HTML()
                 log = gr.File(label="Run log (log.json)", interactive=False)
@@ -1037,13 +1066,13 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                 if not uses_demo_files(price, jsons):
                     issues.append("The synthetic demo inputs have changed; reload the test case.")
             if issues:
-                yield "", "\n".join(f"- {x}" for x in issues), gr.update(visible=False), "", "", "", "", gr.update(value=None), gr.update(value=None), "", None, ""
+                yield "", "\n".join(f"- {x}" for x in issues), gr.update(visible=False), "", "", "", "", gr.update(value=None), gr.update(value=None), "", None, "", None, "", gr.update(interactive=False)
                 return
             price, factsheet, kid, peer, jsons = engine_inputs(selected)
             supporting = supporting_inputs(selected)
             offline = run_offline(price, jsons)
             history = []
-            yield "Starting…", "", gr.update(visible=False), "", "", "", "", gr.update(value=None), gr.update(value=None), "", None, ""
+            yield "Starting…", "", gr.update(visible=False), "", "", "", "", gr.update(value=None), gr.update(value=None), "", None, "", None, "", gr.update(interactive=False)
             def work(say):
                 kwargs = {}
                 if benchmark['series'] or benchmark['documents']:
@@ -1054,9 +1083,9 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             async for kind, item in with_progress(work):
                 if kind == "progress":
                     history = progress_history(history, item)
-                    yield (progress_markdown(history),) + (gr.update(),) * 11
+                    yield (progress_markdown(history),) + (gr.update(),) * 14
                 elif item.data is None:
-                    yield progress_markdown(history), item.message, gr.update(visible=False), "", "", "", "", gr.update(value=None), gr.update(value=None), "", None, ""
+                    yield progress_markdown(history), item.message, gr.update(visible=False), "", "", "", "", gr.update(value=None), gr.update(value=None), "", None, "", None, "", gr.update(interactive=False)
                 else:
                     banner = demo_banner(price, jsons, demo_id, mode)
                     data = item.data | {"pdf": item.pdf, "executive_pdf": item.executive}
@@ -1071,7 +1100,8 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                     views = ["<div class='fp-dashboard'>" + sections[k] + "</div>"
                              for k in ("overview", "performance", "portfolio", "evidence")]
                     yield (progress_markdown(history), "", gr.update(visible=True), *views,
-                           executive, detailed, tech, item.log, item.message)
+                           executive, detailed, tech, item.log, item.message, item.assurance_handle, "",
+                           gr.update(interactive=bool(item.assurance_handle) and live_demo_allowed()))
 
         private = {"api_visibility": "private"}
         mutation = {"concurrency_id": "attachment-mutations", "concurrency_limit": 1}
@@ -1141,7 +1171,12 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
         run.click(on_run, [question, entries, attachments, demo_state, mode_state, benchmark_name,
                            benchmark_currency, benchmark_confirmed, benchmark_pricing],
                   [progress, message, results, overview, performance, portfolio, evidence,
-                   executive_pdf, pdf, technical, log, plain], **private)
+                   executive_pdf, pdf, technical, log, plain, assurance_state, assurance_view, inspect_button],
+                  concurrency_id='review-assurance', concurrency_limit=1, **private)
+        async def on_inspect(handle):
+            return await inspect_saved_review(handle, limits)
+        inspect_button.click(on_inspect, [assurance_state], [assurance_view],
+                             concurrency_id='review-assurance', concurrency_limit=1, **private)
     return ui
 
 
