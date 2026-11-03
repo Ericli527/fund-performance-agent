@@ -55,6 +55,8 @@ def test_structured_review_preserves_scorecard_and_displays_uncalibrated_estimat
     assert DISCLAIMER in html and '72%' in html and 'Human review and sign-off required' in html
     assert 'Visual inspection not performed' in html and 'Research: unavailable' in html
     assert 'public executive report' not in html
+    assert 'fp-assurance-table' in html and 'Governance insights and corrective actions' in html
+    assert 'An AI PASS is not an approval.' in html
     sent = json.loads(runner.prompts[0])
     assert sent['facts']['scorecard'] == before['facts']['scorecard'] and sent['question'] == before['question']
 
