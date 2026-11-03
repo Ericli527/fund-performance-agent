@@ -28,7 +28,8 @@ def test_audit_records_actual_sdk_response_counts_and_tokens():
     finally:
         AI_CALLS.reset(token)
     assert records[0]['model_requests'] == 2
-    assert records[0]['tokens'] == {'input_tokens': 18, 'output_tokens': 7, 'total_tokens': 25}
+    assert records[0]['tokens'] == {'input_tokens': 18, 'output_tokens': 7, 'total_tokens': 25,
+                                    'cached_tokens': 0, 'reasoning_tokens': 0}
 
 
 # config/models.yaml
