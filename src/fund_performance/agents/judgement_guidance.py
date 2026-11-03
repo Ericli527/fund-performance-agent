@@ -52,7 +52,7 @@ def guidance_for(profile, fund_context=None) -> dict:
     chosen = None
     if re.search(r'money.market|cash.like|short.term liquidity', text):
         chosen = 'Money market'
-    elif re.search(r'absolute.return|alternative|cash.*plus|market.neutral', text):
+    elif re.search(r'absolute.return|alternative|cash.*(?:plus|\+)|market.neutral', text):
         chosen = 'Absolute-return or alternatives'
     elif re.search(r'multi.asset|balanced|equity and bond|equities and bonds|target.risk', text):
         chosen = 'Multi-asset'
@@ -60,7 +60,7 @@ def guidance_for(profile, fund_context=None) -> dict:
         chosen = 'Active credit'
     elif re.search(r'government bond|investment.grade|bond|fixed.income|gilts?', text):
         chosen = 'Government or investment-grade bonds'
-    elif re.search(r'active.*equit|stock.select|outperform', text):
+    elif re.search(r'active.*equit|stock.select|outperform.*(?:equit|s&p|ftse|msci)', text):
         chosen = 'Active equity'
     elif re.search(r'passive|track|replicat|index', text):
         if re.search(r'global|world|all.cap|acwi', text + ' ' + reference):
