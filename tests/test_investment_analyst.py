@@ -22,7 +22,7 @@ BASE = {'recommendation': 'satisfied', 'investment_thesis': 'The fund tracks its
                                 'quantitative_scorecard_rating': p['rating'],
                                 'agreement': p['rating'] in ('GREEN', 'AMBER', 'RED', 'MANUAL_CHECK'),
                                 'rationale': 'Consider the evidence and its limitations.',
-                                'supporting_evidence': ['scorecard'], 'limitations': [],
+                                'supporting_evidence': ['The scorecard provides quantitative context.'], 'evidence_references': ['scorecard'], 'limitations': [],
                                 'further_review_required': True} for p in FACTS['scorecard']['pillars']]}
 
 
@@ -42,7 +42,7 @@ def test_rating_disagreement_is_preserved_and_reviewed_against_evidence():
     rating = item['investment_ratings'][0]
     rating.update(proposed_rating='AMBER' if rating['quantitative_scorecard_rating'] != 'AMBER' else 'GREEN',
                   agreement=False, rationale='The available evidence warrants a different investment judgement.',
-                  supporting_evidence=['mandate', 'risk_quality'], limitations=['Tracking error is unavailable.'])
+                  evidence_references=['mandate', 'risk_quality'], limitations=['Tracking error is unavailable.'])
     reviewer, audit = FakeRun(PASS), []
     output = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(item), reviewer, audit_outputs=audit))
     assert output['status'] == 'available' and output['assessment']['investment_ratings'] == item['investment_ratings']
@@ -52,7 +52,7 @@ def test_rating_disagreement_is_preserved_and_reviewed_against_evidence():
 
 def test_ratings_require_all_dimensions_authentic_scorecard_and_known_evidence():
     item = copy.deepcopy(BASE)
-    item['investment_ratings'][0]['supporting_evidence'] = ['research:99']
+    item['investment_ratings'][0]['evidence_references'] = ['research:99']
     item['investment_ratings'][1]['quantitative_scorecard_rating'] = 'RED'
     item['investment_ratings'][2]['dimension'] = item['investment_ratings'][3]['dimension']
     issues = problems(InvestmentAssessment.model_validate(item), FACTS, [])
@@ -465,3 +465,75 @@ def test_unknown_reference_gets_targeted_correction_and_catalogue():
     assert 'performance_5y' in runner.prompts[1] and 'permitted_references' in runner.prompts[1]
     assert 'performance:5y' in runner.prompts[0] and 'evidence_catalogue' in runner.prompts[0]
     assert 'Correct only the affected citation fields' in runner.prompts[1]
+
+
+def test_narrative_rating_claims_and_exact_references_are_separate():
+    item = copy.deepcopy(BASE)
+    item['investment_ratings'][1].update(
+        supporting_evidence=['The performance evidence supports a qualified view. [performance:5y]'],
+        evidence_references=['performance:5y', 'scorecard'])
+    reviewer = FakeRun(PASS)
+    result = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(item), reviewer))
+    assert result['status'] == 'available'
+    assert 'performance:5y' in result['evidence']
+    given = json.loads(reviewer.prompts[0])['assessment']['investment_ratings'][1]
+    assert given['supporting_evidence'][0].endswith('[performance:5y]')
+    assert given['evidence_references'] == ['performance:5y', 'scorecard']
+    item['investment_ratings'][1]['supporting_evidence'] = ['A qualified interpretation of the performance evidence.']
+    assert not problems(InvestmentAssessment.model_validate(item), FACTS, [])
+
+
+def test_rating_claim_with_wrong_embedded_source_is_rejected():
+    item = copy.deepcopy(BASE)
+    item['investment_ratings'][0].update(supporting_evidence=['A claim [research:99]'], evidence_references=['mandate'])
+    assert 'Claim citations must match the rating evidence references' in problems(
+        InvestmentAssessment.model_validate(item), FACTS, [])
+
+
+def test_supported_format_does_not_authorise_invented_rating_numbers():
+    item = copy.deepcopy(BASE)
+    item['investment_ratings'][0].update(supporting_evidence=['The fund returned 999.9%.'], evidence_references=['performance:5y'])
+    assert 'A numerical claim is not present in the financial facts' in problems(
+        InvestmentAssessment.model_validate(item), FACTS, [])
+
+
+def test_illustrative_vanguard_claim_patterns_with_synthetic_matching_facts():
+    facts = copy.deepcopy(FACTS)
+    facts['figures'] += [{'name': 'example.fund', 'value': 11.31, 'unit': '%'},
+                         {'name': 'example.benchmark', 'value': 11.60, 'unit': '%'},
+                         {'name': 'example.gap', 'value': -0.29, 'unit': 'pp'}]
+    for claim in ['The fund lagged the benchmark by 0.29 percentage points annually over five years. [performance:5y]',
+                  'The five-year annualised fund return was 11.31%, versus 11.60% for the benchmark.']:
+        item = copy.deepcopy(BASE)
+        item['investment_ratings'][1].update(supporting_evidence=[claim], evidence_references=['performance:5y'])
+        assert not problems(InvestmentAssessment.model_validate(item), facts, [])
+
+
+def test_missing_rating_references_are_not_inferred_from_claim_text():
+    from pydantic import ValidationError
+    import pytest
+    item = copy.deepcopy(BASE)
+    del item['investment_ratings'][0]['evidence_references']
+    with pytest.raises(ValidationError):
+        InvestmentAssessment.model_validate(item)
+
+
+def test_existing_source_does_not_automatically_clear_a_misleading_claim():
+    item = copy.deepcopy(BASE)
+    item['investment_ratings'][0].update(supporting_evidence=['A single peer proves market-wide competitiveness.'],
+                                          evidence_references=['peers'])
+    review = {'material_issue': True, 'security_issue': False,
+              'feedback': 'The peer evidence does not support market-wide competitiveness.',
+              'recommendation_supported': False, 'supported_fields': ['investment_thesis']}
+    result = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(item, item), FakeRun(review, review)))
+    assert result['status'] == 'partial' and 'investment_ratings' not in result['assessment']
+
+
+def test_rating_claim_is_readable_on_dashboard_with_separate_references():
+    from fund_performance.dashboard import _analyst_card
+    item = copy.deepcopy(BASE)
+    item['investment_ratings'][0].update(supporting_evidence=['The documented policy supports the mandate assessment.'],
+                                          evidence_references=['mandate'])
+    html = _analyst_card({'status': 'available', 'assessment': item})
+    assert 'The documented policy supports the mandate assessment.' in html
+    assert 'Evidence: mandate' in html and '<pre' not in html
