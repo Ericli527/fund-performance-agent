@@ -444,3 +444,26 @@ def test_locate_finds_values_printed_in_other_forms():
     assert locate("midday", pages) == "factsheet.pdf, page 1"              # 12:00
     assert locate("accumulation", pages) == "factsheet.pdf, page 2"        # Accumulating
     assert locate(0.7, pages) == NOT_FOUND and locate("2026-09-29", pages) == NOT_FOUND
+
+
+def test_peer_benchmark_and_ter_survive_full_document_intake(tmp_path):
+    from fund_performance.intake import self_check
+    factsheet, peer_doc = docs(tmp_path)
+    peer_doc.write_text('State Street SPDR MSCI All Country World UCITS ETF (Acc)\n'
+                        'Factsheet 30 September 2026\nISIN IE00B44Z5B48\n'
+                        'Share Class Currency USD\nIndex Name MSCI ACWI\nTER 0.12%\n')
+    answer = peer_answer()
+    answer['currency'] = 'USD'
+    answer['as_of_date'] = '2026-09-30'
+    answer['profile'] |= {'fund_name': 'State Street SPDR MSCI All Country World UCITS ETF (Acc)',
+                          'isin': 'IE00B44Z5B48', 'share_class': 'Acc', 'currency': 'USD',
+                          'benchmark_name': 'MSCI ACWI', 'ocf_pct': 0.12, 'distribution': 'accumulation',
+                          'minimum_investment': None}
+    intake = asyncio.run(read_documents(factsheet, peer_factsheets=peer_doc,
+                                        run_extractor=FakeRun(extractor_answer()), run_mandate=FakeRun(MANDATE),
+                                        run_peer=FakeRun(answer)))
+    built = self_check(intake)
+    assert not built.problems
+    [peer] = built.peers
+    assert (peer['currency'], peer['benchmark_name'], peer['fee_type'], peer['product_type']) == ('USD', 'MSCI ACWI', 'ter', 'etf')
+    assert peer['investor_type'] is None

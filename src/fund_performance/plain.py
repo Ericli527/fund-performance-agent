@@ -25,7 +25,8 @@ def fees_sentence(v: dict) -> str:
         each = " and ".join(f"{f:.2f}%" for f in fees)
         return (f"the fund's {v['fund_ocf']:.2f}% yearly ongoing charge (OCF) is {where} the {len(fees)} peers' "
                 f"average of {v['peer_ocf']:.2f}% ({each})")
-    return f"the fund's {v['fund_ocf']:.2f}% yearly ongoing charge (OCF) is {where} the peer's {v['peer_ocf']:.2f}%"
+    measure = ' TER' if v.get('peer_fee_type') == 'ter' else ''
+    return f"the fund's {v['fund_ocf']:.2f}% yearly ongoing charge (OCF) is {where} the peer's {v['peer_ocf']:.2f}%{measure}"
 
 
 SENTENCES = {"Value for investors": value_sentence, "Fees": fees_sentence}

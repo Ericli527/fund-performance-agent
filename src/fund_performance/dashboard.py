@@ -299,18 +299,23 @@ def _statistics(facts: dict) -> str:
 
 def _peers(facts: dict) -> str:
     rows = ""
+    notes = []
     for p in facts.get("peers", []):
         r = p.get("returns_pct_a_year", {})
         used = f"Fees and returns ({p['basis']})" if p.get("used_for_returns") else f"Fees only: {p.get('excluded')}"
+        currency_excluded = not p.get('used_for_returns') and str(p.get('excluded') or '').startswith('returns in ')
+        fee_label = ' TER' if p.get('fee_type') == 'ter' else ''
         rows += (f"<tr><td class='l'>{escape(p['name'])}</td><td class='l'>{escape(p.get('currency') or '')}</td>"
-                 f"<td>{p['ocf_pct']:.2f}%</td>" + "".join(
-                     f"<td>{'–' if r.get(k) is None else f'{r[k]:.2f}%'.replace('-', '−')}</td>" for k in ("1y", "3y", "5y"))
+                 f"<td>{p['ocf_pct']:.2f}%{fee_label}</td>" + "".join(
+                     f"<td>{'–' if currency_excluded or r.get(k) is None else f'{r[k]:.2f}%'.replace('-', '−')}</td>" for k in ("1y", "3y", "5y"))
                  + f"<td class='l'>{escape(used)}</td></tr>")
+        if p.get('fee_type') == 'ter' or p.get('product_type') == 'etf':
+            notes += [f"{p['name']}: {note}" for note in p.get('notes', [])]
     if not rows:
         return ""
     return ("<h4>Peers</h4><div class='fp-scroll'><table class='fp-table'><tr><th class='l'>Peer</th><th class='l'>"
             "Currency</th><th>Fee</th><th>1 year</th><th>3 years, a year</th><th>5 years, a year</th>"
-            f"<th class='l'>Used for</th></tr>{rows}</table></div>")
+            f"<th class='l'>Used for</th></tr>{rows}</table></div>" + _list(notes))
 
 
 def _findings(data: dict) -> str:

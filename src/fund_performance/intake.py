@@ -70,7 +70,10 @@ PEER_FIELDS = (                # one set per peer; the key "peer.<field>" become
     FieldSpec("peer.isin", "ISIN", "text", False),
     FieldSpec("peer.share_class", "share class", "text"),
     FieldSpec("peer.currency", "currency", "text"),
-    FieldSpec("peer.ocf_pct", "ongoing charge (OCF), % a year", "number"),
+    FieldSpec("peer.ocf_pct", "annual charge (OCF or TER), % a year", "number"),
+    FieldSpec("peer.fee_type", "fee measure", "choice", False, ("ocf", "ter", "unknown")),
+    FieldSpec("peer.product_type", "product type", "choice", False, ("etf", "fund")),
+    FieldSpec("peer.benchmark_name", "benchmark", "text", False),
     FieldSpec("peer.pricing_point", "pricing point", "choice", False, ("midday", "market_close")),
     FieldSpec("peer.distribution", "distribution", "choice", False, ("accumulation", "income")),
     FieldSpec("peer.investor_type", "share class type", "choice", False, ("retail", "institutional")),
@@ -209,6 +212,7 @@ def peer_values(extracted: ExtractionResult) -> dict:
     draft, fs = extracted.profile_draft, extracted.factsheet
     values: dict = {"name": draft.get("fund_name"), "isin": draft.get("isin"), "share_class": draft.get("share_class"),
                     "currency": draft.get("currency") or (fs.currency if fs else None), "ocf_pct": draft.get("ocf_pct"),
+                    "benchmark_name": draft.get("benchmark_name"),
                     "pricing_point": draft.get("pricing_point"), "distribution": draft.get("distribution"),
                     "minimum_investment": draft.get("minimum_investment"),
                     "as_of_date": fs.as_of_date.isoformat() if fs and fs.as_of_date else None, "_derived": {}}
@@ -227,7 +231,11 @@ def peer_values(extracted: ExtractionResult) -> dict:
         values[f"{n}y"] = value
     risk = fs.risk_3y if fs else None
     values["vol_3y"] = risk.fund_vol if risk else None
-    values["investor_type"] = investor_type(values["share_class"], values["minimum_investment"])
+    if re.search(r'\betf\b', values.get('name') or '', re.I):
+        values['product_type'] = 'etf'
+        values['_derived']['product_type'] = 'ETF identified in the fund name'
+    values["investor_type"] = (None if values.get('product_type') == 'etf' and not values['minimum_investment']
+                               else investor_type(values["share_class"], values["minimum_investment"]))
     if values["investor_type"]:
         values["_derived"]["investor_type"] = "from the share class name and minimum investment"
     return values
@@ -240,16 +248,34 @@ def peer_record(values: dict, origin: str) -> dict:
             "pricing_point": values.get("pricing_point"), "distribution": values.get("distribution"),
             "investor_type": values.get("investor_type"), "minimum_investment": values.get("minimum_investment"),
             "vol_3y": values.get("vol_3y"), "as_of_date": values.get("as_of_date"), "origin": origin,
+            "benchmark_name": values.get("benchmark_name"), "product_type": values.get("product_type"),
             "returns": {"1y": values.get("1y"), "3y": None, "5y": None, "basis": "cumulative"},
             "returns_annualised": {"1y": values.get("1y"), "3y": values.get("3y"), "5y": values.get("5y"),
-                                   "basis": "annualised"}}
+                                   "basis": "annualised"}} | ({"fee_type": values['fee_type']} if values.get('fee_type') else {})
+
+
+def _peer_fee_type(pages: list[str], value: float | None) -> str:
+    """Use a fee label only when it is adjacent to the extracted value in the document."""
+    if value is None:
+        return 'unknown'
+    text = ' '.join(' '.join(pages).split())
+    number = _number_pattern(value).pattern
+    labels = {'ter': r'\b(?:TER|total expense ratio)\b',
+              'ocf': r'\b(?:OCF|ongoing charges?(?: figure)?)\b'}
+    found = [key for key, label in labels.items()
+             if re.search(rf'{label}\s*[:\-–]?\s*{number}\s*%', text, re.I)]
+    return found[0] if len(found) == 1 else 'unknown'
 
 
 async def read_peer(path: Path, run: RunFn | None = None) -> tuple[dict, ExtractionResult, list[str]]:
     """ One peer factsheet read by the Extractor Agent: its values, the raw result and the pages """
     pages = read_document_pages(path)
     extracted = await extract("\n".join(pages), run, peer=True)
-    return peer_values(extracted), extracted, pages
+    values = peer_values(extracted)
+    values['fee_type'] = _peer_fee_type(pages, values.get('ocf_pct'))
+    values['_derived']['fee_type'] = ('fee label matched to the extracted amount in the factsheet'
+                                      if values['fee_type'] != 'unknown' else 'fee label not established')
+    return values, extracted, pages
 
 
 async def read_documents(factsheet: Path, kid: Path | None = None, peer_factsheets: list[Path] | Path | None = None,

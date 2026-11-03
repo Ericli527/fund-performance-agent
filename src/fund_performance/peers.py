@@ -197,6 +197,7 @@ def compare_peers(peers: list[Peer], profile: FundProfile, reported: ReportedFig
     out = PeerComparison([], years)
     for peer in peers:
         series, basis, notes = _basis(peer, profile, reported, years)
+        fee_name = 'TER' if peer.fee_type == 'ter' else 'stated annual charge' if peer.fee_type == 'unknown' else 'ongoing charge'
         row = PeerRow(peer, {n: peer_annualised(peer, n) for n in PERIODS}, series,
                       {n: _fund_return(reported, series, n) for n in PERIODS}, basis, True, notes=list(notes))
         if peer.currency.upper() != profile.currency.upper():
@@ -204,7 +205,7 @@ def compare_peers(peers: list[Peer], profile: FundProfile, reported: ReportedFig
             row.excluded = f"returns in {peer.currency.upper()}, not {profile.currency.upper()}"
             out.flags.append(DataFlag(check="peers", level="info", message=(
                 f"Peer {peer.name}: its returns are in {peer.currency.upper()} and the fund's in "
-                f"{profile.currency.upper()}, so they are left out of the value comparison; its ongoing charge "
+                f"{profile.currency.upper()}, so they are left out of the value comparison; its {fee_name} "
                 f"({peer.ocf_pct:.2f}%) is still used for fees")))
         elif peer.as_of_date is not None and peer.as_of_date != profile.as_of_date:
             row.used_for_returns = False
@@ -212,7 +213,7 @@ def compare_peers(peers: list[Peer], profile: FundProfile, reported: ReportedFig
             out.flags.append(DataFlag(check="peers", level="info", message=(
                 f"Peer {peer.name}: its returns are as at {peer.as_of_date:%d %b %Y} and the fund's as at "
                 f"{profile.as_of_date:%d %b %Y} (different periods), so they are left out of the value comparison; "
-                f"its ongoing charge ({peer.ocf_pct:.2f}%) is still used for fees")))
+                f"its {fee_name} ({peer.ocf_pct:.2f}%) is still used for fees")))
         elif row.returns.get(years) is None or row.fund_returns.get(years) is None:
             row.used_for_returns = False
             row.excluded = f"no {years}-year return for the {'peer' if row.returns.get(years) is None else 'fund'}"
@@ -222,9 +223,19 @@ def compare_peers(peers: list[Peer], profile: FundProfile, reported: ReportedFig
             row.notes.append(INSTITUTIONAL_NOTE)
         if peer.distribution and peer.distribution != profile.distribution:
             row.notes.append(f"{peer.distribution} share class: compared on a total-return basis")
+        if peer.fee_type == 'ter':
+            row.notes.append('The peer reports TER rather than OCF; check differences in cost coverage and methodology.')
+        elif peer.fee_type == 'unknown':
+            row.notes.append('The peer fee measure is not established; verify the source before comparing charges.')
+        if peer.product_type == 'etf':
+            row.notes.append('The peer is an ETF; dealing spreads and brokerage costs may differ from an open-ended fund.')
         if peer.benchmark_name and _plain_name(peer.benchmark_name) != _plain_name(profile.benchmark_name):
-            row.notes.append(f"follows {peer.benchmark_name}, a different benchmark variant from the fund's "
-                             f"{profile.benchmark_name} (for information: the comparison and ratings are unchanged)")
+            if 'msci acwi' in _plain_name(peer.benchmark_name) and 'ftse global all cap' in _plain_name(profile.benchmark_name):
+                row.notes.append('MSCI ACWI covers large- and mid-cap equities; FTSE Global All Cap also includes small caps. '
+                                 'This is a relevant but imperfect peer, not an identical benchmark.')
+            else:
+                row.notes.append(f"follows {peer.benchmark_name}, a different benchmark variant from the fund's "
+                                 f"{profile.benchmark_name} (for information: the comparison and ratings are unchanged)")
         out.rows.append(row)
     return out
 

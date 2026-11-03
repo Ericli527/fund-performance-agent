@@ -260,10 +260,12 @@ def _comparison(inp, facts: dict) -> str:
              row("Index or benchmark", ann("index"), "–", _source(*(figs.get(f"index.ann.{k}y") for k in (3, 5)))))
     for p in facts.get("peers", []):
         r = p.get("returns_pct_a_year", {})
-        cells = ["–" if r.get(k) is None else f"{r[k]:.2f}%".replace("-", "−") for k in ("1y", "3y", "5y")]
+        currency_excluded = not p.get('used_for_returns') and str(p.get('excluded') or '').startswith('returns in ')
+        cells = ["–" if currency_excluded or r.get(k) is None else f"{r[k]:.2f}%".replace("-", "−") for k in ("1y", "3y", "5y")]
         used = (f"Peer, fees and returns ({p['basis']})" if p.get("used_for_returns")
                 else f"Peer, fees only: {p.get('excluded')}")
-        rows += row(p["name"], cells, f"{p['ocf_pct']:.2f}%", used)
+        fee_label = ' TER' if p.get('fee_type') == 'ter' else ''
+        rows += row(p["name"], cells, f"{p['ocf_pct']:.2f}%{fee_label}", used)
     gap = figs.get(f"comparison.td.{n}y")
     note = (f"Gap to the index over {n} years: {_shown(gap)} a year (tracking difference; calculated from the "
             "factsheet). Returns a year; 1 year is the 1-year return. Two decimal places aid comparison; source "

@@ -10,28 +10,28 @@ share_class: "A GBP Accumulation"
 isin: GB00BD3RZ582
 ticker: VAFTGAG
 benchmark: "FTSE Global All Cap Index"
-peer: "HSBC FTSE All-World Index Fund Acc C (GB00BMJJJF91): fees compared; returns not (dated 31 May 2026)"
+peer: "State Street SPDR MSCI All Country World UCITS ETF (Acc) (IE00B44Z5B48): TER compared; USD returns excluded"
 review_date: 2026-09-30
 quick:
   prices: quick/Historical_Prices_Vanguard_FTSE_Global_All_Cap_GBP_Acc.xlsx
-  json: [quick/fund_profile.json, quick/factsheet_performance.json, quick/peer.json]
+  json: [quick/fund_profile.json, quick/factsheet_performance.json, quick/spdr_peer.json]
 live:
   prices: quick/Historical_Prices_Vanguard_FTSE_Global_All_Cap_GBP_Acc.xlsx
   factsheet: documents/Vanguard_FTSE_Global_All_Cap_GBP_Acc_factsheet.pdf
   kid: documents/Vanguard_FTSE_Global_All_Cap_GBP_Acc_KIID.pdf
-  peers: [documents/HSBC_FTSE_All-World_Index_Fund_Acc_C_2026-05.pdf]
+  peers: [documents/Factsheet_peer.pdf]
 return_check_tolerance_pp: 0.05
 sources:
   - {publisher: "Vanguard Asset Management", title: "Vanguard FTSE Global All Cap Index Fund GBP Acc factsheet", date: "30 Sep 2026", used: "returns in GBP (fund and benchmark), fees, fund size"}
   - {publisher: "Vanguard Investments UK", title: "Key Investor Information (A GBP Accumulation)", date: "17 Feb 2026", used: "objective, risk indicator, calendar-year returns in GBP"}
   - {publisher: "Vanguard", title: "Historical prices, GBP Acc (Excel download)", date: "downloaded 30 Oct 2026", used: "daily NAV to 30 Sep 2026: risk and cross-checks (later prices left out)"}
   - {publisher: "FTSE Russell", title: "FTSE Global All Cap Index factsheet", date: "30 Sep 2026", used: "context only: its returns are in USD, so they are not compared with the GBP fund"}
-  - {publisher: "HSBC Asset Management", title: "HSBC FTSE All-World Index Fund Acc C monthly report", date: "31 May 2026", used: "peer: ongoing charge, share class, currency, accumulation, pricing time (its returns are not compared: different dates)"}
+  - {publisher: "State Street Investment Management", title: "SPDR MSCI All Country World UCITS ETF (Acc) factsheet", date: "30 Sep 2026", used: "peer: TER, share class, currency, accumulation and benchmark; USD returns excluded"}
 disclosures:
   - "Benchmark returns are the GBP figures printed in Vanguard's factsheet. The FTSE Russell factsheet gives USD returns, which are not used."
   - "When tracking error, beta or R² cannot be established from the documents or a compatible benchmark price series, the relevant ratings wait for that evidence. Check the source and extraction results before concluding that a metric is absent."
-  - "Peer: HSBC FTSE All-World Index Fund Acc C (GB00BMJJJF91), a GBP accumulation share class, priced at 12:00 UK time. Its latest verified official report is dated 31 May 2026, not 30 Sep 2026, so its returns cover different periods and are left out of the value comparison; its ongoing charge is used for fees. Value for investors waits for a peer report dated 30 Sep 2026."
-  - "Benchmark difference: the peer tracks the FTSE All-World Index (large and mid caps, about 4,200 stocks), while the fund tracks the FTSE Global All Cap Index, which also includes small caps (about 10,200 stocks). The peer is a close comparison, not an identical benchmark."
-  - "Peer share class: HSBC Acc C has a minimum initial investment of GBP 1,000,000 (an institutional class), so its fee may be lower than retail investors can get."
+  - "Peer: State Street SPDR MSCI All Country World UCITS ETF (Acc) is a USD share class. Its USD factsheet returns are not compared with the GBP fund; its GBP London listing ACWI does not change the share-class currency."
+  - "Benchmark difference: the peer tracks MSCI ACWI, which covers large and mid caps; the fund's FTSE Global All Cap Index also includes small caps. This is a relevant but imperfect peer, not an identical benchmark."
+  - "Fee comparison: the peer reports TER and the fund reports OCF. Check differences in the cost measures; an ETF may also incur dealing spreads or brokerage costs unlike an open-ended fund."
   - "Pricing time not stated: the factsheet gives a 12:00 London dealing cut-off and says performance is calculated on the closing NAV, but not the valuation time, so the profile records it as not stated and the reports say a timing difference cannot be ruled out."
   - "The price download runs to 29 Oct 2026; prices after 30 Sep 2026 are left out of the September review."

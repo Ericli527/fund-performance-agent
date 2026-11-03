@@ -202,7 +202,7 @@ def test_no_peer_is_amber_add_peer():
 
 def test_a_peer_in_another_currency_counts_for_fees_only():
     pillar = sc.value_rating(figures(fund_nav__ann__5y=13.8), profile(), T, peer(currency="EUR"))
-    assert (pillar.rating, pillar.summary) == (AMBER, "Add peer") and "returns in EUR, not GBP" in pillar.reason
+    assert (pillar.rating, pillar.summary) == (MANUAL_CHECK, "Add peer") and "returns in EUR, not GBP" in pillar.reason
     assert sc.fees_rating(profile(ocf_pct=0.06), T, peer(ocf=0.03, currency="EUR"), GREEN).rating == GREEN
 
 
