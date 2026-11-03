@@ -816,6 +816,9 @@ p {{ margin: 0 0 3px 0; }} ul, ol {{ margin: 0 0 3px 0; }} li {{ margin-bottom: 
 .approval td {{ padding: 4px 4px 2px 4px; }} .line {{ border-bottom: 0.8px solid #1d2733; }}
 .ticks td {{ padding: 2px 4px; }} .box {{ border: 0.8px solid #1d2733; width: 10px; }}
 .callout td {{ background-color: #fff6e0; border-left: 3px solid {RATING_COLOURS[AMBER]}; padding: 6px 8px; }}
+.ai-compare td {{ padding: 4px 6px; vertical-align: top; }}
+.governance td {{ background-color: #eef3fa; border-left: 3px solid {NAVY}; padding: 8px 10px; }}
+
 .tight li {{ margin-bottom: 0; }}
 .concl {{ background-color: #f1f4f8; padding: 4px 6px; margin: 4px 0; }}
 .grid td.sub {{ background-color: #e8edf3; color: {NAVY}; font-weight: bold; font-size: 6.8pt; text-align: left; }}
@@ -834,14 +837,44 @@ def build_html(inp: ReportInputs, out_dir: Path) -> str:
     ratings = ((assessment.get('assessment') or {}).get('investment_ratings') or []
                if assessment.get('status') == 'available' else [])
     if ratings:
-        items = ''.join('<li><b>' + escape(str(r['dimension'])) + ': ' + escape(str(r['proposed_rating']))
-            + '</b> — quantitative scorecard: ' + escape(str(r['quantitative_scorecard_rating']))
-            + (' (agreement). ' if r['agreement'] else ' (disagreement). ') + escape(str(r['rationale']))
-            + ' Evidence: ' + escape(', '.join(r['supporting_evidence'])) + '. Limitations: '
-            + escape('; '.join(r['limitations']) or 'None stated') + '. Further review: '
-            + ('required' if r['further_review_required'] else 'not specifically requested') + '.</li>' for r in ratings)
-        appendices.append('<h1>Independent AI investment rating proposals</h1><p>These proposals are separate '
-                          'from the quantitative scorecard and require human sign-off.</p><ul>' + items + '</ul>')
+        comparisons, explanations, disagreements = [], [], []
+        for rating in ratings:
+            dimension = str(rating.get('dimension') or 'Unknown')
+            code = str(rating.get('quantitative_scorecard_rating') or 'Not available')
+            ai = str(rating.get('proposed_rating') or 'Not available')
+            agreement = bool(rating.get('agreement'))
+            if not agreement:
+                disagreements.append(dimension)
+            comparisons.append(
+                f"<tr><td class='l'>{escape(dimension)}</td><td>{escape(code)}</td>"
+                f"<td>{escape(ai)}</td><td>{'Agrees' if agreement else 'Review difference'}</td></tr>")
+            sources = ', '.join(str(ref) for ref in rating.get('supporting_evidence') or [])
+            limits = rating.get('limitations') or []
+            explanation = (f"<h3>{escape(dimension)} — AI proposal: {escape(ai)}</h3>"
+                           f"<p>{escape(str(rating.get('rationale') or 'No rationale provided.'))}</p>"
+                           f"<p class='src'>Evidence references: {escape(sources or 'Not provided')}</p>")
+            if limits:
+                explanation += "<p><b>Qualifications</b></p><ul class='tight'>" + ''.join(
+                    f"<li>{escape(str(item))}</li>" for item in limits) + "</ul>"
+            if rating.get('further_review_required'):
+                explanation += '<p><b>Further investigation required before sign-off.</b></p>'
+            explanations.append(explanation)
+        ai_appendix = (
+            '<h1>Independent AI investment rating proposals</h1>'
+            '<p>Python owns numerical metrics and the quantitative scorecard. The AI proposes investment ratings '
+            'using the supplied evidence. Neither is a signed investment decision.</p>'
+            '<h2>Rating comparison</h2>'
+            '<table class="grid ai-compare"><tr><th class="l">Dimension</th><th>Python</th>'
+            '<th>AI proposal</th><th>Review status</th></tr>' + ''.join(comparisons) + '</table>')
+        if disagreements:
+            ai_appendix += (
+                '<table class="governance"><tr><td><b>Governance insight</b><br/>'
+                'The quantitative scorecard and independent AI assessment differ on '
+                + escape(', '.join(disagreements))
+                + '. Check the supporting evidence and assumptions before final sign-off.</td></tr></table>')
+        ai_appendix += ('<h2>Investment reasoning and evidence</h2>' + ''.join(explanations)
+                        + '<p class="src">Draft for analyst review. These are AI proposals, not committee approval.</p>')
+        appendices.append(ai_appendix)
     appendices.append(_appendix(inp, False, plain_text("".join([p1, p2] + appendices))))
     separator = '' if long_commentary(inp.facts) else '<div style="page-break-before: always"></div>'
     body = p1 + separator + p2 + '<div style="page-break-before: always"></div>' + \
