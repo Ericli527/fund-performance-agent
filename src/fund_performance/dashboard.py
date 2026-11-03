@@ -668,6 +668,8 @@ def dashboard_sections(data: dict) -> dict[str, str]:
                    + escape(str(benchmark_return.get('display'))) + ' for the benchmark. '
                    'These historical returns are not a forecast.</p>')
     chart_title = status.get("title") or "Five-year cumulative performance — fund vs benchmark"
+    if panels and not data.get('primary_chart'):
+        chart_title = 'Performance & risk — published evidence'
     performance = (f"<div class='fp-card'><h3>{escape(chart_title)}</h3>" + summary + primary
                    + "</div><div class='fp-card'><h3>Period returns &amp; risk</h3>" + (financial_detail or
                    "<p class='fp-muted'>Performance and risk figures are unavailable for this review.</p>")
