@@ -53,7 +53,8 @@ PYTHONPATH=src python -m fund_performance.run_report --data demo/sample_index_fu
 pytest -q tests/test_dashboard.py tests/test_web.py tests/test_report.py tests/test_golden_facts.py
 
 # Full non-live regression and expected-skip audit
-pytest -q --ignore=tests/test_live_agents.py
+python -m pytest -m "not live" -q -ra --junitxml=test-results.xml
+python scripts/check_test_skips.py test-results.xml
 ```
 
 Check the repository's actual CI workflow for its authoritative non-live command and skip audit. Private fixtures are intentionally absent from public CI; skip counts vary by environment. Never use a paid live-model test by default or silently regenerate golden baselines.
