@@ -129,6 +129,54 @@ def test_peer_extraction_uses_lightweight_mode(tmp_path):
     assert by_key(intake)['peer1.5y']['value'] == '8.16'
 
 
+def test_multiple_peer_extractions_overlap_and_keep_input_order(tmp_path):
+    from types import SimpleNamespace
+    factsheet, first = docs(tmp_path)
+    second = tmp_path / 'other_peer.txt'
+    second.write_text(PEER_SHEET)
+    started = []
+    both_started = asyncio.Event()
+
+    async def peer_run(agent, prompt):
+        started.append(prompt)
+        if len(started) == 2:
+            both_started.set()
+        await asyncio.wait_for(both_started.wait(), timeout=5)
+        return SimpleNamespace(final_output=peer_answer())
+
+    intake = asyncio.run(read_documents(factsheet, peer_factsheets=[first, second],
+        run_extractor=FakeRun(extractor_answer()), run_mandate=FakeRun(MANDATE), run_peer=peer_run))
+    assert len(started) == 2
+    assert intake['documents'][-2:] == [first.name, second.name]
+    assert by_key(intake)['peer1.5y']['value'] == by_key(intake)['peer2.5y']['value'] == '8.16'
+
+
+def test_failed_peer_extraction_cancels_other_in_flight_peer(tmp_path):
+    factsheet, first = docs(tmp_path)
+    second = tmp_path / 'other_peer.txt'
+    second.write_text(PEER_SHEET)
+    async def exercise():
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+        count = 0
+        async def peer_run(agent, prompt):
+            nonlocal count
+            count += 1
+            if count == 1:
+                await started.wait()
+                raise RuntimeError('peer failed')
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+        with pytest.raises(RuntimeError, match='peer failed'):
+            await read_documents(factsheet, peer_factsheets=[first, second],
+                run_extractor=FakeRun(extractor_answer()), run_mandate=FakeRun(MANDATE), run_peer=peer_run)
+        assert cancelled.is_set()
+    asyncio.run(exercise())
+
+
 def test_peer_benchmark_pricing_does_not_supply_peer_pricing():
     from fund_performance.agents.extractor import ExtractionResult
     from fund_performance.intake import peer_values
