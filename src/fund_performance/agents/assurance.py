@@ -1,3 +1,4 @@
+from fund_performance.communication import COMMUNICATION_STYLE
 """Optional, read-only investment assurance of a completed review and its PDF text."""
 import copy
 import json
@@ -113,7 +114,7 @@ class AssuranceResult(StrictModel):
 
 def assurance_agent() -> Agent:
     # The existing Judge model and FUND_MODEL_JUDGE override remain authoritative.
-    return Agent(name='Investment Assurance Judge', instructions=INSTRUCTIONS, output_type=AssuranceResult,
+    return Agent(name='Investment Assurance Judge', instructions=INSTRUCTIONS + COMMUNICATION_STYLE, output_type=AssuranceResult,
                  **model_kwargs('judge'))
 
 

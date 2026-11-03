@@ -154,7 +154,8 @@ def test_analyst_summary_is_bounded_and_details_preserve_full_assessment():
     assert 'action 2' in default and 'action 3' not in default
     assert 'Reviewer says verify the source.' in default and 'Evidence is provisional.' in default
     assert 'A specific manager question?' not in default and 'A specific manager question?' in details
-    assert 'word119' in details and 'Full source evidence.' in details and 'accepted' in details
+    assert 'word119' in details and 'Full source evidence.' in details
+    assert 'accepted' not in default and 'accepted' in technical_html(d)
     assert d['presentation_context'] == before
 
 
@@ -201,7 +202,7 @@ def test_rating_explanations_show_logic_evidence_and_peer_limitations():
     d['facts']['peers'][0].update(investor_type='institutional', minimum_investment='GBP 1,000,000')
     overview = text(dashboard_sections(d)['overview'])
     assert all(name in overview for name in ('Mandate', 'Performance', 'Value for investors', 'Fees'))
-    assert 'R² and beta alone do not establish' in overview and 'Tracking difference provides a separate' in overview
+    assert 'R² and beta alone do not establish' in overview and 'aims to track Sample World Index' in overview
     assert '1,000,000' in overview and 'institutional share class' in overview
     assert 'Rating methodology' in overview and 'Supporting evidence' in overview
 
@@ -415,3 +416,15 @@ def test_next_step_covers_both_extraction_and_repeated_price_warnings():
         "suggested_conclusion": {"source": "ai", "next_step": "Check the figures."}}
     text = next_step(facts)
     assert "AI-extracted" in text and "flagged historical prices" in text and "before sign-off" in text
+
+
+def test_main_ai_analysis_is_readable_and_diagnostics_are_technical():
+    from fund_performance.dashboard import dashboard_sections, technical_html
+    d = data()
+    d['presentation_context'] = {'investment_assessment': {'status': 'available',
+        'assessment': {'investment_thesis': 'The fund follows its index.', 'recommendation': 'monitor',
+                       'manager_questions': ['How is tracking monitored?']},
+        'diagnostics': {'internal_marker': 'validation_detail'}}}
+    overview = dashboard_sections(d)['overview']
+    assert 'How is tracking monitored?' in overview and '<pre' not in overview
+    assert 'validation_detail' not in overview and 'validation_detail' in technical_html(d)

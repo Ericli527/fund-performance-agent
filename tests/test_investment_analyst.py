@@ -454,3 +454,14 @@ def test_controller_keeps_qualified_partial_result_and_scorecard(tmp_path):
     overview = dashboard_sections(dashboard_data(result))['overview']
     assert 'Qualified draft' in overview and 'provisional' in overview
     assert result.pdf.is_file() and result.executive_pdf.is_file()
+
+
+def test_unknown_reference_gets_targeted_correction_and_catalogue():
+    bad = copy.deepcopy(BASE)
+    bad['evidence_references'] = ['performance_5y']
+    runner = FakeRun(bad, BASE)
+    result = asyncio.run(assess(FACTS, PROFILE, [], 'Review', runner, FakeRun(PASS)))
+    assert result['status'] == 'available'
+    assert 'performance_5y' in runner.prompts[1] and 'permitted_references' in runner.prompts[1]
+    assert 'performance:5y' in runner.prompts[0] and 'evidence_catalogue' in runner.prompts[0]
+    assert 'Correct only the affected citation fields' in runner.prompts[1]

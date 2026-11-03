@@ -1,3 +1,4 @@
+from fund_performance.communication import COMMUNICATION_STYLE
 """ Reporting Agent: two narratives from the same verified evidence, in one run (framework point 1)
 
 - The dashboard answer to the reviewer's question: a direct answer (2 to 4 sentences), up to three non-repetitive
@@ -264,10 +265,10 @@ def executive_problems(paragraphs: list[str], facts: dict, sources: list[dict] |
 def reporter_agent(tools: bool = False) -> Agent:
     """ The Reporting Agent; with tools, it fetches the verified evidence itself (reporting_tools.py) """
     if not tools:
-        return Agent(name="Reporting Agent", instructions=INSTRUCTIONS, output_type=DraftOutput,
+        return Agent(name="Reporting Agent", instructions=INSTRUCTIONS + COMMUNICATION_STYLE, output_type=DraftOutput,
                      **model_kwargs("reporter"))
     from fund_performance.agents.reporting_tools import TOOLS
-    return Agent(name="Reporting Agent", instructions=INSTRUCTIONS + TOOL_INSTRUCTIONS, output_type=DraftOutput,
+    return Agent(name="Reporting Agent", instructions=INSTRUCTIONS + COMMUNICATION_STYLE + TOOL_INSTRUCTIONS, output_type=DraftOutput,
                  tools=TOOLS, **model_kwargs("reporter"))
 
 

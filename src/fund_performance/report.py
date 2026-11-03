@@ -872,6 +872,13 @@ def build_html(inp: ReportInputs, out_dir: Path) -> str:
                 'The quantitative scorecard and independent AI assessment differ on '
                 + escape(', '.join(disagreements))
                 + '. Check the supporting evidence and assumptions before final sign-off.</td></tr></table>')
+        analysis = assessment.get('assessment') or {}
+        ai_appendix += '<h2>Investment thesis</h2><p>' + escape(str(analysis.get('investment_thesis') or '')) + '</p>'
+        for heading, key in [('Supporting evidence', 'supporting_evidence'), ('Material risks', 'material_risks'),
+                             ('Oversight actions', 'recommended_actions'), ('Manager questions', 'manager_questions')]:
+            if analysis.get(key):
+                ai_appendix += '<h3>' + heading + '</h3><ul>' + ''.join(
+                    '<li>' + escape(str(item)) + '</li>' for item in analysis[key]) + '</ul>'
         ai_appendix += ('<h2>Investment reasoning and evidence</h2>' + ''.join(explanations)
                         + '<p class="src">Draft for analyst review. These are AI proposals, not committee approval.</p>')
         appendices.append(ai_appendix)

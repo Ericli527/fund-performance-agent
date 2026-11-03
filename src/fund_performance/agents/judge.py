@@ -1,3 +1,4 @@
+from fund_performance.communication import COMMUNICATION_STYLE
 """ Judge Agent: an editor, not a gatekeeper. It reviews the Reporting Agent's draft like a senior analyst helping a
 junior analyst improve it (framework point 2)
 
@@ -76,7 +77,7 @@ class ReviewResult(BaseModel):
 
 
 def judge_agent() -> Agent:
-    return Agent(name="Judge Agent", instructions=INSTRUCTIONS, output_type=ReviewResult, **model_kwargs("judge"))
+    return Agent(name="Judge Agent", instructions=INSTRUCTIONS + COMMUNICATION_STYLE, output_type=ReviewResult, **model_kwargs("judge"))
 
 
 # The review as checks that pass (true = good), for facts.json and the report's draft table
