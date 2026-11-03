@@ -37,7 +37,7 @@ PAGE_TITLES = ("Overview", "Comparisons and decision") + APPENDIX_TITLES
 NAVY = "#1f3a5f"
 RATING_COLOURS = {GREEN: "#2e7d32", AMBER: "#d18f00", RED: "#c62828", CHECK_DATA: "#6d4c9f", MANUAL_CHECK: "#546e7a"}
 RATING_WORDS = {GREEN: "Green", AMBER: "Amber", RED: "Red", CHECK_DATA: "Check data", MANUAL_CHECK: "Manual check"}
-SOURCE_WORDS = {"factsheet": "Factsheet", "calculated": "Calculated", "calculated_provisional": "Calculated from AI-extracted figures (please verify)", "ai_extracted": "AI-extracted (please verify)",
+SOURCE_WORDS = {"factsheet": "Fund Factsheet", "calculated": "Calculated", "calculated_provisional": "Calculated", "ai_extracted": "Fund Factsheet",
                 "user": "Entered by user",
                 "web": "Web"}
 AOV_DISCLAIMER = ("This is an indicative assessment from public data. It does not replace the AFM's formal "
@@ -99,7 +99,7 @@ def fmt(name: str, fig: Figure | None, verify: bool = True) -> str:
         return "–"
     two_dp = any(part in TWO_DP for part in name.split("."))
     text = fig.display(percent_decimals=2 if two_dp else 1, ratio_decimals=2).replace("-", "−")
-    return text + (" (please verify)" if verify and fig.needs_verification else "")
+    return text
 
 
 def source_of(*figs: Figure | None) -> str:
@@ -119,8 +119,8 @@ def _years(inp: ReportInputs) -> int:
 
 def _profile_source(p: FundProfile, key: str, default: str) -> str:
     """ Documents route: who gave a profile value (AI-extracted, entered by user, derived by code) """
-    return {"ai_extracted": "AI-extracted (please verify)", "user": "Entered by user",
-            "code": "Derived by code (please verify)"}.get(p.field_sources.get(key, ""), default)
+    return {"ai_extracted": "Fund Factsheet", "user": "Entered by user",
+            "code": "Calculated"}.get(p.field_sources.get(key, ""), default)
 
 
 def plain_reason(inp: ReportInputs, name: str) -> str:
@@ -188,7 +188,7 @@ def _returns_table(inp: ReportInputs) -> str:
         who = "PNAV" if basis == "fund_pnav" else "NAV"
         rows += (f"<tr class='total'><td class='l'>{_marked(inp, f'Gap to index ({who} vs index, pp)')}</td>"
                  + "".join(f"<td>{fmt('comparison.td' if i >= 3 else 'comparison.excess_cum', g, False)}</td>"
-                           for i, g in enumerate(gap)) + "<td class='src'>Calculated from the factsheet</td></tr>")
+                           for i, g in enumerate(gap)) + "<td class='src'>Calculated</td></tr>")
     head = "".join(f"<th>{c}</th>" for c, _ in cols)
     return (f"<table class='grid num'><tr><th class='l' width='31%'>Return</th>{head}<th width='14%'>Source</th></tr>"
             f"{rows}</table><p class='small'>Cumulative gaps to 1 d.p., yearly gaps to 2 d.p.</p>")

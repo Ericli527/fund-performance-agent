@@ -303,7 +303,7 @@ def test_the_market_close_series_is_used_when_the_gap_is_measured_on_it():
     facts["figures"].append({"name": "fund_pnav.ann.5y", "display": "13.8%", "value": 13.8, "unit": "%",
                              "source": "factsheet"})
     fund = headline_metrics(facts)[0]
-    assert (fund.value, fund.source) == ("13.8% a year", "Factsheet") and "market-close price (PNAV)" in fund.period
+    assert (fund.value, fund.source) == ("13.8% a year", "Fund Factsheet") and "market-close price (PNAV)" in fund.period
 
 
 # Audiences: different views, same facts and ratings
