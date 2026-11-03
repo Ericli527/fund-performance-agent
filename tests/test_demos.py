@@ -108,7 +108,7 @@ def test_missing_optional_peer_is_disclosed_but_does_not_block_live_case(library
     state, table, picked, mode, status = choose("sample")
     assert picked == "sample" and mode == web.LIVE
     assert any(row["role"] == "Fund factsheet" for row in state)
-    assert any(row["role"] == "Fund price history" for row in state)
+    assert any(row["role"] == "Price history" for row in state)
     assert not any(row["role"] == "Peer factsheet" for row in state)
     assert "loaded" in status and "Optional documents not found" in status
     assert "documents/peer_factsheet.pdf" in status
