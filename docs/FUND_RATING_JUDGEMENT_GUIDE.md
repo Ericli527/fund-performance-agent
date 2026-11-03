@@ -93,3 +93,12 @@ Use **relative** quantities rather than universal annual-return bands. These are
 10. **Vanguard LifeStrategy 60% Equity, official provider**: https://www.vanguard.co.uk/professional/product/mf/lifestrategy/9241/lifestrategyr-60-equity-fund-gbp-acc
 
 **Important:** This research covers general UK-retail accessible examples and regulatory principles; it does **not** establish comprehensive or current statistical return/fee acceptance bands across all fund categories. Such ranges require representative fund-universe data and explicit review-policy approval.
+
+## Application integration
+
+The Analyst and Quality Reviewer receive only the rubric selected from the documented objective and mandate
+interpretation, plus common judgement safeguards. Selection is retrieval guidance, not a financial rating; the LLM
+must check it against the source evidence. Unclear strategy receives the common framework without an invented
+category. The full guide remains a human-readable research reference. Product examples are not added as numerical
+authority. The Reporting Agent distinguishes supported AI conclusions from the quantitative scorecard and evidence
+completeness, and targets a concise 2–3 paragraph answer without manufacturing content to reach a word count.

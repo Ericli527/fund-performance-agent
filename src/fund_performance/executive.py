@@ -182,6 +182,7 @@ def _scorecard(data: dict) -> str:
 def _summary_html(concl: dict) -> str:
     """ The Executive commentary (AI, checked by code); else the dashboard answer and its evidence; else code's
     conclusion as one paragraph """
+    from fund_performance.presentation import answer_paragraphs
     paragraphs = executive_commentary(concl)
     if paragraphs:
         return "".join(f"<p>{escape(p)}</p>" for p in paragraphs)
@@ -189,7 +190,7 @@ def _summary_html(concl: dict) -> str:
     if not parts:
         return f"<p>{escape(concl.get('text', ''))}</p>"
     answer, evidence = parts
-    return (f"<p><b>Answer.</b> {escape(answer)}</p>"
+    return ("<p><b>Answer.</b></p>" + ''.join(f"<p>{escape(p)}</p>" for p in answer_paragraphs(answer))
             + (f"<p><b>Supporting evidence</b></p>{_ul(evidence)}" if evidence else ""))
 
 

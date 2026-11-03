@@ -45,14 +45,15 @@ def test_strategy_and_evidence_reach_both_agents_without_requiring_a_peer(object
     assert output['assessment']['human_review_required']
 
 
-def test_both_existing_agents_receive_strategy_rubric_without_fee_example_authority():
+def test_only_applicable_strategy_guidance_is_sent_with_no_fee_example_authority():
+    from fund_performance.agents.judgement_guidance import guidance_for
+    profile = PROFILE.model_copy(update={'objective_text': 'Track FTSE Global All Cap using sampling.',
+                                         'benchmark_name': 'FTSE Global All Cap'})
+    packet = guidance_for(profile)
+    assert packet['strategy_framework'] == 'Passive global equity'
+    assert 'sampling' in packet['guidance']
+    assert 'Rate-shock' not in packet['guidance'] and 'Money market:' not in packet['guidance']
+    assert '0.06%' not in packet['guidance'] and '0.23%' not in packet['guidance']
+    assert 'not an uploaded peer' in packet['guidance']
     for agent in (analyst_agent(), reviewer_agent()):
-        prompt = agent.instructions
-        for strategy in ('Passive US equity', 'Passive global equity', 'Active equity',
-                         'Government or investment-grade bonds', 'Active credit', 'Multi-asset',
-                         'Money market', 'Absolute-return or alternatives'):
-            assert strategy in prompt
-        assert 'not approved policy or automatic thresholds' in prompt
-        assert 'Missing peers or secondary risk metrics alone do not justify AMBER or RED' in prompt
-        assert '0.06%' not in prompt and '0.23%' not in prompt
-        assert 'not an uploaded peer' in prompt
+        assert 'Rate-shock' not in agent.instructions
