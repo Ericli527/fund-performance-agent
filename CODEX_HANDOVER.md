@@ -76,3 +76,10 @@ Check the repository's actual CI workflow for its authoritative non-live command
 - `feat/investment-assurance-judge` adds an opt-in, one-call Investment Assurance Judge using the existing Judge model and AI limits. It reviews the completed review and extracted report text without changing calculations or ratings; human sign-off remains required.
 - Results are session-only and include a schema version and run ID for future human-review comparison. Likelihoods are explicitly uncalibrated. No PDF page images are sent, so visual inspection is not performed. Research Brief coverage is reported unavailable when no such PDF exists.
 - Details, example schema and limitations: `docs/investment-assurance.md`. Run focused assurance, web, controller and golden-facts tests before review. No live model evaluation has been performed.
+
+## Fund judgement guide
+The supplied `docs/FUND_RATING_JUDGEMENT_GUIDE.md` is retained as a dated qualitative research reference.
+`agents/judgement_guidance.py` distils strategy-specific guidance for the existing Analyst and Quality Reviewer.
+It adds no numeric fee thresholds, external evidence IDs, model calls or scoring rules. Fee examples in the guide
+are not injected as current facts; any contextual comparison requires current-run sourced, dated evidence.
+Mocked cross-strategy tests cover missing/unreadable peers; they do not establish live investment-judgement quality.
