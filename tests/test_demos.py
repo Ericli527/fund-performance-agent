@@ -86,9 +86,49 @@ def test_missing_private_files_make_a_demo_unavailable_not_an_error(library):
     sample, absent = load_demos()
     assert sample.available and not absent.available
     assert absent.missing() == ["quick/prices.csv", "quick/fund_profile.json", "quick/factsheet_performance.json",
-                                "quick/peer.json", "documents/factsheet.pdf", "documents/peer_factsheet.pdf"]
+                                "quick/peer.json", "documents/factsheet.pdf"]
+    assert absent.missing_optional() == ["documents/peer_factsheet.pdf"]
     assert matching_demo(SAMPLE / "prices.csv", [], [absent]) is None
 
+
+
+def test_missing_optional_peer_is_disclosed_but_does_not_block_live_case(library, monkeypatch):
+    from fund_performance import web
+    (library / "sample" / "documents" / "peer_factsheet.pdf").unlink()
+    demo = find_demo("sample")
+    assert demo.available and demo.missing() == []
+    assert demo.missing_optional() == ["documents/peer_factsheet.pdf"]
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-real")
+    monkeypatch.setenv("AI_RUNS_ENABLED", "true")
+    monkeypatch.delenv("PORT", raising=False)
+    monkeypatch.delenv(web.OFFLINE_ENV, raising=False)
+
+    choose = next(f for f in web.build_ui().fns.values() if f.name == "choose_case").fn
+    state, table, picked, mode, status = choose("sample")
+    assert picked == "sample" and mode == web.LIVE
+    assert any(row["role"] == "Fund factsheet" for row in state)
+    assert any(row["role"] == "Price history" for row in state)
+    assert not any(row["role"] == "Peer factsheet" for row in state)
+    assert "loaded" in status and "Optional documents not found" in status
+    assert "documents/peer_factsheet.pdf" in status
+
+    price, factsheet, kid, peers, json_files, _, info = web.on_demo("sample", web.LIVE)
+    assert price and factsheet and peers is None and json_files is None
+    assert "Optional files not loaded" in info and "documents/peer_factsheet.pdf" in info
+
+
+def test_missing_main_factsheet_still_blocks_live_case(library, monkeypatch):
+    from fund_performance import web
+    (library / "sample" / "documents" / "factsheet.pdf").unlink()
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-real")
+    monkeypatch.setenv("AI_RUNS_ENABLED", "true")
+    monkeypatch.delenv("PORT", raising=False)
+    choose = next(f for f in web.build_ui().fns.values() if f.name == "choose_case").fn
+    state, table, picked, mode, status = choose("sample")
+    assert not state and picked is None
+    assert mode == web.LIVE and "unavailable" in status
+    assert "documents/factsheet.pdf" in status
 
 def test_a_demo_is_recognised_only_from_its_exact_quick_inputs(library, tmp_path):
     files = find_demo("sample").quick_files

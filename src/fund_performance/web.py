@@ -642,8 +642,9 @@ def demo_inputs(demo: Demo, mode: str) -> dict:
     """ What goes into the upload boxes: the quick inputs (price + JSON) or the documents (price + PDFs) """
     if mode == LIVE:
         f = demo.live_files
-        return {"price": str(f["price"]), "factsheet": str(f["factsheet"]), "kid": str(f["kid"]) if f["kid"] else None,
-                "peer": [str(p) for p in f["peers"]] or None, "json": None}
+        return {"price": str(f["price"]), "factsheet": str(f["factsheet"]),
+                "kid": str(f["kid"]) if f["kid"] and f["kid"].is_file() else None,
+                "peer": [str(p) for p in f["peers"] if p.is_file()] or None, "json": None}
     f = demo.quick_files
     return {"price": str(f["price"]), "factsheet": None, "kid": None, "peer": None, "json": [str(p) for p in f["json"]]}
 
@@ -659,6 +660,11 @@ def demo_info_html(demo: Demo, mode: str) -> str:
     sources = "".join(f"<li><b>{escape(x['publisher'])}</b>, {escape(x['title'])} ({escape(str(x['date']))}): "
                       f"{escape(x['used'])}</li>" for x in demo.sources)
     notes = "".join(f"<li>{escape(x)}</li>" for x in demo.disclosures)
+    missing_optional = demo.missing_optional() if mode == LIVE else []
+    missing_notice = ("<p class='fp-evidence-type'><b>Optional files not loaded:</b> "
+                      + escape(", ".join(missing_optional))
+                      + ". Confirm the resulting peer and KID evidence before relying on comparisons.</p>"
+                      if missing_optional else "")
     ticker = f" · {escape(demo.ticker)}" if demo.ticker else ""
     files = demo_inputs(demo, mode)
     documents = [Path(x).name for x in [files["price"], files["factsheet"], files["kid"], *(files["peer"] or []),
@@ -669,6 +675,7 @@ def demo_info_html(demo: Demo, mode: str) -> str:
 <p>{escape(demo.share_class)} · ISIN {escape(demo.isin)}{ticker} · Benchmark: {escape(demo.benchmark)}<br/>
 Peer: {escape(demo.peer)}<br/>Review date: {demo.review_date:%d %b %Y}</p>
 <p><b>Documents loaded:</b> {escape(", ".join(documents))}</p>
+{missing_notice}
 <p class='fp-evidence-type'><b>{'AI-extracted evidence' if mode == LIVE else 'Prevalidated inputs'}.</b>
 {escape(EVIDENCE_WORDS[mode].split(': ', 1)[1][:1].upper() + EVIDENCE_WORDS[mode].split(': ', 1)[1][1:])}</p>
 <details><summary>Return check: fund price returns vs the factsheet ({escape(basis)})</summary>
@@ -1070,7 +1077,7 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             if demo.fallback:
                 wanted += files['json']
             else:
-                wanted += [files['factsheet']] + ([files['kid']] if files['kid'] else []) + files['peers']
+                wanted += [files['factsheet']]  # optional KID and peer PDFs must not block the main fund
             missing = [str(p.relative_to(demo.folder)) for p in wanted if not p.is_file()]
             if missing:
                 return [], [], None, mode, f"{demo.title} is unavailable: " + ", ".join(missing)
@@ -1081,7 +1088,11 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             items += [(p, PEER) for p in d['peer'] or []] + [(p, DEMO_INPUT) for p in d['json'] or []]
             state = [{'id': str(i), 'path': p, 'role': role, 'issue': ''}
                      for i, (p, role) in enumerate((x for x in items if x[0]), start=1)]
-            return state, rows(state), demo_id, mode, f"{demo.title} loaded."
+            optional = demo.missing_optional() if mode == LIVE else []
+            note = (" Optional documents not found: " + ", ".join(optional)
+                    + ". The review can run without them; verify any missing peer or KID evidence."
+                    if optional else "")
+            return state, rows(state), demo_id, mode, f"{demo.title} loaded." + note
 
         async def on_run(q, state, table, demo_id, mode, name='', currency='', confirmed=False, pricing=None,
                          ):

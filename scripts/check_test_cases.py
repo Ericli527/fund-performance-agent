@@ -24,6 +24,8 @@ def main(folder: str | None = None) -> int:
         print(f"{demo.title} ({demo.id}): {status} · folder {demo.folder}")
         for name in missing:
             print(f"  missing: {name}")
+        for name in demo.missing_optional():
+            print(f"  optional document unavailable: {name} (does not block a review)")
         if missing:
             ready = False
             continue

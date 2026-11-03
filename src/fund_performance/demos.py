@@ -71,9 +71,14 @@ class Demo:
                 "peers": [self.path(p) for p in live.get("peers", [])]}
 
     def missing(self) -> list[str]:
-        """ The private files this demo needs that are not there (relative names only) """
-        wanted = [self.quick["prices"], *self.quick.get("json", []), self.live["prices"], self.live["factsheet"],
-                  *([self.live["kid"]] if self.live.get("kid") else []), *self.live.get("peers", [])]
+        """Required private files. The KID and peer documents are optional for a Live AI review."""
+        wanted = [self.quick["prices"], *self.quick.get("json", []),
+                  self.live["prices"], self.live["factsheet"]]
+        return [w for w in dict.fromkeys(wanted) if not self.path(w).is_file()]
+
+    def missing_optional(self) -> list[str]:
+        """Missing optional live documents: disclose them, but do not block a fund review."""
+        wanted = ([self.live["kid"]] if self.live.get("kid") else []) + self.live.get("peers", [])
         return [w for w in dict.fromkeys(wanted) if not self.path(w).is_file()]
 
     @property
