@@ -507,3 +507,33 @@ def test_illustrative_vanguard_claim_patterns_with_synthetic_matching_facts():
         item = copy.deepcopy(BASE)
         item['investment_ratings'][1].update(supporting_evidence=[claim], evidence_references=['performance:5y'])
         assert not problems(InvestmentAssessment.model_validate(item), facts, [])
+
+
+def test_missing_rating_references_are_not_inferred_from_claim_text():
+    from pydantic import ValidationError
+    import pytest
+    item = copy.deepcopy(BASE)
+    del item['investment_ratings'][0]['evidence_references']
+    with pytest.raises(ValidationError):
+        InvestmentAssessment.model_validate(item)
+
+
+def test_existing_source_does_not_automatically_clear_a_misleading_claim():
+    item = copy.deepcopy(BASE)
+    item['investment_ratings'][0].update(supporting_evidence=['A single peer proves market-wide competitiveness.'],
+                                          evidence_references=['peers'])
+    review = {'material_issue': True, 'security_issue': False,
+              'feedback': 'The peer evidence does not support market-wide competitiveness.',
+              'recommendation_supported': False, 'supported_fields': ['investment_thesis']}
+    result = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(item, item), FakeRun(review, review)))
+    assert result['status'] == 'partial' and 'investment_ratings' not in result['assessment']
+
+
+def test_rating_claim_is_readable_on_dashboard_with_separate_references():
+    from fund_performance.dashboard import _analyst_card
+    item = copy.deepcopy(BASE)
+    item['investment_ratings'][0].update(supporting_evidence=['The documented policy supports the mandate assessment.'],
+                                          evidence_references=['mandate'])
+    html = _analyst_card({'status': 'available', 'assessment': item})
+    assert 'The documented policy supports the mandate assessment.' in html
+    assert 'Evidence: mandate' in html and '<pre' not in html
