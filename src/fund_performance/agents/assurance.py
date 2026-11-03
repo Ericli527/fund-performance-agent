@@ -1,7 +1,9 @@
 """Optional, read-only investment assurance of a completed review and its PDF text."""
 import copy
 import json
+import logging
 import re
+import time
 from html import escape
 from typing import Literal
 
@@ -9,7 +11,8 @@ from agents import Agent
 from pydantic import BaseModel, ConfigDict, Field
 from pypdf import PdfReader
 
-from fund_performance.agents.base import RunFn, model_kwargs, run_structured, run_with_fresh_client
+from fund_performance.agents.base import AI_CALLS, RunFn, model_kwargs, run_structured, run_with_fresh_client
+from fund_performance.performance_metrics import configured_prices, summary
 from fund_performance.agents.reporting_tools import fund_performance, oversight_scorecard, peer_comparison
 from fund_performance.agents.investment_analyst import context_numbers
 from fund_performance.number_guard import check_numbers
@@ -19,6 +22,7 @@ DISCLAIMER = 'Uncalibrated LLM estimate — not a statistically validated probab
 DIMENSIONS = ('Mandate', 'Performance', 'Value for investors', 'Fees')
 MAX_REPORT_CHARS = 90000
 MAX_REPORT_PAGES = 30
+LOGGER = logging.getLogger(__name__)
 
 INSTRUCTIONS = """You are an independent Senior Investment Oversight Reviewer. Review the completed fund review and
 its available report text for a human analyst. Exercise independent, evidence-grounded investment judgement; do not
@@ -213,17 +217,27 @@ async def inspect(evidence: dict, run: RunFn | None = None) -> dict:
         return {'status': 'unavailable', 'reason': 'No completed review with readable report text is available.'}
     async def private_run(agent, prompt):
         return await run_with_fresh_client(agent, prompt, max_turns=1, tracing_disabled=True)
+    calls: list[dict] = []
+    token = AI_CALLS.set(calls)
+    started = time.monotonic()
     try:
         result = await run_structured(assurance_agent(), json.dumps(evidence, ensure_ascii=False, default=str),
                                       AssuranceResult, run=run or private_run, attempts=1, max_turns=1)
         if not result.ok or result.output.security_issue or not validate_review(result.output, evidence):
-            return {'status': 'unavailable', 'reason': 'The assurance review was unavailable or did not pass validation.'}
+            return {'status': 'unavailable', 'reason': 'The assurance review was unavailable or did not pass validation.',
+                    'performance': summary(calls, time.monotonic() - started, configured_prices())}
         return {'status': 'available', 'schema_version': 1, 'run_id': evidence.get('run_id'),
+                'performance': summary(calls, time.monotonic() - started, configured_prices()),
                 'review': result.output.model_dump(),
                 'report_coverage': {name: {k: v for k, v in item.items() if k != 'text'}
                                     for name, item in evidence['reports'].items()}, 'disclaimer': DISCLAIMER}
     except Exception:
-        return {'status': 'unavailable', 'reason': 'The assurance review could not be completed.'}
+        return {'status': 'unavailable', 'reason': 'The assurance review could not be completed.',
+                'performance': summary(calls, time.monotonic() - started, configured_prices())}
+    finally:
+        LOGGER.info('Investment assurance performance: %s', json.dumps(
+            summary(calls, time.monotonic() - started, configured_prices())))
+        AI_CALLS.reset(token)
 
 
 def render(result: dict) -> str:

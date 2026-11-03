@@ -93,8 +93,9 @@ AI_CALLS: ContextVar[list[dict] | None] = ContextVar("AI_CALLS", default=None)
 def _record(agent: Agent, attempt: int, started: float, outcome: str, result: Any = None) -> None:
     calls = AI_CALLS.get()
     if calls is not None:
-        entry = {"agent": agent.name, "attempt": attempt, "seconds": round(time.monotonic() - started, 2),
-                 "outcome": outcome}
+        model = getattr(agent, 'model', None)
+        entry = {"agent": agent.name, "model": model if isinstance(model, str) else None,
+                 "attempt": attempt, "seconds": round(time.monotonic() - started, 2), "outcome": outcome}
         responses = getattr(result, "raw_responses", None)
         if responses is not None:
             entry["model_requests"] = len(responses)
@@ -102,6 +103,13 @@ def _record(agent: Agent, attempt: int, started: float, outcome: str, result: An
             if usages and all(u is not None for u in usages):
                 entry["tokens"] = {key: sum(getattr(u, key, 0) for u in usages)
                                    for key in ("input_tokens", "output_tokens", "total_tokens")}
+                for key, detail, field in (('cached_tokens', 'input_tokens_details', 'cached_tokens'),
+                                           ('reasoning_tokens', 'output_tokens_details', 'reasoning_tokens')):
+                    values = [getattr(getattr(u, detail, None), field, None) for u in usages]
+                    entry['tokens'][key] = sum(values) if all(v is not None for v in values) else None
+            if all(hasattr(response, 'output') for response in responses):
+                entry['tool_calls'] = sum(1 for response in responses for item in response.output
+                    if getattr(item, 'type', None) == 'function_call')
         calls.append(entry)
 
 
