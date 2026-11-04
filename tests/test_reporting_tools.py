@@ -107,10 +107,12 @@ class ScriptedModel(Model):
     """ A model that answers turn by turn from a script of tool calls, then a final JSON answer """
     def __init__(self, turns):
         self.turns, self.inputs = list(turns), []
+        self.offered_tools = []
 
     async def get_response(self, system_instructions, input, model_settings, tools, output_schema, handoffs,
                            tracing, **_):
         self.inputs.append(input)
+        self.offered_tools.append([tool.name for tool in tools])
         step = self.turns.pop(0) if self.turns else self.loop_forever
         if isinstance(step, list):
             return ModelResponse(output=[ResponseFunctionToolCall(
@@ -217,32 +219,32 @@ def test_planner_calls_scoped_evidence_tools_through_sdk(sdk_with):
     assert len(plan.focus) == 4
 
 
-def test_investment_analyst_invokes_existing_tools_in_sdk_loop(sdk_with):
+def test_investment_analyst_uses_prepared_evidence_in_one_sdk_response(sdk_with):
     from fund_performance.agents.investment_analyst import assess
     from test_investment_analyst import BASE, PASS
     from conftest import FakeRun
     profile = FundProfile.model_validate(json.loads((Path(__file__).parent / "fixtures" / "fund_profile_sample.json").read_text()))
-    model = sdk_with(ScriptedModel([[('get_oversight_scorecard', {}), ('get_research_sources', {})], BASE]))
+    model = sdk_with(ScriptedModel([BASE]))
     result = asyncio.run(assess(FACTS, profile, [], 'Review', review_run=FakeRun(PASS)))
     assert result['status'] == 'available'
-    assert result['tool_calls'] == ['get_oversight_scorecard', 'get_research_sources']
-    outputs = [item['output'] for item in model.inputs[1] if isinstance(item, dict) and item.get('type') == 'function_call_output']
-    assert 'Retain' in outputs[0] and 'No vetted market research' in outputs[1]
+    assert result['tool_calls'] == [] and model.offered_tools == [[]]
+    assert len(model.inputs) == 1
+    assert 'evidence_catalogue' in model.inputs[0] and 'Retain' in model.inputs[0]
+    assert 'vetted_source_count' in model.inputs[0]
 
 
-def test_analyst_revision_has_fresh_tool_budget_with_full_call_log(sdk_with):
+def test_analyst_substantive_revision_remains_tool_free_and_bounded(sdk_with):
     from fund_performance.agents.investment_analyst import assess
     from test_investment_analyst import BASE, PASS
     from conftest import FakeRun
     profile = FundProfile.model_validate(json.loads((Path(__file__).parent / 'fixtures' / 'fund_profile_sample.json').read_text()))
-    model = sdk_with(ScriptedModel([[('get_oversight_scorecard', {})] * 6, BASE,
-                                    [('get_peer_comparison', {})], BASE]))
+    model = sdk_with(ScriptedModel([BASE, BASE]))
     review = FakeRun({'material_issue': True, 'security_issue': False, 'feedback': 'Qualify peer eligibility.'}, PASS)
     result = asyncio.run(assess(FACTS, profile, [], 'Review', review_run=review))
-    outputs = [item['output'] for item in model.inputs[3]
-               if isinstance(item, dict) and item.get('type') == 'function_call_output']
-    assert result['status'] == 'available' and len(result['tool_calls']) == 7
-    assert outputs and LIMIT_REACHED not in outputs[-1] and 'Sample World Index Tracker B' in outputs[-1]
+    assert result['status'] == 'available' and result['tool_calls'] == []
+    assert len(model.inputs) == 2 and model.offered_tools == [[], []]
+    assert 'Qualify peer eligibility.' in model.inputs[1]
+    assert result['diagnostics']['revision_required'] is True
 
 
 def test_planner_receives_only_current_run_source_matched_exposures(sdk_with):
@@ -303,8 +305,8 @@ def test_investment_analyst_can_reuse_the_same_context(sdk_with):
     from conftest import FakeRun
     profile = FundProfile.model_validate(json.loads((Path(__file__).parent / 'fixtures' / 'fund_profile_sample.json').read_text()))
     brief = {'document_summary': 'Global equity index strategy.', 'summary_evidence_level': 'provisional'}
-    model = sdk_with(ScriptedModel([[('get_fund_context', {})], BASE | {'evidence_references': ['fund_context']}]))
+    model = sdk_with(ScriptedModel([BASE | {'evidence_references': ['fund_context']}]))
     result = asyncio.run(assess(FACTS, profile, [], 'Review', review_run=FakeRun(PASS), fund_context=brief))
     assert result['status'] == 'available' and result['evidence']['fund_context'] == brief
-    outputs = [x['output'] for x in model.inputs[1] if isinstance(x, dict) and x.get('type') == 'function_call_output']
-    assert 'Global equity index strategy.' in outputs[0]
+    assert len(model.inputs) == 1 and model.offered_tools == [[]]
+    assert 'Global equity index strategy.' in model.inputs[0]
