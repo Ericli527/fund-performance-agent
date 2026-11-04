@@ -124,7 +124,7 @@ def how_it_works_html() -> str:
 REVIEW_TYPES = {      # value: (title, subtitle, the review question it fills in)
     "overall": ("Overall Review", "Complete fund analysis",
                 "Is the fund meeting its mandate and delivering value? Assess benchmark performance, material risks, "
-                "fees and relevant peers, and identify the key evidence gaps and next steps."),
+                "fees and relevant peers, and identify the next steps."),
     "performance": ("Performance", "Returns and benchmark tracking",
                     "How has the fund performed against its benchmark in light of its mandate, portfolio and risks? "
                     "Explain material trends, evidence limitations and oversight priorities."),
