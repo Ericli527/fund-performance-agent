@@ -230,7 +230,7 @@ def test_the_page_has_the_instructions_files_table_and_how_it_works():
     texts = " ".join(str(getattr(c, "value", "") or "") for c in ui.blocks.values())
     assert PUBLIC_DATA_HTML in texts and HOW_END in texts
     accordions = {c.label: c.open for c in ui.blocks.values() if isinstance(c, gr.Accordion)}
-    assert accordions == {"Help & methodology": False, "Technical details": False}
+    assert accordions == {"Help & methodology": False, "View processing details": False, "Technical details": False}
 
 
 

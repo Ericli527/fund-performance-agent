@@ -442,9 +442,9 @@ def page2(inp, content: ExecutiveContent) -> str:
 <tr><td>Reviewer name</td><td class="x-line" width="38%">&nbsp;</td><td width="10%" class="x-right">Date</td><td class="x-line">&nbsp;</td></tr>
 <tr><td>Signature</td><td class="x-line" colspan="3">&nbsp;</td></tr>
 </table>
-<p class="x-src x-after">Draft for oversight review from public data, prepared with AI assistance. Quantitative figures and
-scorecard ratings come from code; any AI rating proposals are separate and require human sign-off. Not investment advice.
-Full tables, sources, data checks and audit evidence: the Detailed Report.</p>
+<p class="x-src x-after">Draft for human review and sign-off, prepared with AI assistance from public data.
+Python calculates metrics and the scorecard; AI rating proposals are separate. Not investment advice.
+Full evidence, sources and audit records: the Detailed Report.</p>
 """
 
 
@@ -475,7 +475,7 @@ EXEC_CSS = f"""
 .x-ai-name {{ color: {NAVY}; font-weight: bold; font-size: 7.5pt; }}
 .x-ai-check {{ color: #8a4b00; font-size: 7.3pt; }}
 
-.x-approval td {{ padding: 8px 4px 1px 4px; }} .x-line {{ border-bottom: 0.8px solid #1d2733; }}
+.x-approval td {{ padding: 6px 4px 1px 4px; }} .x-line {{ border-bottom: 0.8px solid #1d2733; }}
 .x-right {{ text-align: right; }} .x-after {{ margin-top: 8px; }}
 .x-box {{ font-size: 12pt; }} .x-tick-row {{ font-size: 9pt; }}
 .x-tick-head {{ font-weight: bold; color: {NAVY}; width: 22%; }}
