@@ -554,6 +554,9 @@ def _unique_items(*groups) -> list[str]:
 
 
 def _analyst_card(assessment: dict) -> str:
+    from fund_performance.presentation import emphasised_answer, categorised_finding, answer_paragraphs
+    def findings_list(items):
+        return '<ul>' + ''.join('<li>' + categorised_finding(item) + '</li>' for item in items) + '</ul>'
     if assessment.get('status') not in ('available', 'partial'):
         reason = assessment.get('reason') or 'The independent assessment was not produced.'
         details = ("<p class='fp-muted'><b>AI assessment status: Unavailable.</b> "
@@ -568,7 +571,7 @@ def _analyst_card(assessment: dict) -> str:
                        'Requires analyst review' if review_status == 'requires_analyst_review' else 'Reviewed')
         details = (f"<p><b>AI assessment status:</b> {status_text}</p>"
                    f"<p class='fp-verdict'>{escape(label)}</p>"
-                   f"<p>{escape(_short_text(ai.get('investment_thesis') or ''))}</p>")
+                   f"<p>{emphasised_answer(_short_text(ai.get('investment_thesis') or ''))}</p>")
         ratings = ai.get('investment_ratings') or []
         if ratings:
             rows, disagreements = [], []
@@ -579,11 +582,11 @@ def _analyst_card(assessment: dict) -> str:
                 agreement = 'agrees' if rating.get('agreement') else 'differs'
                 if not rating.get('agreement'):
                     disagreements.append(dimension)
-                rationale = escape(str(rating.get('rationale') or 'No rationale supplied.'))
+                rationale = emphasised_answer(str(rating.get('rationale') or 'No rationale supplied.'))
                 evidence = escape(', '.join(str(ref) for ref in rating.get('evidence_references', rating.get('supporting_evidence')) or []))
                 notes = _list(_material_limits(rating.get('limitations') or []), 'fp-sub')
                 if 'evidence_references' in rating:
-                    notes = _list(rating.get('supporting_evidence') or []) + notes
+                    notes = findings_list(rating.get('supporting_evidence') or []) + notes
                 if rating.get('further_review_required'):
                     notes += '<p class="fp-muted">Further investigation is required.</p>'
                 rows.append(
@@ -608,7 +611,8 @@ def _analyst_card(assessment: dict) -> str:
         for heading, items, limit in (('Supporting findings', findings, 4), ('Material risks', risks, 3),
                                       ('Prioritised actions', actions, 3), ('Reviewer warnings and evidence limits', warnings, 3)):
             if items:
-                details += f"<p class='fp-group'>{heading}</p>" + _list([_short_text(x, 40) for x in items[:limit]])
+                shown = [_short_text(x, 40) for x in items[:limit]]
+                details += f"<p class='fp-group'>{heading}</p>" + (findings_list(shown) if heading == 'Supporting findings' else _list(shown))
         if not ai.get('scorecard_agreement', True) and ai.get('scorecard_disagreement_reason'):
             details += f"<p><b>Difference from scorecard:</b> {escape(_short_text(ai['scorecard_disagreement_reason'], 40))}</p>"
         if assessment.get('evidence_summary'):
@@ -617,14 +621,14 @@ def _analyst_card(assessment: dict) -> str:
             details += f"<p class='fp-muted'>{escape(str(assessment['reason']))}</p>"
     # Only fields already made available by the review pipeline are rendered, including partial redactions.
     ai = assessment.get('assessment') or {}
-    readable = '<p>' + escape(ai.get('investment_thesis') or '') + '</p>'
+    readable = ''.join('<p>' + emphasised_answer(p) + '</p>' for p in answer_paragraphs(ai.get('investment_thesis') or ''))
     for title, key in [('Supporting evidence', 'supporting_evidence'), ('Strengths', 'strengths'),
                        ('Material risks', 'material_risks'), ('Uncertainties', 'uncertainties'),
                        ('Oversight actions', 'recommended_actions'), ('Questions for the fund manager', 'manager_questions')]:
         if ai.get(key):
-            readable += '<h4>' + title + '</h4>' + _list(ai[key])
+            readable += '<h4>' + title + '</h4>' + (findings_list(ai[key]) if key in ('supporting_evidence', 'strengths') else _list(ai[key]))
     for rating in ai.get('investment_ratings') or []:
-        readable += '<h4>' + escape(rating['dimension']) + '</h4><p>' + escape(rating['rationale']) + '</p>'
+        readable += '<h4>' + escape(rating['dimension']) + '</h4><p>' + emphasised_answer(rating['rationale']) + '</p>'
         readable += _list(rating.get('limitations') or [])
     for reference, evidence in (assessment.get('evidence') or {}).items():
         readable += '<p><b>' + escape(reference) + '</b></p>'
