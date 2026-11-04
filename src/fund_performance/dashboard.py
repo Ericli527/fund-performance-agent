@@ -86,7 +86,7 @@ def _chip(rating: str) -> str:
 
 
 def _list(items, cls: str = "") -> str:
-    items = [i for i in items if i]
+    items = [i for i in items if i and i.strip()]
     return f"<ul class='{cls}'>" + "".join(f"<li>{escape(i)}</li>" for i in items) + "</ul>" if items else ""
 
 
@@ -98,10 +98,12 @@ def _details(title: str, body: str, open_: bool = False, cls: str = "") -> str:
 
 
 def _header(data: dict, quality: EvidenceQuality, institutional: bool = False) -> str:
+    from fund_performance.presentation import preliminary_assessment
     facts = data["facts"]
     fund, card = facts.get("fund", {}), facts.get("scorecard", {})
     code = card.get("verdict", "")
-    colour = next((c for k, c in VERDICT_STYLE.items() if code.startswith(k)), NAVY)
+    colour = NAVY
+    headline, status_detail = preliminary_assessment(data)
     n = (fund.get("time_horizon_years") or fund.get("analysis_period_years", 5))
     caveat = assessment_caveat(quality)
     q_colour = {"check": "#6d4c9f", "warnings": "#b7791f", "clear": "#4c5966"}[quality.level]
@@ -117,10 +119,9 @@ def _header(data: dict, quality: EvidenceQuality, institutional: bool = False) -
     <p>Reporting period: {n} years to {escape(_date(fund.get('as_of_date')))}{offline}</p></div>
   <div class='fp-status-row'>
     <div class='fp-status fp-assessment' style='border-left-color:{colour}'>
-      <div class='fp-kicker'>{'Deterministic scorecard' if institutional else 'Investment assessment (suggested)'}</div>
-      <div class='fp-status-main' style='color:{colour}'>{escape(code if institutional else verdict_name(code))}</div>
-      <div class='fp-status-sub'>{escape(assessment_meaning(code, quality, verdict_meaning(code)))}. From fixed rules on the four ratings; the analyst
-      decides and signs.{(' <b>' + escape(caveat) + '</b>') if caveat else ''}</div></div>
+      <div class='fp-kicker'>Preliminary investment assessment</div>
+      <div class='fp-status-main' style='color:{colour}'>{escape(headline)}</div>
+      <div class='fp-status-sub'>{escape(status_detail)}{(' <b>' + escape(caveat) + '</b>') if caveat else ''}</div></div>
     <div class='fp-status fp-quality' style='border-left-color:{q_colour}'>
       <div class='fp-kicker'>Evidence quality (data checks)</div>
       <div class='fp-status-main' style='color:{q_colour}'>{escape(quality.label)}</div>
@@ -210,8 +211,10 @@ def _ratings(data: dict, analyst: bool, explanatory: bool = False) -> str:
                        + ("<p><b>Supporting evidence</b></p>" + _list(explanation['evidence']) if explanation['evidence'] else "")
                        + ("<p><b>Limitations</b></p>" + _list(_material_limits(explanation['limitations'])) + _details('All rating qualifications', _list(explanation['limitations'])) if explanation['limitations'] else "")
                        + _details("Rating methodology", methodology))
+            provisional = ("<div class='fp-muted'>Peer comparison provisional</div>"
+                           if p['name'] in ('Value for investors', 'Fees') and explanation['limitations'] else '')
             rows += (f"<div class='fp-rating'><div class='fp-rating-name'><b>{escape(p['name'])}</b></div>"
-                     f"{_chip(p['rating'])}<div class='fp-rating-why'>{content}</div></div>")
+                     f"<div>{_chip(p['rating'])}{provisional}</div><div class='fp-rating-why'>{content}</div></div>")
             continue
         extra = ""
         if analyst:
@@ -556,7 +559,8 @@ def _unique_items(*groups) -> list[str]:
 def _analyst_card(assessment: dict) -> str:
     from fund_performance.presentation import emphasised_answer, categorised_finding, answer_paragraphs
     def findings_list(items):
-        return '<ul>' + ''.join('<li>' + categorised_finding(item) + '</li>' for item in items) + '</ul>'
+        items = _unique_items(items)
+        return '<ul>' + ''.join('<li>' + categorised_finding(item) + '</li>' for item in items) + '</ul>' if items else ''
     if assessment.get('status') not in ('available', 'partial'):
         reason = assessment.get('reason') or 'The independent assessment was not produced.'
         details = ("<p class='fp-muted'><b>AI assessment status: Unavailable.</b> "
@@ -625,8 +629,9 @@ def _analyst_card(assessment: dict) -> str:
     for title, key in [('Supporting evidence', 'supporting_evidence'), ('Strengths', 'strengths'),
                        ('Material risks', 'material_risks'), ('Uncertainties', 'uncertainties'),
                        ('Oversight actions', 'recommended_actions'), ('Questions for the fund manager', 'manager_questions')]:
-        if ai.get(key):
-            readable += '<h4>' + title + '</h4>' + (findings_list(ai[key]) if key in ('supporting_evidence', 'strengths') else _list(ai[key]))
+        items = _unique_items(ai.get(key))
+        if items:
+            readable += '<h4>' + title + '</h4>' + (findings_list(items) if key in ('supporting_evidence', 'strengths') else _list(items))
     for rating in ai.get('investment_ratings') or []:
         readable += '<h4>' + escape(rating['dimension']) + '</h4><p>' + emphasised_answer(rating['rationale']) + '</p>'
         readable += _list(rating.get('limitations') or [])

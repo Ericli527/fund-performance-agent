@@ -172,10 +172,12 @@ def test_sequential_overlapping_uploads_do_not_discard_newer_files(tmp_path):
         paths.append(str(path))
     initial, result = list(callback(paths[:2], [], []))
     assert len(result[0]) == 2
+    assert 'Processed 2 file(s) in this upload. 2 attachment(s) in total.' in result[8]
     # A queued second request can carry an old table even when the server state has advanced.
     _, second = list(callback(paths[2:], result[0], []))
     assert [Path(e['path']).name for e in second[0]] == ['one.docx', 'two.docx', 'three.docx']
     assert len({entry['id'] for entry in second[0]}) == 3
+    assert 'Processed 1 file(s) in this upload. 3 attachment(s) in total.' in second[8]
 
 
 def test_stale_table_cannot_restore_a_removed_attachment(tmp_path):

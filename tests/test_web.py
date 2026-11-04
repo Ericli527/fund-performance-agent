@@ -230,7 +230,7 @@ def test_the_page_has_the_instructions_files_table_and_how_it_works():
     texts = " ".join(str(getattr(c, "value", "") or "") for c in ui.blocks.values())
     assert PUBLIC_DATA_HTML in texts and HOW_END in texts
     accordions = {c.label: c.open for c in ui.blocks.values() if isinstance(c, gr.Accordion)}
-    assert accordions == {"Help & methodology": False, "Technical details": False}
+    assert accordions == {"Help & methodology": False, "View processing details": False, "Technical details": False}
 
 
 
@@ -258,6 +258,15 @@ def test_there_is_no_offline_switch_on_the_page():
     assert all('offline' not in str(c.label).lower() for c in _blocks(gr.Checkbox))
     texts = " ".join(str(getattr(c, "value", "") or "") + str(getattr(c, "label", "") or "") for c in build_ui().blocks.values())
     assert "Offline" not in texts and "untick" not in texts.lower()
+
+
+def test_processing_history_is_collapsed_without_hiding_review_status():
+    ui = build_ui()
+    accordion = next(c for c in ui.blocks.values() if isinstance(c, gr.Accordion)
+                     and c.label == 'View processing details')
+    assert accordion.open is False
+    progress = next(c for c in ui.blocks.values() if 'fp-progress' in (getattr(c, 'elem_classes', None) or []))
+    assert progress in accordion.children
 
 
 def test_review_type_cards_fill_in_the_question_and_keep_the_users_own():

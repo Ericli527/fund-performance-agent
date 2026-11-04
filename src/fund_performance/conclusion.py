@@ -212,8 +212,8 @@ def judgement_points(facts: dict) -> list[str]:
             points.append(f"{row['name']}'s returns are in {row['currency']}, so only its fee is compared.")
         if row.get("investor_type") == "institutional":
             minimum = f" (minimum {row['minimum_investment']})" if row.get("minimum_investment") else ""
-            points.append(f"{row['name']} is an institutional share class{minimum}: its fee is lower than retail "
-                          "investors could get.")
+            points.append(f"{row['name']} is an institutional share class{minimum}: verify investor eligibility "
+                          "and access to the quoted fee.")
     invalid = comparison_invalid(facts)       # a currency or benchmark mismatch: no point rests on the gap to the index
     test = None if invalid else (facts.get("evidence") or {}).get("test")
     if test and test.get("significant") and facts["fund"].get("objective_type") == "index_tracker":

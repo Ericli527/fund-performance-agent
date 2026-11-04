@@ -977,8 +977,9 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             gr.Markdown("Upload the fund price history and factsheet. A KID and peer factsheets are optional. "
                         "The synthetic case uses prevalidated inputs. All four quantitative scorecard ratings are always calculated.")
             gr.HTML(how_it_works_html())
-        progress = gr.Markdown(elem_classes="fp-progress")
         message = gr.Markdown()
+        with gr.Accordion('View processing details', open=False):
+            progress = gr.Markdown(elem_classes="fp-progress")
         with gr.Column(visible=False) as results:
             with gr.Tabs():
                 with gr.Tab("Overview"):
@@ -1051,7 +1052,8 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                 updated = add_files(existing, paths)
                 failed = sum(bool(e.get('issue')) and ('could not' in e['issue'].lower())
                              for e in updated[len(existing):])
-                message = f"Processed {len(updated) - len(existing)} file(s)."
+                message = (f"Processed {len(updated) - len(existing)} file(s) in this upload. "
+                           f"{len(updated)} attachment(s) in total.")
                 if failed:
                     message += f" {failed} could not be read; remove or replace them."
                 if error:
@@ -1118,7 +1120,7 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             supporting = supporting_inputs(selected)
             offline = run_offline(price, jsons)
             history = []
-            yield "Starting…", "", gr.update(visible=False), "", "", "", "", gr.update(value=None), gr.update(value=None), "", None, "", None, "", gr.update(interactive=False)
+            yield "Starting…", "Preparing your review…", gr.update(visible=False), "", "", "", "", gr.update(value=None), gr.update(value=None), "", None, "", None, "", gr.update(interactive=False)
             def work(say):
                 kwargs = {}
                 if benchmark['series'] or benchmark['documents']:
@@ -1129,7 +1131,7 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             async for kind, item in with_progress(work):
                 if kind == "progress":
                     history = progress_history(history, item)
-                    yield (progress_markdown(history),) + (gr.update(),) * 14
+                    yield (progress_markdown(history), item) + (gr.update(),) * 13
                 elif item.data is None:
                     yield progress_markdown(history), item.message, gr.update(visible=False), "", "", "", "", gr.update(value=None), gr.update(value=None), "", None, "", None, "", gr.update(interactive=False)
                 else:
@@ -1145,7 +1147,7 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                     sections = dashboard_sections(data)
                     views = ["<div class='fp-dashboard'>" + sections[k] + "</div>"
                              for k in ("overview", "performance", "portfolio", "evidence")]
-                    yield (progress_markdown(history), "", gr.update(visible=True), *views,
+                    yield (progress_markdown(history), "Review complete — preliminary results ready for analyst review.", gr.update(visible=True), *views,
                            executive, detailed, tech, item.log, item.message, item.assurance_handle, "",
                            gr.update(interactive=bool(item.assurance_handle) and live_demo_allowed()))
 
