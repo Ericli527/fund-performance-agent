@@ -229,8 +229,8 @@ def test_investment_analyst_uses_prepared_evidence_in_one_sdk_response(sdk_with)
     assert result['status'] == 'available'
     assert result['tool_calls'] == [] and model.offered_tools == [[]]
     assert len(model.inputs) == 1
-    assert 'evidence_catalogue' in model.inputs[0] and 'Retain' in model.inputs[0]
-    assert 'vetted_source_count' in model.inputs[0]
+    assert 'evidence_catalogue' in json.dumps(model.inputs[0]) and 'Retain' in json.dumps(model.inputs[0])
+    assert 'vetted_source_count' in json.dumps(model.inputs[0])
 
 
 def test_analyst_substantive_revision_remains_tool_free_and_bounded(sdk_with):
@@ -243,7 +243,7 @@ def test_analyst_substantive_revision_remains_tool_free_and_bounded(sdk_with):
     result = asyncio.run(assess(FACTS, profile, [], 'Review', review_run=review))
     assert result['status'] == 'available' and result['tool_calls'] == []
     assert len(model.inputs) == 2 and model.offered_tools == [[], []]
-    assert 'Qualify peer eligibility.' in model.inputs[1]
+    assert 'Qualify peer eligibility.' in json.dumps(model.inputs[1])
     assert result['diagnostics']['revision_required'] is True
 
 
@@ -309,4 +309,4 @@ def test_investment_analyst_can_reuse_the_same_context(sdk_with):
     result = asyncio.run(assess(FACTS, profile, [], 'Review', review_run=FakeRun(PASS), fund_context=brief))
     assert result['status'] == 'available' and result['evidence']['fund_context'] == brief
     assert len(model.inputs) == 1 and model.offered_tools == [[]]
-    assert 'Global equity index strategy.' in model.inputs[0]
+    assert 'Global equity index strategy.' in json.dumps(model.inputs[0])
