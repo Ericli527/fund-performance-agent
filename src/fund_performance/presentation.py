@@ -22,6 +22,37 @@ def answer_paragraphs(text: str) -> list[str]:
     return [' '.join(p.split()) for p in re.split(r'\n\s*\n', text.strip()) if p.strip()]
 
 
+def emphasised_answer(text: str) -> str:
+    """Escape all content and emphasise the paragraph's opening sentence, including qualifications."""
+    import re
+    from html import escape
+    boundary = re.search(r'[.!?](?=\s+[A-Z])', text)
+    end = boundary.end() if boundary else len(text)
+    return '<strong>' + escape(text[:end]) + '</strong>' + escape(text[end:])
+
+
+def categorised_finding(text: str) -> str:
+    """Use explicit Reporter labels; provide conservative labels for older saved findings."""
+    import re
+    from html import escape
+    labels = ('Mandate', 'Performance', 'Value for investors', 'Fees', 'Risk', 'Evidence', 'Oversight')
+    match = re.match(r'^(' + '|'.join(labels) + r'):\s*', text, re.I)
+    if match:
+        label = next(label for label in labels if label.casefold() == match.group(1).casefold())
+        body = text[match.end():]
+    else:
+        body = text
+        lower = text.casefold()
+        groups = [('Value for investors', r'\bpeer\b|share.class|investor value'),
+                  ('Fees', r'\bfees?\b|\bocf\b|\bter\b|charges?'),
+                  ('Risk', r'\brisk\b|volatility|drawdown|tracking error|\bbeta\b|r²'),
+                  ('Mandate', r'\bmandate\b|investment objective'),
+                  ('Performance', r'\breturn|performance|behind|ahead|benchmark|index'),
+                  ('Evidence', r'verif|source document|data quality')]
+        label = next((label for label, pattern in groups if re.search(pattern, lower)), 'Oversight')
+    return '<strong>' + escape(label) + ':</strong> ' + escape(body)
+
+
 # --- Evidence quality (separate from the investment assessment) ------------------------------------------------
 
 def rating_explanation(facts: dict, pillar: dict) -> dict:

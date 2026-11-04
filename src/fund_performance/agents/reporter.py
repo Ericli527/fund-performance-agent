@@ -53,7 +53,10 @@ A. The dashboard, for the analyst who asked the question:
   never add filler or invent a conclusion. Keep key findings and recommended actions separate from the answer.
   Use concise professional British English. A paragraph's rendered line count depends on the viewport.
 - evidence: up to 3 points, one or two sentences each, the most material first. Each gives a different verified fact
-  with its period and what it is compared with, and why it matters. Investment insight first (returns against the
+  prefixed by its main topic: Mandate:, Performance:, Value for investors:, Fees:, Risk:, Evidence: or Oversight:.
+  Include its period, comparison and why it matters. Use plain text labels, not HTML or Markdown; the dashboard
+  formats labels. Lead each answer paragraph with its key conclusion sentence, including any qualification needed
+  to keep that sentence accurate. Investment insight first (returns against the
   benchmark, tracking, fees against peers); a data issue only when it changes the answer. Never repeat a point, and
   mention a piece of missing evidence once only.
 - next_step: one clear action or priority for the analyst, in one sentence.
