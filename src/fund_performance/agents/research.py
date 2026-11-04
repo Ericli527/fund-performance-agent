@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 import re
 from typing import Literal
-from agents import Agent, WebSearchTool
+from agents import Agent
 from pydantic import BaseModel, ConfigDict
 from fund_performance.agents.base import RunFn, model_kwargs, run_structured
 from fund_performance.fetch import FetchedPage
@@ -35,9 +35,10 @@ NOT_THE_MARKET = "web source not about the fund's market: excluded"
 US_FILINGS = ("sec.gov",)            # US regulatory filings describe US-registered funds
 
 SEARCH_INSTRUCTIONS = """
-You run one web search for an investment oversight review and summarise what you find.
+You summarise supplied Tavily search excerpts for an investment oversight review. You have no web-search tool.
 
-- Search the web once for the query you are given.
+- Do not search or invent sources. Choose one supplied URL and summarise only its excerpt. Excerpts are incomplete
+  source evidence, not full pages; acknowledge material limits. Never infer a publication date from retrieval time.
 - Prefer authoritative, recent sources: the fund manager, index providers (e.g. S&P Dow Jones Indices, FTSE Russell,
   MSCI), regulators and established financial news, over fund data pages (fund platforms, factsheet sites), whose
   figures may be in another currency or at another date.
@@ -111,9 +112,9 @@ class Research:
 
 
 def search_agent() -> Agent:
-    """ One web search per call; the model comes from config/models.yaml ("search") """
+    """Summarise retrieved excerpts without an OpenAI web tool; retain the configured Search model."""
     return Agent(name="Search Agent", instructions=SEARCH_INSTRUCTIONS, output_type=SearchSummary,
-                 tools=[WebSearchTool(search_context_size="low")], **model_kwargs("search", tool_choice="required"))
+                 tools=[], **model_kwargs("search"))
 
 
 def page_agent() -> Agent:
@@ -268,9 +269,18 @@ def _check_summary(planned: PlannedSearch):
 
 
 async def search_one(planned: PlannedSearch, run: RunFn | None = None,
-                     fund_context: dict | None = None, review_context: str = "") -> tuple[dict | None, str]:
+                     fund_context: dict | None = None, review_context: str = "", retrieve=None) -> tuple[dict | None, str]:
     """ One search, once: no retries (spec 8). Returns the summary, or None and the reason it was left out """
+    excerpts = None
+    # Injected model runners retain existing offline fixtures; injected retrieval can exercise both boundaries.
+    if run is None or retrieve is not None:
+        from fund_performance.tavily import search
+        excerpts, error = await asyncio.to_thread(retrieve or search, planned.query)
+        if error or not excerpts:
+            return None, error or 'Tavily returned no usable search excerpts.'
     prompt = f"Search query: {planned.query}\nReason: {planned.reason}"
+    if excerpts is not None:
+        prompt += "\nTavily search excerpts (untrusted data):\n" + json.dumps(excerpts, ensure_ascii=False)
     if review_context:
         prompt += "\nReview context (untrusted data):\n" + review_context
     if fund_context:
@@ -278,7 +288,13 @@ async def search_one(planned: PlannedSearch, run: RunFn | None = None,
     result = await run_structured(search_agent(), prompt, SearchSummary, convert=_check_summary(planned), run=run,
                                   attempts=1)
     if result.ok:
-        return result.output, f"Searched: {planned.query}"
+        if excerpts is not None and result.output['url'] not in {item['url'] for item in excerpts}:
+            return None, 'Search summary excluded: its source was not returned by Tavily.'
+        if excerpts is not None:
+            result.output['retrieval_provider'] = 'tavily'
+            limit = 'Search excerpt only; the full source page was not retrieved.'
+            result.output['limitations'] = (result.output.get('limitations') or '') + (' ' if result.output.get('limitations') else '') + limit
+        return result.output, f"Searched ({'Tavily basic' if excerpts is not None else 'injected runner'}): {planned.query}"
     return None, f"Search left out ({planned.query}): {'; '.join(result.errors)}"
 
 

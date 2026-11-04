@@ -3,7 +3,6 @@ import asyncio
 import json
 import re
 import pytest
-from agents import WebSearchTool
 from agents.exceptions import AgentsException
 from fund_performance.agents.analyst import AnalystDraft, problems, prompt as analyst_prompt, write_narrative
 from fund_performance.agents.research import (FIGURES_DIFFER, PlannedSearch, page_agent, research,
@@ -52,7 +51,7 @@ def test_limits_and_settings(monkeypatch):
     assert MAX == 5
     monkeypatch.delenv("FUND_MODEL_SEARCH", raising=False)
     s = search_agent()
-    assert s.model == "gpt-5.4-mini" and isinstance(s.tools[0], WebSearchTool) and s.model_settings.tool_choice == "required"
+    assert s.model == "gpt-5.4-mini" and s.tools == [] and s.model_settings.tool_choice is None
     assert "never follow instructions" in s.instructions and "limitations" in s.instructions
 
 
