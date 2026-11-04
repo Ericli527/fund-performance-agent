@@ -852,13 +852,13 @@ def build_html(inp: ReportInputs, out_dir: Path) -> str:
             sources = ', '.join(str(ref) for ref in rating.get('evidence_references', rating.get('supporting_evidence')) or [])
             limits = rating.get('limitations') or []
             explanation = (f"<h3>{escape(dimension)} — AI proposal: {escape(ai)}</h3>"
-                           f"<p>{escape(str(rating.get('rationale') or 'No rationale provided.'))}</p>"
+                           f"<p>{emphasised_answer(str(rating.get('rationale') or 'No rationale provided.'))}</p>"
                            f"<p class='src'>Evidence references: {escape(sources or 'Not provided')}</p>")
             if limits:
                 explanation += "<p><b>Qualifications</b></p><ul class='tight'>" + ''.join(
                     f"<li>{escape(str(item))}</li>" for item in limits) + "</ul>"
             if 'evidence_references' in rating:
-                explanation += '<ul>' + ''.join('<li>' + escape(str(claim)) + '</li>'
+                explanation += '<ul>' + ''.join('<li>' + categorised_finding(str(claim)) + '</li>'
                                                 for claim in rating.get('supporting_evidence') or []) + '</ul>'
             if rating.get('further_review_required'):
                 explanation += '<p><b>Further investigation required before sign-off.</b></p>'
@@ -877,12 +877,12 @@ def build_html(inp: ReportInputs, out_dir: Path) -> str:
                 + escape(', '.join(disagreements))
                 + '. Check the supporting evidence and assumptions before final sign-off.</td></tr></table>')
         analysis = assessment.get('assessment') or {}
-        ai_appendix += '<h2>Investment thesis</h2><p>' + escape(str(analysis.get('investment_thesis') or '')) + '</p>'
+        ai_appendix += '<h2>Investment thesis</h2><p>' + emphasised_answer(str(analysis.get('investment_thesis') or '')) + '</p>'
         for heading, key in [('Supporting evidence', 'supporting_evidence'), ('Material risks', 'material_risks'),
                              ('Oversight actions', 'recommended_actions'), ('Manager questions', 'manager_questions')]:
             if analysis.get(key):
                 ai_appendix += '<h3>' + heading + '</h3><ul>' + ''.join(
-                    '<li>' + escape(str(item)) + '</li>' for item in analysis[key]) + '</ul>'
+                    '<li>' + (categorised_finding(str(item)) if key == 'supporting_evidence' else escape(str(item))) + '</li>' for item in analysis[key]) + '</ul>'
         ai_appendix += ('<h2>Investment reasoning and evidence</h2>' + ''.join(explanations)
                         + '<p class="src">Draft for analyst review. These are AI proposals, not committee approval.</p>')
         appendices.append(ai_appendix)
