@@ -108,6 +108,11 @@ def _ul(items) -> str:
     return "<ul class='x-list'>" + "".join(f"<li>{escape(i)}</li>" for i in items) + "</ul>" if items else ""
 
 
+def _findings_list(items) -> str:
+    from fund_performance.presentation import categorised_finding
+    return "<ul class='x-list'>" + ''.join('<li>' + categorised_finding(i) + '</li>' for i in items) + '</ul>' if items else ''
+
+
 def _chip(rating: str) -> str:
     word, colour = RATING_STYLE.get(rating, (rating.title(), "#546e7a"))
     return f"<td class='x-chip' style='background-color:{colour}'>{escape(word)}</td>"
@@ -182,16 +187,16 @@ def _scorecard(data: dict) -> str:
 def _summary_html(concl: dict) -> str:
     """ The Executive commentary (AI, checked by code); else the dashboard answer and its evidence; else code's
     conclusion as one paragraph """
-    from fund_performance.presentation import answer_paragraphs
+    from fund_performance.presentation import answer_paragraphs, emphasised_answer
     paragraphs = executive_commentary(concl)
     if paragraphs:
-        return "".join(f"<p>{escape(p)}</p>" for p in paragraphs)
+        return "".join(f"<p>{emphasised_answer(p)}</p>" for p in paragraphs)
     parts = summary_parts(concl)
     if not parts:
-        return f"<p>{escape(concl.get('text', ''))}</p>"
+        return ''.join(f"<p>{emphasised_answer(p)}</p>" for p in answer_paragraphs(concl.get('text', '')))
     answer, evidence = parts
-    return ("<p><b>Answer.</b></p>" + ''.join(f"<p>{escape(p)}</p>" for p in answer_paragraphs(answer))
-            + (f"<p><b>Supporting evidence</b></p>{_ul(evidence)}" if evidence else ""))
+    return ("<p><b>Answer.</b></p>" + ''.join(f"<p>{emphasised_answer(p)}</p>" for p in answer_paragraphs(answer))
+            + (f"<p><b>Supporting evidence</b></p>{_findings_list(evidence)}" if evidence else ""))
 
 
 def long_commentary(facts: dict) -> bool:
@@ -215,7 +220,7 @@ def page1(inp, content: ExecutiveContent) -> str:
     heading = 'Oversight commentary' if executive_commentary(concl) else 'Summary'
     summary = (f"<h2>{heading}</h2>{_summary_html(concl)}<p class='x-src'>"
                f"{escape(conclusion_origin(concl))}; a draft for the analyst.</p>")
-    findings_html = '<h2>Key findings</h2>' + _ul(findings) if findings else ''
+    findings_html = '<h2>Key findings</h2>' + _findings_list(findings) if findings else ''
     # xhtml2pdf cannot split a table row. Long commentary in the side-by-side row moves the whole row to
     # the next page, leaving page one mostly empty. Render long commentary as normal flowing paragraphs.
     long_summary = long_commentary(data["facts"])

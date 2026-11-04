@@ -26,7 +26,7 @@ from fund_performance.evidence import Evidence
 from fund_performance.peers import PeerComparison, as_list
 from fund_performance.plain import plain_peer_reason
 from fund_performance.presentation import (NOT_RELIABLE, UNRELIABLE, UNRELIABLE_MARK, comparison_problems,
-                                           missing_evidence,
+                                           missing_evidence, emphasised_answer, categorised_finding,
                                            is_comparative)
 from fund_performance.precedence import ReportedFigures
 from fund_performance.scorecard import AMBER, CHECK_DATA, GREEN, MANUAL_CHECK, RED, Scorecard
@@ -166,7 +166,8 @@ def _in_full(inp: ReportInputs) -> str:
     parts = [("Key findings", list(out.key_findings) if out else []),
              ("Points for your judgement", facts.get("judgement_points", [])),
              ("Questions to ask the manager", facts.get("manager_questions", []))]
-    return "".join(f"<h3>{title}</h3><ul class='tight'>" + "".join(f"<li>{escape(x)}</li>" for x in items) + "</ul>"
+    return "".join(f"<h3>{title}</h3><ul class='tight'>" + "".join(
+                      '<li>' + (categorised_finding(x) if title == 'Key findings' else escape(x)) + '</li>' for x in items) + "</ul>"
                    for title, items in parts if items)
 
 
@@ -655,7 +656,7 @@ def _page3(inp: ReportInputs) -> str:
                   f"<td class='chip' style='background-color:{STATUS_COLOURS[c]}'>{c}</td></tr>" for a, b, c in _aov_rows(inp))
     context = inp.narrative.output.market_context
     analytical = (inp.facts.get("suggested_conclusion") or {}).get("detailed_analysis") or []
-    analytical_html = ("<h3>Investment analysis</h3>" + "".join(f"<p>{escape(p)}</p>" for p in analytical)
+    analytical_html = ("<h3>Investment analysis</h3>" + "".join(f"<p>{emphasised_answer(p)}</p>" for p in analytical)
                        if analytical else "")
     market = (f"<p>{escape(context)}</p><p class='small'>Written by AI from the cited sources; sources [n] are listed "
               "in the appendix.</p>" if context else
