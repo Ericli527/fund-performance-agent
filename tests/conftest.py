@@ -103,3 +103,15 @@ def _ai_switch_on(monkeypatch):
 def _no_trace_upload(monkeypatch):
     """ Unit tests never send OpenAI traces (some set a fake key); live tests keep tracing """
     monkeypatch.setenv("OPENAI_AGENTS_DISABLE_TRACING", "1")
+
+
+@pytest.fixture(autouse=True)
+def _no_real_tavily_calls(request, monkeypatch):
+    """Normal CI never spends Tavily credits, even if a developer has configured a key."""
+    if 'live' in request.keywords:
+        return
+    import requests
+    import fund_performance.tavily as tavily
+    def blocked(**kwargs):
+        raise requests.RequestException('Tavily transport is mocked in non-live tests')
+    monkeypatch.setattr(tavily, '_post', blocked)
