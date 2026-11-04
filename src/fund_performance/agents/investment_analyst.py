@@ -323,7 +323,26 @@ VALIDATION_CODES = {
     'Disagreement requires an evidence-based explanation': 'unexplained_scorecard_disagreement',
     'A numerical claim is not present in the financial facts': 'unsupported_number',
     'Vetted research was supplied; correct the claim that research was unavailable or not retrieved': 'false_missing_research',
+    'Exactly four distinct investment rating dimensions are required': 'invalid_rating_dimensions',
+    'Quantitative scorecard rating was misattributed': 'rating_scorecard_misattribution',
+    'Investment rating agreement is inconsistent': 'rating_agreement_mismatch',
+    'Investment rating requires a rationale and evidence': 'missing_rating_evidence',
+    'Claim citations must match the rating evidence references': 'claim_citation_mismatch',
 }
+
+
+def citation_mismatches(out: InvestmentAssessment) -> list[dict]:
+    """Check each citation against the same pillar's explicitly declared references."""
+    mismatches = []
+    for rating in out.investment_ratings:
+        for index, claim in enumerate(rating.supporting_evidence):
+            groups = re.findall(r'\[([^\[\]]+)\]', claim)
+            cited = {ref.strip() for group in groups for ref in re.split(r'[,;]', group)}
+            missing = cited - set(rating.evidence_references)
+            if missing:
+                mismatches.append({'dimension': rating.dimension, 'claim_index': index,
+                                   'undeclared_references': sorted(missing)})
+    return mismatches
 
 
 def unsupported_numbers(out: InvestmentAssessment, facts: dict, sources: list[dict], exposures: dict | None = None,
@@ -389,9 +408,8 @@ def problems(out: InvestmentAssessment, facts: dict, sources: list[dict], exposu
             issues.append('Investment rating requires a rationale and evidence')
         if set(rating.evidence_references) - allowed:
             issues.append('Unknown evidence reference')
-        embedded = set(re.findall(r'\[([^\[\]]+)\]', ' '.join(rating.supporting_evidence)))
-        if embedded - set(rating.evidence_references):
-            issues.append('Claim citations must match the rating evidence references')
+    if citation_mismatches(out):
+        issues.append('Claim citations must match the rating evidence references')
     verdict = (facts.get("scorecard") or {}).get("verdict", "")
     expected = ("satisfied" if verdict.startswith("Retain") else "monitor" if verdict.startswith("Monitor") else
                 "action_needed" if verdict.startswith("Review") else "insufficient_evidence")
@@ -406,7 +424,7 @@ def problems(out: InvestmentAssessment, facts: dict, sources: list[dict], exposu
         issues.append("A numerical claim is not present in the financial facts")
     if sources and missing_research_claim(text):
         issues.append("Vetted research was supplied; correct the claim that research was unavailable or not retrieved")
-    return issues
+    return list(dict.fromkeys(issues))
 
 
 def reference_feedback(out: InvestmentAssessment, sources: list[dict]) -> str:
@@ -417,10 +435,14 @@ def reference_feedback(out: InvestmentAssessment, sources: list[dict]) -> str:
     invalid = sorted(set(supplied) - set(permitted))
     suggestions = {ref: ref.replace('_', ':').replace('.', ':') for ref in invalid
                    if ref.replace('_', ':').replace('.', ':') in permitted}
+    mismatches = citation_mismatches(out)
     return (json.dumps({'invalid_references': invalid, 'suggested_references': suggestions,
+                       'claim_citation_mismatches': mismatches,
                        'permitted_references': permitted}) +
-            ' Correct only the affected citation fields. Preserve supported reasoning; do not invent a source.'
-            if invalid else '')
+            " Correct only the affected citation fields. Each claim's bracketed IDs must also be declared in "
+            "that rating's evidence_references. Use only supplied evidence that actually supports the claim; "
+            'correct or remove an unsupported claim. Preserve supported reasoning; do not invent a source.'
+            if invalid or mismatches else '')
 
 
 def evidence_catalog(facts: dict, profile: FundProfile, sources: list[dict], references: list[str],
@@ -542,7 +564,8 @@ def partial_assessment(out: InvestmentAssessment, review: QualityReview | None, 
              'scorecard_disagreement_reason': 'scorecard disagreement explanation'}
     withheld = [names[name] for name in TEXT_FIELDS if getattr(out, name) and name not in kept]
     if withheld:
-        observations.append('Not cleared for display: ' + ', '.join(withheld) + '.')
+        label = 'Not cleared for display: ' if review else 'Evidence checks prevented independent review of: '
+        observations.append(label + ', '.join(withheld) + '.')
     observations.append('Some AI claims were withheld; check the evidence and complete a human review before sign-off.')
     diagnostic.update(status='partial')
     evidence = (evidence_catalog(facts, profile, sources, out.evidence_references, exposures, fund_context)
@@ -620,6 +643,9 @@ async def assess(facts: dict, profile: FundProfile, sources: list[dict], questio
                 out, issues, omitted_number_claims = cleaned, [], True
                 entry['unsupported_numeric_claims_withheld'] = True
         entry['validation_issues'] = [VALIDATION_CODES.get(issue, 'other_validation_issue') for issue in issues]
+        # Field locations only: diagnostics must not contain private claims or source text.
+        entry['citation_mismatches'] = [{k: item[k] for k in ('dimension', 'claim_index')}
+                                       for item in citation_mismatches(out)]
         if not issues:
             refs = list(dict.fromkeys(out.evidence_references + [ref for rating in out.investment_ratings
                                                                 for ref in rating.evidence_references]))
@@ -701,9 +727,14 @@ async def assess(facts: dict, profile: FundProfile, sources: list[dict], questio
         messages = {code: issue for issue, code in VALIDATION_CODES.items()}
         messages['unknown_evidence_reference'] = ('A source reference could not be verified. '
             'The financial results remain available; review the cited sources before using the AI conclusion.')
+        messages['claim_citation_mismatch'] = ('Some supporting claims cite sources not declared for their rating. '
+            'Check the affected rating and claim locations in the assessment diagnostics before sign-off.')
         details = [messages.get(code, 'An assessment validation check failed.')
-                   for code in final.get('validation_issues', [])]
-    reason = "A material or unsupported issue remains after revision. " + " ".join(details)
+                   for code in dict.fromkeys(final.get('validation_issues', []))]
+    prefix = ("A material or unsupported issue remains after revision. "
+              if final_reason == 'unresolved_reviewer_issue_after_revision' else
+              "The revised assessment did not pass the evidence checks. ")
+    reason = prefix + " ".join(details)
     # Validation failures were never seen by the reviewer: keep only deterministic evidence in that case.
     reviewed = last_review if last_reviewed_out else None
     partial = partial_assessment(last_reviewed_out if reviewed else out, reviewed, facts, profile, sources, exposures, fund_context,
