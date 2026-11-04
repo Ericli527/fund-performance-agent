@@ -3,6 +3,7 @@ JSON route, the demo and example files, and the page's text. No server is starte
 runs and stand-ins for the reader and the controller) """
 import asyncio
 import json
+import re
 from pathlib import Path
 import zipfile
 import gradio as gr
@@ -115,7 +116,7 @@ def documents(tmp_path):
 
 def test_documents_are_read_checked_by_code_and_run_in_one_click(tmp_path, limits):
     price, factsheet, peer = documents(tmp_path)
-    seen = {}
+    seen, progress = {}, []
 
     async def runner(folder, question, out_root, offline, intake=None, on_step=None):
         seen["profile"] = json.loads((folder / "fund_profile.json").read_text())
@@ -123,13 +124,29 @@ def test_documents_are_read_checked_by_code_and_run_in_one_click(tmp_path, limit
         seen["intake"], seen["offline"] = intake, offline
         raise RunStopped("stop here")
     outcome = asyncio.run(start_review("q", price, factsheet, None, [peer, peer], [], False, limits, out_root=tmp_path,
-                                       runner=runner, reader=fake_reader))
+                                       runner=runner, reader=fake_reader, on_step=progress.append))
     assert outcome.message == "**stop here**" and seen["offline"] is False
     assert seen["files"] == ["factsheet_performance.json", "fund_profile.json", "peer.json", "prices.csv"]
     assert seen["profile"]["ocf_pct"] == 0.1 and seen["profile"]["field_sources"]["ocf_pct"] == "ai_extracted"
     checks = [f["message"] for f in seen["intake"]["flags"] if f["check"] == "self_check"]
     assert any(m.startswith("Code checked the values the Extractor Agent read:") for m in checks)
     assert limits.used_today() == 1 and limits.active == 0
+    assert 'finished' not in progress[0]
+    assert re.search(r'done \([\d.]+ s; \d+ AI call\(s\)\) · finished \d{2}:\d{2}:\d{2} UTC$', progress[1])
+
+
+def test_failed_document_read_finishes_its_progress_line(tmp_path, limits):
+    price, factsheet, _ = documents(tmp_path)
+    progress = []
+
+    async def broken_reader(*args):
+        raise ValueError('Unreadable document')
+
+    outcome = asyncio.run(start_review('q', price, factsheet, None, [], [], False, limits,
+                                       reader=broken_reader, on_step=progress.append))
+    assert 'documents could not be read' in outcome.message
+    assert len(progress) == 2 and progress[-1].startswith('✗ Step 1 of 5')
+    assert re.search(r'failed \([\d.]+ s\).* · finished \d{2}:\d{2}:\d{2} UTC$', progress[-1])
 
 
 def test_documents_need_ai(tmp_path, limits):

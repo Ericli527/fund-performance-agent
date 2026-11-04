@@ -39,7 +39,7 @@ from html import escape
 import gradio as gr
 from fund_performance.config import WebSettings, load_settings
 from fund_performance.dashboard import dashboard_data, dashboard_html, dashboard_sections, technical_html
-from fund_performance.controller import (DEFAULT_QUESTION, DOCUMENTS_STAGE, RunResult, RunStopped, progress_line,
+from fund_performance.controller import (DEFAULT_QUESTION, DOCUMENTS_STAGE, RunResult, RunStopped, completion_time, progress_line,
                                          run_review)
 from fund_performance.plain import verdict_meaning, verdict_name
 from agents import trace
@@ -533,12 +533,17 @@ async def start_review(question: str, price, factsheet, kid, peer_factsheets, js
                 intake = await reader(Path(factsheet), Path(kid) if kid else None, [Path(p) for p in peers], **kwargs)
             except Exception as e:                   # noqa: BLE001
                 traceback.print_exc()
+                if on_step:
+                    on_step(f"✗ Step 1 of 5 · {DOCUMENTS_STAGE[1]} · failed "
+                            f"({time.monotonic() - intake_started:.1f} s): documents could not be read "
+                            f"({type(e).__name__}) · {completion_time()}")
                 return Outcome(f"**Step 1 of 5 failed: the documents could not be read** ({type(e).__name__}). Check "
                                "they are PDF or Word files.")
             finally:
                 AI_CALLS.reset(token)
             if on_step:
-                on_step(f"✓ Step 1 of 5 · {DOCUMENTS_STAGE[1]} · done ({len(calls)} AI call(s))")
+                on_step(f"✓ Step 1 of 5 · {DOCUMENTS_STAGE[1]} · done "
+                        f"({time.monotonic() - intake_started:.1f} s; {len(calls)} AI call(s)) · {completion_time()}")
             intake = intake | {"ai_calls": calls}
             # No person checks the values: code checks each one against the documents and flags what it cannot confirm
             built = self_check(intake)
