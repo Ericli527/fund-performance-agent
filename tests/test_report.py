@@ -409,10 +409,15 @@ def test_long_commentary_uses_existing_answer_and_keeps_full_detail(tmp_path):
     assert 'FUND PERFORMANCE REVIEW · EXECUTIVE REPORT' not in detailed
 
 
-def test_unavailable_chart_is_a_note_without_an_empty_chart_cell(tmp_path):
+def test_unavailable_chart_is_a_note_without_an_empty_chart_cell(tmp_path, monkeypatch):
+    from fund_performance import charts
     from fund_performance.report import _page2
     inp = made_up_inputs()
+    annual = charts.yearly_returns_chart(['2026'], [1.0], [1.1], tmp_path / 'annual.png',
+                                         'Fund', 'Index', 'Illustrative annual returns')
+    monkeypatch.setattr('fund_performance.report._chart_images', lambda *args: (None, annual, 'Factsheet returns.'))
     inp.presentation_context['performance_chart'] = {'available': False, 'reason': 'No compatible benchmark series.'}
     html = _page2(inp, tmp_path)
     assert 'No compatible benchmark series.' in html and 'Not enough data for this chart' not in html
+    assert html.count('<img ') == 1  # The supported annual chart remains; no empty growth-chart cell.
     assert not re.search(r'<td[^>]*>\s*</td>', html)
