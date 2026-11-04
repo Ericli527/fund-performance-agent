@@ -132,7 +132,7 @@ def _header(data: dict, quality: EvidenceQuality, institutional: bool = False) -
 def _summary(data: dict, quality: EvidenceQuality, title: str = "Summary", concise: bool = False) -> str:
     """ The analyst's answer: Answer, Supporting evidence and Recommended next step. The verdict and ratings are shown
     in their own sections; data-quality items are listed once, in a collapsible section """
-    from fund_performance.presentation import answer_paragraphs
+    from fund_performance.presentation import answer_paragraphs, emphasised_answer, categorised_finding
     facts = data["facts"]
     concl = facts.get("suggested_conclusion") or {}
     who = conclusion_origin(concl)
@@ -141,14 +141,15 @@ def _summary(data: dict, quality: EvidenceQuality, title: str = "Summary", conci
         answer, evidence = parts
         shown = evidence[:3] if concise else evidence
         body = ("<p class='fp-concern-title'>Answer</p>" + ''.join(
-                    f"<p class='fp-conclusion'>{escape(p)}</p>" for p in answer_paragraphs(answer))
+                    f"<p class='fp-conclusion'>{emphasised_answer(p)}</p>" for p in answer_paragraphs(answer))
                 + (f"<p class='fp-concern-title'>{'Key findings' if concise else 'Supporting evidence'}</p>"
-                   + _list(shown, "fp-evidence") if shown else ""))
+                   + "<ul class='fp-evidence'>" + ''.join('<li>' + categorised_finding(item) + '</li>' for item in shown) + '</ul>' if shown else ""))
         if concise and len(evidence) > 3:
             body += _details("Full supporting evidence", _list(evidence))
     else:
         answer = concl.get('text') or 'The answer is unavailable; review the scorecard and evidence below.'
-        body = f"<p class='fp-concern-title'>Answer</p><p class='fp-conclusion'>{escape(answer)}</p>"
+        body = "<p class='fp-concern-title'>Answer</p>" + ''.join(
+            f"<p class='fp-conclusion'>{emphasised_answer(p)}</p>" for p in answer_paragraphs(answer))
     check = next_step(facts)
     step = concl.get("next_step") or check
     if step:

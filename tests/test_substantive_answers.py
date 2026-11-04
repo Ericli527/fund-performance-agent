@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import re
 from html import unescape
 
 import pytest
@@ -43,7 +44,7 @@ def test_reviewed_no_peer_judgement_reaches_reporter_and_paragraphs_survive_both
     pdf = _summary_html(concl)
     assert html.count("class='fp-conclusion'") == 3
     for paragraph in ANSWER.split('\n\n'):
-        assert paragraph in unescape(html) and paragraph in unescape(pdf)
+        assert paragraph in unescape(re.sub('<[^>]+>', '', html)) and paragraph in unescape(pdf)
     assert 'preliminary mandate assessment' in judge_input(facts, draft, assessment=assessment)
 
 
