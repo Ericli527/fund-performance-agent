@@ -48,7 +48,7 @@ def content_from(inp, out_dir: Path) -> ExecutiveContent:
     from fund_performance.report import plain_reason
     data = {"facts": facts, "reasons": {name: plain_reason(inp, name) for name in inp.card.pillars},
             "findings": list(out.key_findings) if out else [], "actions": list(out.action_texts) if out else [],
-            "flags": flag_dicts(inp.flags)}
+            "flags": flag_dicts(inp.flags), "presentation_context": inp.presentation_context}
     if comparison_problems(inp.flags):
         return ExecutiveContent(data, None, CHART_LEFT_OUT, True)
     chart, caption = _chart(inp, out_dir)
@@ -104,7 +104,7 @@ def _chart(inp, out_dir: Path) -> tuple[Path | None, str]:
 # --- Page pieces ---------------------------------------------------------------------------------------------------------
 
 def _ul(items) -> str:
-    items = [i for i in items if i]
+    items = [i for i in items if i and i.strip()]
     return "<ul class='x-list'>" + "".join(f"<li>{escape(i)}</li>" for i in items) + "</ul>" if items else ""
 
 
@@ -118,27 +118,28 @@ def _chip(rating: str) -> str:
     return f"<td class='x-chip' style='background-color:{colour}'>{escape(word)}</td>"
 
 
-def _banner(inp) -> str:
+def _banner(inp, report_kind: str = 'Executive Report') -> str:
     p = inp.profile
     n = p.analysis_period_years
-    return (f"<table class='x-banner'><tr><td><span class='x-kicker'>FUND PERFORMANCE REVIEW · EXECUTIVE REPORT</span><br/>"
+    return (f"<table class='x-banner'><tr><td><span class='x-kicker'>FUND PERFORMANCE REVIEW · {escape(report_kind.upper())}</span><br/>"
             f"<span class='x-fund'>{escape(p.fund_name)}</span><br/><span class='x-meta'>ISIN {escape(p.isin)} · "
             f"{escape(p.share_class)} · {escape(p.currency)} · Benchmark: {escape(p.benchmark_name)}<br/>Reporting "
             f"period: {n} years to {p.as_of_date:%d %b %Y} · prepared {inp.prepared:%d %b %Y}</span></td></tr></table>")
 
 
 def _statuses(data: dict) -> str:
+    from fund_performance.presentation import preliminary_assessment
     facts = data["facts"]
     code = facts["scorecard"]["verdict"]
     quality = evidence_quality(data)
-    colour = next((c for k, c in VERDICT_STYLE.items() if code.startswith(k)), NAVY)
+    colour = NAVY
+    headline, detail = preliminary_assessment(data)
     q_colour = {"check": "#6d4c9f", "warnings": "#b7791f", "clear": "#4c5966"}[quality.level]
     caveat = assessment_caveat(quality)
     return (f"<table class='x-status'><tr>"
-            f"<td width='50%' class='x-box' style='border-left: 4px solid {colour}'><span class='x-label'>INVESTMENT "
-            f"ASSESSMENT (SUGGESTED)</span><br/><span class='x-big' style='color:{colour}'>{escape(verdict_name(code))}</span>"
-            f"<br/>{escape(assessment_meaning(code, quality, verdict_meaning(code)))}. From fixed rules on the four "
-            "ratings; the analyst decides."
+            f"<td width='50%' class='x-box' style='border-left: 4px solid {colour}'><span class='x-label'>PRELIMINARY "
+            f"INVESTMENT ASSESSMENT</span><br/><span class='x-preliminary'>{escape(headline)}</span>"
+            f"<br/>{escape(detail)}"
             f"{('<br/><b>' + escape(caveat) + '</b>') if caveat else ''}</td><td width='2%'></td>"
             f"<td width='48%' class='x-box' style='border-left: 4px solid {q_colour}'><span class='x-label'>EVIDENCE "
             f"QUALITY (DATA CHECKS)</span><br/><span class='x-big' style='color:{q_colour}'>{escape(quality.label)}</span>"
@@ -169,6 +170,7 @@ def key_findings(data: dict) -> list[str]:
 
 
 def _scorecard(data: dict) -> str:
+    from fund_performance.presentation import rating_explanation
     missing = missing_evidence(data["facts"])
     rows = ""
     for p in data["facts"]["scorecard"]["pillars"]:
@@ -178,16 +180,28 @@ def _scorecard(data: dict) -> str:
             why = "Not rated yet: the data check on page 2 must be resolved first."
         else:
             why = data["reasons"].get(p["name"]) or p["reason"]
+        if p['name'] in ('Value for investors', 'Fees') and rating_explanation(data['facts'], p)['limitations']:
+            why += ' Peer comparison provisional; see the comparison qualifications.'
         rows += (f"<tr><td class='x-q'><b>{escape(p['name'])}</b><br/><span class='x-src'>"
                  f"{escape(SHORT_QUESTIONS.get(p['name'], ''))}</span></td>{_chip(p['rating'])}<td>{escape(why)}</td></tr>")
     return ("<table class='x-grid'><tr><th width='24%' class='l'>Question</th><th width='12%'>Rating</th>"
             f"<th class='l'>Why</th></tr>{rows}</table>")
 
 
+def compact_commentary(concl: dict) -> bool:
+    """Reuse the validated direct answer; never truncate or generate a replacement summary."""
+    full = ' '.join(executive_commentary(concl))
+    answer = (concl.get('answer') or '').strip()
+    return bool(len(full) > 1800 and answer and len(answer) < len(full))
+
+
 def _summary_html(concl: dict) -> str:
     """ The Executive commentary (AI, checked by code); else the dashboard answer and its evidence; else code's
     conclusion as one paragraph """
     from fund_performance.presentation import answer_paragraphs, emphasised_answer
+    if compact_commentary(concl):
+        return (''.join(f'<p>{emphasised_answer(p)}</p>' for p in answer_paragraphs(concl['answer']))
+                + '<p class="x-src">Extended oversight commentary is retained in the Detailed Report.</p>')
     paragraphs = executive_commentary(concl)
     if paragraphs:
         return "".join(f"<p>{emphasised_answer(p)}</p>" for p in paragraphs)
@@ -201,10 +215,12 @@ def _summary_html(concl: dict) -> str:
 
 def long_commentary(facts: dict) -> bool:
     concl = facts.get("suggested_conclusion") or {}
+    if compact_commentary(concl):
+        return len(concl['answer']) > 700
     return len(" ".join(executive_commentary(concl)) or concl.get("text", "")) > 700
 
 
-def page1(inp, content: ExecutiveContent) -> str:
+def page1(inp, content: ExecutiveContent, report_kind: str = 'Executive Report') -> str:
     data = content.data
     concl = data["facts"].get("suggested_conclusion") or {}
     findings = key_findings(data)
@@ -224,7 +240,7 @@ def page1(inp, content: ExecutiveContent) -> str:
     # xhtml2pdf cannot split a table row. Long commentary in the side-by-side row moves the whole row to
     # the next page, leaving page one mostly empty. Render long commentary as normal flowing paragraphs.
     long_summary = long_commentary(data["facts"])
-    if long_summary:
+    if long_summary or not content.chart:
         chart = chart.replace("width='330'", "width='240'")
         narrative = summary + findings_html + f"<div align='center'>{chart}</div>"
     else:
@@ -248,7 +264,7 @@ def page1(inp, content: ExecutiveContent) -> str:
         "Report; human sign-off required.</p>"
         if ai_cells else '')
     return f"""
-{_banner(inp)}
+{_banner(inp, report_kind)}
 <h1>{PAGE1}</h1>
 {_statuses(data)}
 {_metrics(data['facts'])}
@@ -364,6 +380,12 @@ def material_issues(data: dict) -> str:
         body += "<p class='x-group'>Data issues (evidence quality)</p>" + _ul(data_items)
     if quality.ai_read:
         body += "<p class='x-group'>Evidence note</p>" + _ul(["AI-extracted figures require verification against the documents."])
+    assessment = (data.get('presentation_context') or {}).get('investment_assessment') or {}
+    if assessment.get('status') in ('partial', 'unavailable'):
+        body += ("<p class='x-group'>Independent AI assessment</p><p>"
+                 + ('The AI judgement remains qualified.' if (assessment.get('assessment') or {}).get('recommendation')
+                    else 'An independent AI recommendation has not been cleared for use.')
+                 + ' Review the findings in the Detailed Report before sign-off.</p>')
     return body or "<p>No performance concerns, no gaps in the evidence and no data issues.</p>"
 
 
@@ -429,6 +451,7 @@ Full tables, sources, data checks and audit evidence: the Detailed Report.</p>
 EXEC_CSS = f"""
 .x-banner td {{ background-color: {NAVY}; color: white; padding: 7px 10px; }}
 .x-kicker {{ font-size: 7.4pt; color: #b9cbe0; }} .x-fund {{ font-size: 16pt; font-weight: bold; }}
+.x-preliminary {{ font-size: 11pt; font-weight: bold; color: {NAVY}; }}
 .x-meta {{ font-size: 8.4pt; color: #dce6f1; }}
 .x-status td.x-box, .x-metrics td.x-metric {{ border: 0.6px solid #dde3ea; padding: 6px 8px; vertical-align: top;
   background-color: #ffffff; font-size: 8.4pt; }}
@@ -469,10 +492,10 @@ def _market_context(inp) -> str:
             "sources [n] (listed with dates in the Detailed Report, Appendix D). It never changes a figure or rating.</p>")
 
 
-def executive_html(inp, out_dir: Path) -> tuple[str, str]:
+def executive_html(inp, out_dir: Path, report_kind: str = 'Executive Report') -> tuple[str, str]:
     """ The two pages' HTML (page 1, page 2) """
     content = content_from(inp, out_dir)
-    return page1(inp, content), page2(inp, content)
+    return page1(inp, content, report_kind), page2(inp, content)
 
 
 def build_executive(inp, out_dir: Path, name: str = "report_executive.pdf") -> Path:

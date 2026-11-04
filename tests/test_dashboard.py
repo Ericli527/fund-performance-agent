@@ -275,7 +275,43 @@ def test_a_suggested_satisfied_with_open_data_issues_is_never_shown_as_final():
     assert "Satisfied" in html and "Not final: review the data warnings first." in html
     assert "Warning: Gap in prices" in html and "approved" not in html.lower()
     clean = text(dashboard_html(data()))
-    assert "Not final" not in clean and "Investment assessment (suggested)" in clean
+    assert "Not final" not in clean and "Preliminary investment assessment" in clean
+
+
+def test_preliminary_headline_distinguishes_supported_ai_from_scorecard():
+    from fund_performance.dashboard import dashboard_sections
+    d = data()
+    d['presentation_context'] = {'investment_assessment': {'status': 'partial', 'review_status': 'qualified_draft',
+        'assessment': {'recommendation': 'monitor', 'investment_thesis': 'Monitor concentration.'}}}
+    original = copy.deepcopy(d)
+    overview = dashboard_sections(d)['overview']
+    assert 'Preliminary: Monitor' in text(overview) and 'pending evidence review' in text(overview)
+    assert 'Quantitative scorecard: Retain' in text(overview)
+    assert d == original
+    d['presentation_context']['investment_assessment']['assessment']['recommendation'] = None
+    overview = text(dashboard_sections(d)['overview'])
+    assert 'Preliminary: Analyst review required' in overview and 'Quantitative scorecard: Retain' in overview
+
+
+def test_peer_qualifications_are_visible_without_changing_green_scorecard():
+    from fund_performance.dashboard import dashboard_sections
+    d = data()
+    d['facts']['peers'][0].update(investor_type='institutional', minimum_investment='GBP 1,000,000',
+        fee_type='unknown', benchmark_name='Different index variant',
+        notes=['Confirm pricing time and reporting date.'])
+    original = copy.deepcopy(d['facts']['scorecard'])
+    overview = text(dashboard_sections(d)['overview'])
+    assert 'Peer comparison provisional' in overview and '1,000,000' in overview
+    assert 'Confirm pricing time and reporting date.' in overview and 'not a verified like-for-like OCF' in overview
+    assert d['facts']['scorecard'] == original
+
+
+def test_empty_lists_and_ai_details_do_not_create_empty_bullets_or_sections():
+    from fund_performance.dashboard import _analyst_card, _details, _list
+    assert _list(['', '  ', '\n']) == '' and _details('Rating methodology', _list([' '])) == ''
+    html = _analyst_card({'status': 'partial', 'assessment': {'supporting_evidence': [' ', ''],
+        'material_risks': ['\n'], 'investment_thesis': ''}})
+    assert 'Detailed AI Analysis' not in html and not re.search(r'<li>\s*</li>', html)
 
 
 # Headline metrics: from the facts, with period, unit and source; missing is never zero

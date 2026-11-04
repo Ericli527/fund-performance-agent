@@ -538,6 +538,9 @@ def _page2(inp: ReportInputs, out_dir: Path) -> str:
         candidate = out_dir / "dashboard_growth.png"
         growth = candidate if status.get("available") and candidate.is_file() else None
         caption = status.get("caption") if growth else "Comparison unavailable: " + str(status.get("reason") or "insufficient evidence")
+    cells = ''.join('<td align="center">' + _img(chart) + '</td>'
+                    for chart in (growth, yearly) if chart is not None)
+    chart_panel = '<table width="100%"><tr>' + cells + '</tr></table>' if cells else ''
     return f"""
 <h1>Appendix B: Mandate and performance</h1>
 {_not_reliable(inp)}
@@ -549,7 +552,7 @@ def _page2(inp: ReportInputs, out_dir: Path) -> str:
 <h3>Calendar-year returns</h3>{_calendar_table(inp)}
 <h3>Risk</h3>{_risk_table(inp)}
 <h3>Below the surface</h3><ul class="tight">{notes or '<li>No data notes.</li>'}</ul>
-<table width="100%"><tr><td align="center">{_img(growth)}</td><td align="center">{_img(yearly)}</td></tr></table>
+{chart_panel}
 <p class="small">{escape(caption)}</p>
 """
 
@@ -829,12 +832,21 @@ p {{ margin: 0 0 3px 0; }} ul, ol {{ margin: 0 0 3px 0; }} li {{ margin-bottom: 
 
 def build_html(inp: ReportInputs, out_dir: Path) -> str:
     """ The Detailed Report: the two Executive Report pages, then Appendices A to D, each from a new page """
-    from fund_performance.executive import EXEC_CSS, executive_html, long_commentary
+    from fund_performance.executive import EXEC_CSS, executive_html, long_commentary, compact_commentary
     footer = (f'<div id="footer">{escape(inp.profile.fund_name)} · Detailed Report (draft) · figures to '
               f'{inp.profile.as_of_date:%d %b %Y} · Public data only · Page <pdf:pagenumber> of <pdf:pagecount></div>')
-    p1, p2 = executive_html(inp, out_dir)
+    p1, p2 = executive_html(inp, out_dir, report_kind='Detailed Report')
     appendices = [_dashboard(inp, out_dir), _page2(inp, out_dir), _page3(inp)]
+    conclusion = inp.facts.get('suggested_conclusion') or {}
+    if compact_commentary(conclusion):
+        appendices.append('<h1>Extended oversight commentary</h1>' + ''.join(
+            '<p>' + emphasised_answer(p) + '</p>' for p in conclusion['executive'] if p.strip()))
     assessment = (inp.presentation_context or {}).get('investment_assessment') or {}
+    review_notes = [note for note in [assessment.get('reason'), *(assessment.get('reviewer_observations') or []),
+                                     *(assessment.get('limitations') or [])] if note and note.strip()]
+    review_qualifications = ('<h3>AI review qualifications</h3><p>Human evidence review and sign-off are required.</p><ul>'
+                            + ''.join('<li>' + escape(note) + '</li>' for note in dict.fromkeys(review_notes)) + '</ul>'
+                            if review_notes else '')
     ratings = ((assessment.get('assessment') or {}).get('investment_ratings') or []
                if assessment.get('status') == 'available' else [])
     if ratings:
@@ -886,7 +898,7 @@ def build_html(inp: ReportInputs, out_dir: Path) -> str:
         ai_appendix += ('<h2>Investment reasoning and evidence</h2>' + ''.join(explanations)
                         + '<p class="src">Draft for analyst review. These are AI proposals, not committee approval.</p>')
         appendices.append(ai_appendix)
-    appendices.append(_appendix(inp, False, plain_text("".join([p1, p2] + appendices))))
+    appendices.append(_appendix(inp, False, plain_text("".join([p1, p2] + appendices))) + review_qualifications)
     separator = '' if long_commentary(inp.facts) else '<div style="page-break-before: always"></div>'
     body = p1 + separator + p2 + '<div style="page-break-before: always"></div>' + \
         '<div style="page-break-before: always"></div>'.join(appendices)

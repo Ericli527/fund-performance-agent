@@ -9,7 +9,7 @@
 - Pricing time: noon prices are compared with the fund's noon NAV, market-close prices with the fund's PNAV
   (market close). The basis used is shown.
 - Share class: the type (retail or institutional) and the minimum investment are recorded; an institutional class
-  is kept with a note, because its fee is lower than retail investors could get.
+  is kept with a note that eligibility and fee access may differ for retail investors.
 - Income vs accumulation: comparable on a total-return basis; the type is shown.
 - Several peers: Value uses the average gap over the peers whose returns can be used; Fees uses the average fee.
 """
@@ -23,7 +23,7 @@ from fund_performance.config import PEER_FOLDER, ApprovedPeer, BenchmarkPeers, P
 from fund_performance.models import DataFlag, FundProfile, Peer
 from fund_performance.precedence import PRICE_SERIES, ReportedFigures
 
-INSTITUTIONAL_NOTE = "institutional share class: its fee is lower than retail investors could get"
+INSTITUTIONAL_NOTE = "institutional share class: verify investor eligibility and access to the quoted fee"
 PERIODS = (1, 3, 5)
 DOC_SUFFIXES = (".pdf", ".docx")
 

@@ -380,3 +380,39 @@ def test_long_executive_commentary_starts_on_first_page_and_is_kept_in_both_repo
         for p in paragraphs:
             assert " ".join(p.split()) in full
         assert "Analyst sign-off" in full and "☐ Satisfied" in full
+
+
+def test_long_commentary_uses_existing_answer_and_keeps_full_detail(tmp_path):
+    from fund_performance.executive import compact_commentary
+    inp = made_up_inputs()
+    paragraphs = [f'Extended finding {i}. ' + 'Source verification and peer eligibility need review. ' * 9
+                  for i in range(5)]
+    answer = ('The fund follows its documented benchmark, subject to source verification.\n\n'
+              'Published charges can be assessed; peer eligibility and fee measures require confirmation.\n\n'
+              'Review market and currency risk and verify provisional figures before sign-off.')
+    inp.facts['suggested_conclusion'] |= {'source': 'ai', 'executive': paragraphs, 'answer': answer}
+    inp.presentation_context['investment_assessment'] = {'status': 'partial', 'review_status': 'qualified_draft',
+        'assessment': {'recommendation': 'satisfied'}, 'reason': 'Provisional evidence requires source verification.',
+        'reviewer_observations': ['Confirm institutional peer eligibility before sign-off.']}
+    assert compact_commentary(inp.facts['suggested_conclusion'])
+    executive = page_texts(build_executive(inp, tmp_path / 'exec'))
+    detailed = ' '.join(' '.join(page_texts(build_report(inp, tmp_path / 'detail'))).split())
+    assert len(executive) == 2
+    for paragraph in answer.split('\n\n'):
+        assert paragraph in ' '.join(' '.join(executive).split())
+    for paragraph in paragraphs:
+        assert paragraph.strip() in detailed
+    assert 'Extended oversight commentary' in detailed
+    assert 'AI review qualifications' in detailed and 'Confirm institutional peer eligibility before sign-off.' in detailed
+    assert 'The AI judgement remains qualified.' in ' '.join(' '.join(executive).split())
+    assert 'FUND PERFORMANCE REVIEW · DETAILED REPORT' in detailed
+    assert 'FUND PERFORMANCE REVIEW · EXECUTIVE REPORT' not in detailed
+
+
+def test_unavailable_chart_is_a_note_without_an_empty_chart_cell(tmp_path):
+    from fund_performance.report import _page2
+    inp = made_up_inputs()
+    inp.presentation_context['performance_chart'] = {'available': False, 'reason': 'No compatible benchmark series.'}
+    html = _page2(inp, tmp_path)
+    assert 'No compatible benchmark series.' in html and 'Not enough data for this chart' not in html
+    assert not re.search(r'<td[^>]*>\s*</td>', html)

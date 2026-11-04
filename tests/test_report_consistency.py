@@ -40,7 +40,8 @@ def test_verdict_ratings_and_headline_figures_agree_everywhere(run):
             assert value in surface, value
         for name, word in zip(("Mandate", "Performance", "Value for investors", "Fees"), ratings):
             assert re.search(rf"{re.escape(name)}.{{0,60}}{word}", surface), (name, word)
-    body = lambda text: flat(text.split("\n", 1)[1])                          # noqa: E731 - without the footer line
+    # The document-specific banner and footer differ; all overview evidence must still agree.
+    body = lambda text: flat(text.split("\n", 1)[1]).replace('DETAILED REPORT', 'EXECUTIVE REPORT')  # noqa: E731
     assert [body(x) for x in page_texts(run.executive_pdf)] == [body(x) for x in page_texts(run.pdf)[:2]]
 
 

@@ -260,6 +260,15 @@ def test_there_is_no_offline_switch_on_the_page():
     assert "Offline" not in texts and "untick" not in texts.lower()
 
 
+def test_processing_history_is_collapsed_without_hiding_review_status():
+    ui = build_ui()
+    accordion = next(c for c in ui.blocks.values() if isinstance(c, gr.Accordion)
+                     and c.label == 'View processing details')
+    assert accordion.open is False
+    progress = next(c for c in ui.blocks.values() if 'fp-progress' in (getattr(c, 'elem_classes', None) or []))
+    assert progress in accordion.children
+
+
 def test_review_type_cards_fill_in_the_question_and_keep_the_users_own():
     radio = next(c for c in _blocks(gr.Radio) if c.value == "overall")
     assert [v for _, v in radio.choices] == ["overall", "performance", "fees_value", "custom"]

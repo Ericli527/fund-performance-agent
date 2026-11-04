@@ -55,13 +55,34 @@ def categorised_finding(text: str) -> str:
 
 # --- Evidence quality (separate from the investment assessment) ------------------------------------------------
 
+def preliminary_assessment(data: dict) -> tuple[str, str]:
+    """Attribute the headline without turning a scorecard or an AI draft into human approval."""
+    from fund_performance.plain import verdict_name
+    code = (data.get('facts', {}).get('scorecard') or {}).get('verdict', 'Not available')
+    assessment = (data.get('presentation_context') or {}).get('investment_assessment') or {}
+    recommendation = (assessment.get('assessment') or {}).get('recommendation')
+    labels = {'satisfied': 'Satisfied', 'monitor': 'Monitor', 'action_needed': 'Action needed',
+              'insufficient_evidence': 'Further assessment required'}
+    if assessment.get('status') in ('available', 'partial') and recommendation in labels:
+        conclusion = labels[recommendation]
+        origin = 'Independent AI judgement; evidence qualifications and reviewer findings still apply.'
+    elif assessment:
+        conclusion = 'Analyst review required'
+        origin = 'An independent AI recommendation has not been cleared for use.'
+    else:
+        conclusion = verdict_name(code)
+        origin = 'Preliminary indication from the quantitative scorecard, not an independent AI recommendation.'
+    return (f'Preliminary: {conclusion} — pending evidence review',
+            f'Quantitative scorecard: {code}. {origin} Human review and sign-off are required.')
+
+
 def rating_explanation(facts: dict, pillar: dict) -> dict:
     """Explain the stored scorecard evidence without changing its rating or calculating new metrics."""
     name, rating = pillar.get('name', ''), pillar.get('rating', '')
     objective = (facts.get('fund') or {}).get('objective_type')
     values = pillar.get('values') or {}
     figures = facts.get('figures') or []
-    evidence, limitations = [], list(pillar.get('notes') or [])
+    evidence, limitations = [], [note for note in pillar.get('notes') or [] if note and note.strip()]
     conclusion = {'GREEN': 'The available evidence meets the scorecard criteria.',
                   'AMBER': 'The evidence warrants monitoring or a more complete comparison.',
                   'RED': 'The evidence warrants investigation under the scorecard criteria.',
@@ -119,6 +140,12 @@ def rating_explanation(facts: dict, pillar: dict) -> dict:
         if len(peers) == 1:
             limitations.append('A single peer does not represent the full market.')
         for peer in peers:
+            limitations.extend(note for note in peer.get('notes', []) if note and note.strip())
+            if peer.get('benchmark_name') and peer['benchmark_name'] != (facts.get('fund') or {}).get('benchmark_name'):
+                limitations.append(f"{peer.get('name', 'Peer')}: follows {peer['benchmark_name']}; index coverage may differ.")
+            if name == 'Fees' and peer.get('fee_type', 'ocf') != 'ocf':
+                limitations.append(f"{peer.get('name', 'Peer')}: fee measure {peer.get('fee_type') or 'unconfirmed'} "
+                                   'is not a verified like-for-like OCF comparison.')
             if peer.get('origin') in ('uploaded', 'approved'):
                 limitations.append(f"{peer.get('name', 'Peer')}: figures were AI-extracted from a peer factsheet and require verification.")
             if peer.get('investor_type') == 'institutional' or peer.get('minimum_investment'):
