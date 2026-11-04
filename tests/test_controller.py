@@ -318,4 +318,19 @@ def test_an_offline_run_starts_no_agent_and_says_which_steps_it_skipped(tmp_path
     messages = []
     asyncio.run(run_review(sample, out_root=tmp_path, offline=True, on_step=messages.append))
     assert all(" · Code: " in m for m in messages if m.startswith("▶"))
-    assert "↷ Step 2 of 5 · Task Planner Agent · skipped: offline run: default plan" in messages
+    assert any(m.startswith("↷ Step 2 of 5 · Task Planner Agent · skipped (")
+               and ": offline run: default plan · finished " in m for m in messages)
+
+
+@pytest.mark.parametrize('status', ['ok', 'skipped', 'fallback', 'partial', 'failed', 'unavailable', 'timeout', 'stopped'])
+def test_every_terminal_step_has_recorded_finish_time_and_duration(tmp_path, status):
+    from datetime import datetime
+    from fund_performance.controller import RunLog
+    messages = []
+    log = RunLog(tmp_path, 'Review', False, messages.append)
+    record = log.start('investment_assessment')
+    log.end(record, status=status, notes=['A useful explanation.'])
+    assert 'finished' not in messages[0]
+    assert f'{record.seconds:.1f} s' in messages[-1]
+    assert messages[-1].endswith(f"finished {datetime.fromisoformat(record.ended):%H:%M:%S} UTC")
+    assert datetime.fromisoformat(record.ended).utcoffset().total_seconds() == 0

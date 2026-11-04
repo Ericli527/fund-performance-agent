@@ -490,6 +490,63 @@ def test_rating_claim_with_wrong_embedded_source_is_rejected():
         InvestmentAssessment.model_validate(item), FACTS, [])
 
 
+def test_grouped_claim_citations_require_every_source_to_be_declared():
+    item = copy.deepcopy(BASE)
+    rating = item['investment_ratings'][0]
+    rating.update(supporting_evidence=['The documented strategy supports the assessment. [mandate, scorecard]'],
+                  evidence_references=['mandate', 'scorecard'])
+    result = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(item), FakeRun(PASS)))
+    assert result['status'] == 'available'
+    # Formatting tolerance does not infer missing sources or approve an unknown citation.
+    for claim in ['A claim [mandate; research:99]', 'A claim [mandate, peers]']:
+        rating['supporting_evidence'] = [claim]
+        assert 'Claim citations must match the rating evidence references' in problems(
+            InvestmentAssessment.model_validate(item), FACTS, [])
+
+
+def test_claim_citation_revision_identifies_pillar_and_claim_without_hiding_supported_judgement():
+    item = copy.deepcopy(BASE)
+    for rating in item['investment_ratings'][:2]:
+        rating['supporting_evidence'] = ['A supported interpretation. [mandate]']
+    runner, reviewer = FakeRun(item, BASE), FakeRun(PASS)
+    result = asyncio.run(assess(FACTS, PROFILE, [], 'Review', runner, reviewer))
+    assert result['status'] == 'available' and result['assessment']['recommendation'] == 'satisfied'
+    assert len(runner.prompts) == 2 and len(reviewer.prompts) == 1
+    assert 'claim_citation_mismatches' in runner.prompts[1]
+    assert 'undeclared_references' in runner.prompts[1] and 'claim_index' in runner.prompts[1]
+    first = result['diagnostics']['attempts'][0]
+    assert first['review'] == 'not_run' and first['validation_issues'] == ['claim_citation_mismatch']
+    assert first['citation_mismatches'] == [{'dimension': r['dimension'], 'claim_index': 0}
+                                          for r in item['investment_ratings'][:2]]
+    assert 'A supported interpretation.' not in json.dumps(result['diagnostics'])
+
+
+def test_persistent_claim_citation_failure_is_specific_and_not_mislabelled_reviewer_rejection():
+    item = copy.deepcopy(BASE)
+    for rating in item['investment_ratings'][:2]:
+        rating['supporting_evidence'] = ['Private unsupported claim. [research:99]']
+    reviewer = FakeRun(PASS)
+    result = asyncio.run(assess(FACTS, PROFILE, [], 'Review', FakeRun(item, item), reviewer))
+    assert result['review_status'] == 'requires_analyst_review'
+    assert result['assessment']['recommendation'] is None and not reviewer.prompts
+    assert result['diagnostics']['final_reason'] == 'validation_failed_after_revision'
+    assert result['reason'].count('Some supporting claims cite sources') == 1
+    assert 'An assessment validation check failed' not in result['reason']
+    assert result['reviewer_observations'][0].startswith('Evidence checks prevented independent review of:')
+    assert 'Private unsupported claim' not in json.dumps(result)
+
+
+def test_rating_validation_reasons_have_specific_diagnostic_codes():
+    from fund_performance.agents.investment_analyst import VALIDATION_CODES
+    item = copy.deepcopy(BASE)
+    item['investment_ratings'][0].update(dimension='Fees', quantitative_scorecard_rating='WRONG',
+                                          agreement=None, rationale=' ', evidence_references=[' '])
+    issues = problems(InvestmentAssessment.model_validate(item), FACTS, [])
+    assert issues and all(issue in VALIDATION_CODES for issue in issues)
+    assert {'invalid_rating_dimensions', 'rating_scorecard_misattribution', 'rating_agreement_mismatch',
+            'missing_rating_evidence', 'unknown_evidence_reference'} <= {VALIDATION_CODES[i] for i in issues}
+
+
 def test_supported_format_does_not_authorise_invented_rating_numbers():
     item = copy.deepcopy(BASE)
     item['investment_ratings'][0].update(supporting_evidence=['The fund returned 999.9%.'], evidence_references=['performance:5y'])

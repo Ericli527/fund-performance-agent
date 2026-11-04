@@ -21,7 +21,7 @@ The extractor runs before the data checks because the repeated-price check compa
 import asyncio
 from dataclasses import asdict, dataclass, field
 from typing import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import re
 from pathlib import Path
@@ -165,14 +165,15 @@ class RunLog:
         record.notes += notes or []
         if self.on_step and record.step in STAGES and not quiet:
             stage, who, _ = STAGES[record.step]
-            word = {"ok": f"done ({record.seconds:.1f} s)", "skipped": "skipped",
-                    "fallback": f"fallback after {record.seconds:.1f} s"}.get(status, status)
+            word = {"ok": f"done ({record.seconds:.1f} s)", "skipped": f"skipped ({record.seconds:.1f} s)",
+                    "fallback": f"fallback after {record.seconds:.1f} s"}.get(status, f"{status} ({record.seconds:.1f} s)")
             if status == "ok" and record.step == "research" and record.notes:
                 word += f": {record.notes[0]}"
             why = f": {record.notes[0]}" if status not in ("ok", "fallback") and record.notes else (
                 f": code's conclusion is used (labelled as such); {record.notes[0]}" if status == "fallback"
                 and record.notes else "")
-            self.on_step(f"{OUTCOME_ICON.get(status, '•')} Step {stage} of {TOTAL_STAGES} · {who} · {word}{why}")
+            self.on_step(f"{OUTCOME_ICON.get(status, '•')} Step {stage} of {TOTAL_STAGES} · {who} · {word}{why}"
+                         f" · {completion_time(record.ended)}")
 
     def finish(self, status: str, message: str | None = None) -> None:
         self.run |= {"ended": _now(), "status": status, "message": message}
@@ -227,7 +228,13 @@ def _count(calls: list[dict]) -> dict[str, int]:
 
 
 def _now() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def completion_time(ended: str | None = None) -> str:
+    """Use an explicit timezone so Render's clock cannot be mistaken for the user's local time."""
+    when = datetime.fromisoformat(ended) if ended else datetime.now(timezone.utc)
+    return f"finished {when.astimezone(timezone.utc):%H:%M:%S} UTC"
 
 
 def find_inputs(folder: Path) -> dict:
