@@ -4,6 +4,7 @@ import copy
 from datetime import date, datetime, timedelta
 from functools import partial
 import ipaddress
+import logging
 import re
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -64,9 +65,10 @@ def _domain(host: str, domains) -> bool:
 
 
 def _dated_in_excerpt(source: dict, when: date) -> bool:
-    metadata = source.get('retrieved_publication_date') or ''
-    if metadata[:10] == when.isoformat():
-        return True
+    from fund_performance.tavily import publication_date
+    metadata = publication_date(source.get('retrieved_publication_date'))
+    if metadata and source.get('date_basis') != 'as_at':
+        return metadata == when.isoformat()
     text = ' '.join(str(source.get('source_excerpt') or '').lower().replace(',', '').split())
     variants = [when.isoformat(), when.strftime('%Y/%m/%d'),
                 f'{when.day} {when:%B %Y}'.lower(), f'{when:%B} {when.day} {when.year}'.lower(),
@@ -110,22 +112,25 @@ async def current_research(seed: dict, exposures: dict | None = None, *, as_of: 
     context = {'fund_name': seed.get('fund_name'), 'benchmark': seed.get('benchmark_name'),
                'asset_class': seed.get('asset_class'), 'fund_review_date': seed.get('as_of_date')}
     async def one(item):
+        diagnostic = {}
+        domains = AUTHORITIES.get(str(seed.get('isin') or '')[:2].upper(), ('', ('iosco.org',)))[1] if item['category'] == 'regulation' else NEWS_DOMAINS
         try:
             query = PlannedSearch(topic='market_drivers', query=item['query'], reason=item['reason'])
             source, _ = await asyncio.wait_for(search_one(query, run, context,
                 f'Current chat research window {start} to {today}. Prefer substantive dated news; exclude routine fund factsheets. '
                 'This is current context, not information necessarily available at the historical fund review date.',
                 retrieve=retrieve or partial(search, start_date=start.isoformat(), end_date=today.isoformat(),
-                                             topic='general' if item['category'] == 'regulation' else 'news'),
-                include_excerpt=True), timeout=load_settings().timeouts_seconds.research)
-            return source, vet(source, item, seed, today) if source else 'search_unavailable_or_no_usable_summary'
+                                             topic='general' if item['category'] == 'regulation' else 'news', include_domains=list(domains)),
+                include_excerpt=True, diagnostics=diagnostic), timeout=load_settings().timeouts_seconds.research)
+            issue = vet(source, item, seed, today) if source else diagnostic.get('reason', 'search_summary_failed')
+            return source, issue, diagnostic
         except asyncio.TimeoutError:
-            return None, 'search_timeout'
+            return None, 'search_timeout', diagnostic
         except Exception:
-            return None, 'search_failed'  # No provider response, source text or private prompt in diagnostics.
+            return None, 'search_failed', diagnostic  # No provider response, source text or private prompt in diagnostics.
     results = await asyncio.gather(*(one(item) for item in items))
     kept, diagnostics, seen = [], [], set()
-    for item, (source, issue) in zip(items, results):
+    for item, (source, issue, diagnostic) in zip(items, results):
         if not issue and same_url(source['url']) in seen:
             issue = 'duplicate_source'
         if not issue:
@@ -140,7 +145,53 @@ async def current_research(seed: dict, exposures: dict | None = None, *, as_of: 
                                 'after fund review; current context only' if source['date'] > reviewed else 'published by fund review date')
             source['limitations'] = (source.get('limitations') or '') + ' Context relevance is not proof of fund-return attribution or regulatory applicability.'
             kept.append(source)
-        diagnostics.append({'category': item['category'], 'query': item['query'], 'status': 'excluded' if issue else 'kept', 'reason': issue})
-    return {'status': 'complete' if len(kept) == 5 else 'partial' if kept else 'unavailable',
+        status = 'kept' if not issue else 'excluded' if source else 'failed'
+        diagnostics.append({'category': item['category'], 'query': item['query'], 'status': status, 'reason': issue,
+                            'retrieved_count': diagnostic.get('retrieved_count', 0), 'stage': diagnostic.get('stage', 'retrieval')})
+        if issue:
+            logging.getLogger(__name__).info('Chat research %s: %s (%s)', item['category'], issue, status)
+    result = {'status': 'complete' if len(kept) == 5 else 'partial' if kept else 'unavailable',
             'as_of_date': today.isoformat(), 'window_start': start.isoformat(), 'searches_requested': 5,
             'source_count': len(kept), 'sources': kept, 'searches': diagnostics}
+
+    if not kept:
+        reasons = sorted({item['reason'] for item in diagnostics if item['reason']})
+        logging.getLogger(__name__).warning('Chat research unavailable: %s', ','.join(reasons))
+    result['message'] = availability_message(result)
+    return result
+
+
+REASONS = {
+    'tavily_not_configured': 'Tavily is not configured on the server',
+    'tavily_authentication_failed': 'Tavily rejected its API credentials',
+    'tavily_access_denied': 'Tavily denied access',
+    'tavily_rate_or_credit_limit': 'Tavily reached a rate or credit limit',
+    'tavily_http_error': 'the search provider returned an error',
+    'tavily_connection_failed': 'the search provider could not be reached',
+    'no_search_results': 'the searches returned no usable excerpts',
+    'invalid_search_response': 'the search provider returned an invalid response',
+    'search_summary_failed': 'the Search Agent could not produce a valid source summary',
+    'summary_source_not_retrieved': 'the summary cited a source not returned by the search',
+    'search_timeout': 'a search exceeded its time limit',
+    'search_failed': 'a search could not complete',
+    'publication_date_unavailable': 'a source date was unavailable',
+    'publication_date_not_supported_by_retrieval': 'a source date could not be confirmed',
+    'source_outside_recent_window': 'sources fell outside the requested dates',
+    'source_not_in_current_research_publishers': 'sources were outside the accepted publishers',
+    'summary_numbers_not_in_source_excerpt': 'summary figures were not supported by the excerpt',
+    'duplicate_source': 'duplicate articles were removed',
+    'static_fund_information_already_supplied': 'static fund information was excluded',
+    'no_current_development_in_excerpt': 'an excerpt contained no current development',
+    'unsafe_source_url': 'a source address failed safety checks',
+}
+
+
+def availability_message(result: dict) -> str:
+    reasons = list(dict.fromkeys(item.get('reason') for item in result.get('searches', []) if item.get('reason')))
+    count = result['source_count']
+    text = f'{count} current source(s) retained from five searches.'
+    if reasons:
+        text += ' Coverage limits: ' + '; '.join(REASONS.get(reason, 'a source failed validation') for reason in reasons) + '.'
+    if count == 0:
+        text += ' Recent news could not be prepared; this does not mean there were no relevant developments. Prepare again to retry; server configuration may need attention for provider errors.'
+    return text

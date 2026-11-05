@@ -144,3 +144,25 @@ a clearly labelled, source-based partial overview of identity, objective, benchm
 and supplied peer identity/eligibility terms. It does not invent an investment judgement,
 claim to answer a more specific question fully, or retain any failed model claim. Source,
 security or active-content failures still suppress the response. No retry/model call is added.
+
+
+### Current-research troubleshooting
+
+Tavily news publication metadata can be ISO dates/timestamps or RFC 2822 dates. Chat accepts
+both, including when the excerpt omits its publication date. A source-backed publication date
+can fill an absent summary date; a conflicting model publication date remains excluded. The
+retrieval date is never substituted. Chat requests the trusted publishers/regulator that its
+validator accepts, avoiding a mismatch between unrestricted retrieval and publisher checks.
+
+Preparation and the chatbot catalogue expose per-search retrieval counts, processing stage,
+and sanitised reason codes. The summary distinguishes missing credentials, authentication,
+rate/credit limits, connection failures, no results, failed summaries and validation exclusions.
+An all-empty research pass logs the reason codes without prompts, source text or credentials.
+Retry with **Prepare evidence and recent research**; unchanged documents are not re-extracted.
+Five searches are still bounded, with no automatic retry or extra model call. Historical
+Reporting research keeps its existing search options and date rules. Current market context
+may explain plausible exposure channels without claiming measured fund-return attribution.
+
+The November no-source report could not be matched to private Render logs in development.
+The provider-date false-negative is reproduced with realistic mocked metadata; actual Render
+credential status, credits and live search coverage remain to be checked in that environment.
