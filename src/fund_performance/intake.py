@@ -302,6 +302,7 @@ async def read_documents(factsheet: Path, kid: Path | None = None, peer_factshee
     exposures = source_checked_exposures(extracted.exposures, docs)
     context = build_fund_context(extracted.document_summary, draft, fs, exposures, list(docs), recovered=recovered)
     context['benchmark_composition'] = source_checked_exposures(extracted.exposures, docs, subject='benchmark')
+    context['unattributed_composition'] = source_checked_exposures(extracted.exposures, docs, subject='unknown')
     if on_fund_context is not None:
         on_fund_context(context)  # Chat can start independent current research while mandate/peers finish.
     log = [f"Extractor Agent read: {', '.join(docs)}"]
