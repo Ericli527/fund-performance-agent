@@ -41,6 +41,8 @@ def _resolve(node, path):
 
 
 def arithmetic(catalogue: dict, request: ArithmeticRequest, question: str, history=None) -> str:
+    if not re.fullmatch(r'[a-zA-Z0-9_+\-*/().\s]+', request.expression):
+        raise ValueError('Use only numeric arithmetic and named inputs, without comments, links or code.')
     user_text = '\n'.join([m['content'] for m in (history or [])[-12:] if m.get('role') == 'user'
                            and isinstance(m.get('content'), str)] + [question])
     user_values = _user_numbers(user_text)

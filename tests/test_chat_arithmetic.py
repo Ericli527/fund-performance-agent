@@ -51,6 +51,7 @@ def test_user_assumptions_support_other_horizons_and_monthly_compounding():
 @pytest.mark.parametrize('expression', [
     '__import__("os").system("whoami")', 'open("secret")', '(1).__class__',
     '[x for x in (1,2)]', 'lambda: 1', '1 if True else 2', 'sum([1,2])', 'missing + 1',
+    '1 # [click](https://unapproved.example)',
 ])
 def test_python_code_and_unknown_names_are_rejected(expression):
     with pytest.raises(ValueError):
