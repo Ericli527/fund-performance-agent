@@ -53,6 +53,18 @@ additional annual rate. For example, £10,000 with an 88.3% cumulative return be
 Show the source date, return basis and provisional status; this is not a live balance
 or future forecast. Calculations do not change the scorecard or independent ratings.
 
+Other basic questions use a general arithmetic request rather than a template for
+each question: addition, subtraction, multiplication, division, percentages, averages,
+ratios and compounding. The model selects a formula and binds named inputs either
+to numeric catalogue paths or to explicit user assumptions. Python executes only
+bounded numeric `+`, `-`, `*`, `/` and `**` expressions. There is no `eval`, generated
+Python execution, file access, function calling or web access. User-specified
+hypothetical horizons can differ from the one-/three-/five-year historical cash
+examples; they are labelled as assumptions, not fund forecasts. Currency and source
+unit checks remain, with the protected NAV cash path retained for fund-fee handling.
+Results show the inputs, formula and provenance. The model still owns interpretation
+and formula selection; this does not replace independent investment review.
+
 ### Grounding and model calls
 
 Each question makes at most one structured, tool-free AI call using the existing

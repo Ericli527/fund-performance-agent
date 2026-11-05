@@ -23,6 +23,11 @@ def _user_numbers(text: str) -> set[Decimal]:
     for match in re.finditer(r'(?<![\w.])([0-9][0-9,]*(?:\.[0-9]+)?)\s*(thousand|million|k\b)?', text, re.I):
         scale = {'k': 1000, 'thousand': 1000, 'million': 1000000}.get((match[2] or '').lower(), 1)
         values.add(Decimal(match[1].replace(',', '')) * scale)
+    words = dict(zip(('zero one two three four five six seven eight nine ten eleven twelve thirteen '
+                      'fourteen fifteen sixteen seventeen eighteen nineteen twenty').split(), range(21)))
+    for match in re.finditer(r'\b(' + '|'.join(words) + r')\b(?:\s+(hundred|thousand|million))?', text, re.I):
+        scale = {'hundred': 100, 'thousand': 1000, 'million': 1000000}.get((match[2] or '').lower(), 1)
+        values.add(Decimal(words[match[1].lower()] * scale))
     return values
 
 

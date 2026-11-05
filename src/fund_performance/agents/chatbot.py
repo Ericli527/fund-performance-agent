@@ -11,12 +11,13 @@ from fund_performance.agents.base import RunFn, model_kwargs, run_structured, ru
 from fund_performance.communication import COMMUNICATION_STYLE
 from fund_performance.number_guard import check_numbers
 from fund_performance.chat_calculations import InvestmentValueRequest, investment_value, render_investment_value
+from fund_performance.chat_arithmetic import ArithmeticRequest, arithmetic
 
 MAX_QUESTION = 2000
 RECENT_MESSAGES = 12
 INSTRUCTIONS = """You are the Fund Performance Agent's AI Chatbot (Beta), an AI evidence assistant for investment oversight.
 Answer only questions about the prepared fund evidence, its mandate, returns, charges, risks, peers and relevant
-financial terminology. Be clear that you are AI if asked. Normally use two to five substantive sentences in
+financial terminology, as well as basic arithmetic. Be clear that you are AI if asked. Normally use two to five substantive sentences in
 professional, friendly British English, with light bold emphasis or short bullets when useful.
 Use only the supplied current-fund evidence catalogue. Cite exact catalogue IDs in evidence_references.
 Fund figures must already exist in that evidence, with the same unit, dates, currency and pricing basis.
@@ -30,6 +31,18 @@ fee needs its own explicitly stated annual percentage. If that fee is missing, s
 and explain that an additional fee can be included when supplied. This arithmetic is not a new investment
 recommendation or personalised buy/sell advice; hypothetical cash illustrations are in scope.
 Do not invent a return, perform mental arithmetic, infer peer fees or compare incompatible returns.
+For other arithmetic (sums, differences, averages, ratios, percentage changes, conversions between percent and
+percentage points, compound growth or user-specified hypothetical scenarios), use arithmetic_request.
+Choose the expression; Python executes it. Bind fund numbers using exact catalogue references and numeric
+JSON-pointer paths, never copy guessed fund values into literals. Bind user amounts, rates and periods as
+user_value operands with their units. Parentheses and + - * / ** are supported, not Python code or functions.
+Only structural arithmetic constants (integers 0-12, 100, 365, 10000) and numbers supplied by the user may
+appear as literals. Structural constants are for counts, powers and unit conversions, never invented fund data.
+Use percent inputs as percentages (divide by 100 for a growth factor). Fee/return differences are percentage
+points, not relative percentage changes. Do not mix currencies, periods or incompatible price bases.
+Use calculation_request, not generic arithmetic, for historical cash values using fund NAV returns, to preserve
+the OCF and pricing safeguards. Populate only one request. Do not call missing arithmetic output missing evidence.
+Arithmetic and hypothetical scenarios are not new investment ratings; user assumptions are not fund forecasts.
 Separate published or AI-extracted provisional figures, Python calculations, quantitative scorecard indications,
 independent AI judgement (if supplied) and human approval. A missing peer does not invalidate all fund evidence.
 No full investment assessment or independent quality review is performed in this chat preparation. Do not propose
@@ -56,6 +69,7 @@ class ChatAnswer(BaseModel):
     security_issue: bool
     proposes_investment_decision: bool = Field(description='True if proposing a new rating, buy/sell decision or approval rather than explaining supplied evidence.')
     calculation_request: InvestmentValueRequest | None = None
+    arithmetic_request: ArithmeticRequest | None = None
 
 
 async def answer_question(catalogue: dict, question: str, history: list[dict] | None = None,
@@ -81,8 +95,6 @@ async def answer_question(catalogue: dict, question: str, history: list[dict] | 
         return 'I cannot safely use that response. Please ask a question about the prepared fund evidence.'
     if out.proposes_investment_decision:
         return 'A new investment recommendation needs the Reporting workflow, independent review and human sign-off. I can explain the prepared fund evidence here.'
-    if out.status == 'out_of_scope':
-        return 'I am an AI assistant for fund evidence. I can explain this fund’s mandate, performance, fees and risks. Please keep questions within that scope.'
     if out.calculation_request is not None:
         try:
             calculated = investment_value(catalogue, out.calculation_request, question, history)
@@ -90,6 +102,13 @@ async def answer_question(catalogue: dict, question: str, history: list[dict] | 
             return str(error)
         # The free-text model draft is not displayed for calculations. Python owns every derived amount.
         return render_investment_value(calculated)
+    if out.arithmetic_request is not None:
+        try:
+            return arithmetic(catalogue, out.arithmetic_request, question, history)
+        except ValueError as error:
+            return str(error)
+    if out.status == 'out_of_scope':
+        return 'I am an AI assistant for fund evidence. I can explain this fund’s mandate, performance, fees and risks. Please keep questions within that scope.'
     # Claims are checked against cited evidence, never numbers supplied by the question or conversation.
     if (set(refs) - set(catalogue) or (out.status == 'answered' and not refs)
             or check_numbers(prose, {ref: catalogue[ref] for ref in refs if ref in catalogue})
