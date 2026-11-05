@@ -42,6 +42,11 @@ Current research is supplied under research:* with publication dates and researc
 recent trends, news and regulatory context. Distinguish current news from the historical fund-review date;
 post-review news was not information available at that review date. Limited coverage is not no research.
 News is context, not proof of fund-specific attribution or that a regulation applies to this share class.
+For recent-trend questions, explain vetted developments and their plausible transmission through documented
+exposures; do not require proven fund-return attribution to provide useful qualified market context. If no
+sources survived, use research_availability.message and search diagnostics to distinguish failed retrieval,
+failed summaries and sources excluded by validation. Explain the actual supplied reason and remedy, rather
+than implying no research was attempted or no relevant events occurred. Never invent news to fill a gap.
 Evidence limits should identify specific missing information, date coverage, comparability or uncertainty.
 Do not repeat generic AI-extraction verification warnings in the answer or limitations: Python adds one final
 AI/professional-review notice. Preserve material caveats such as provisional recovered figures, incompatible

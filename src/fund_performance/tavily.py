@@ -1,5 +1,7 @@
 """Bounded Tavily search transport. Secrets and response/error bodies are never logged."""
 import os
+from datetime import date, datetime
+from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
 
 import requests
@@ -15,8 +17,43 @@ def _post(**kwargs):
     return requests.post(ENDPOINT, **kwargs)
 
 
+def publication_date(value: str | None) -> str | None:
+    """Tavily news metadata may use ISO or RFC 2822; never infer a date from retrieval time."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError:
+        pass
+    try:
+        return datetime.fromisoformat(value.replace('Z', '+00:00')).date().isoformat()
+    except ValueError:
+        pass
+    try:
+        return parsedate_to_datetime(value).date().isoformat()
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
+def failure_code(error: str) -> str:
+    """Map our own sanitised transport messages to stable diagnostic codes."""
+    import re
+    if 'TAVILY_API_KEY' in error:
+        return 'tavily_not_configured'
+    match = re.search(r'HTTP (\d{3})', error)
+    if match:
+        status = match.group(1)
+        return {'401': 'tavily_authentication_failed', '403': 'tavily_access_denied',
+                '429': 'tavily_rate_or_credit_limit', '432': 'tavily_rate_or_credit_limit'}.get(status, 'tavily_http_error')
+    if 'no usable' in error:
+        return 'no_search_results'
+    if 'invalid search response' in error:
+        return 'invalid_search_response'
+    return 'tavily_connection_failed'
+
+
 def search(query: str, *, start_date: str | None = None, end_date: str | None = None,
-           topic: str | None = None) -> tuple[list[dict], str | None]:
+           topic: str | None = None, include_domains: list[str] | None = None) -> tuple[list[dict], str | None]:
     load_env()
     key = os.getenv('TAVILY_API_KEY', '').strip()
     if not key:
@@ -26,6 +63,7 @@ def search(query: str, *, start_date: str | None = None, end_date: str | None = 
     if start_date: options['start_date'] = start_date
     if end_date: options['end_date'] = end_date
     if topic: options['topic'] = topic
+    if include_domains: options['include_domains'] = include_domains
     try:
         response = _post(headers={'Authorization': f'Bearer {key}'},
                          json=options,

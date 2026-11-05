@@ -65,7 +65,7 @@ def brief(bundle: dict) -> str:
                  f"covering {research['window_start']} to {research['as_of_date']}. "
                  'Current news is separate from the historical fund review. Prepare again to refresh; follow-up questions reuse these sources.')
         if research['source_count'] < 5:
-            text += ' Some searches returned no usable dated source; coverage is incomplete.'
+            text += ' ' + research.get('message', 'Some searches returned no usable dated source; coverage is incomplete.')
     else:
         text += '\n\n**Recent research:** Not run (AI/research disabled, unavailable or not requested).'
     text += '\n\nPreparation does not run an independent investment assessment, quality review or PDF reporting.'
@@ -166,7 +166,8 @@ def with_research(bundle: dict, research: dict) -> dict:
     result['research'] = research
     catalogue['research_availability'] = {key: value for key, value in research.items() if key != 'sources'}
     catalogue['evidence_limits']['research'] = (f"{research['source_count']} vetted current sources; "
-        f"{research['window_start']} to {research['as_of_date']}. These are current context, not historical fund performance evidence.")
+        f"{research['window_start']} to {research['as_of_date']}. These are current context, not historical fund performance evidence. "
+        + research.get('message', ''))
     result['summary'] = brief(result)
     return result
 
