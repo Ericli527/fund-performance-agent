@@ -136,7 +136,7 @@ def reconcile_roles(entries: list[dict], table) -> tuple[list[dict], str]:
     return [chosen.get(entry['id'], entry) for entry in entries], ''
 
 
-def validate(question: str, entries: list[dict], synthetic: bool = False) -> list[str]:
+def validate(question: str, entries: list[dict], synthetic: bool = False, require_prices: bool = True) -> list[str]:
     issues = []
     if not (question or '').strip():
         issues.append('Enter a review question.')
@@ -174,7 +174,7 @@ def validate(question: str, entries: list[dict], synthetic: bool = False) -> lis
                 issues.append(f'{path.name}: select a readable price history.')
             if role in (FACTSHEET, KID, PEER, SUPPORTING) and path.suffix.lower() not in DOC_TYPES:
                 issues.append(f'{path.name}: this role requires a readable PDF or Word document.')
-    if sum(e['role'] == PRICE for e in entries) != 1:
+    if sum(e['role'] == PRICE for e in entries) > 1 or (require_prices and not any(e['role'] == PRICE for e in entries)):
         issues.append('Add exactly one fund price history.')
     if not synthetic and sum(e['role'] == FACTSHEET for e in entries) != 1:
         issues.append('Add exactly one main fund factsheet.')

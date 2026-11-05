@@ -936,9 +936,11 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
         gr.HTML("<div class='fp-header'><h1>Fund Performance Review</h1>"
                 "<p>Ask a question about a fund and review the evidence.</p></div>")
         gr.HTML(f"<div class='fp-notice' role='note'>{PUBLIC_DATA_HTML}</div>")
+        from fund_performance.chatbot import REPORTING_MODE, CHAT_MODE
+        application_mode = gr.Radio([REPORTING_MODE, CHAT_MODE], value=REPORTING_MODE, label='Application mode')
         review_type = gr.Radio([(_card(v), v) for v in REVIEW_TYPES], value=DEFAULT_REVIEW, show_label=False,
                                container=False, elem_classes="fp-cards", label="Question type")
-        gr.Markdown(REVIEW_HELP, elem_classes="fp-help")
+        review_help = gr.Markdown(REVIEW_HELP, elem_classes="fp-help")
         with gr.Row():
             question = gr.Textbox(label="Review question", value=UI_QUESTION, lines=2, scale=8)
             add = gr.Button("+ Add", scale=1)
@@ -973,35 +975,52 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
         case_info = gr.Markdown()
         attachment_status = gr.Markdown()
         run = gr.Button("Run Fund Review", variant="primary", interactive=False, elem_classes="fp-run")
-        with gr.Accordion("Help & methodology", open=False):
+        with gr.Accordion("Help & methodology", open=False) as reporting_help:
             gr.Markdown("Upload the fund price history and factsheet. A KID and peer factsheets are optional. "
                         "The synthetic case uses prevalidated inputs. All four quantitative scorecard ratings are always calculated.")
             gr.HTML(how_it_works_html())
-        message = gr.Markdown()
-        with gr.Accordion('View processing details', open=False):
-            progress = gr.Markdown(elem_classes="fp-progress")
-        with gr.Column(visible=False) as results:
-            with gr.Tabs():
-                with gr.Tab("Overview"):
-                    overview = gr.HTML()
-                with gr.Tab("Performance & Risk"):
-                    performance = gr.HTML()
-                with gr.Tab("Portfolio & Research"):
-                    portfolio = gr.HTML()
-                with gr.Tab("Evidence & Actions"):
-                    evidence = gr.HTML()
-            with gr.Row():
-                executive_pdf = gr.DownloadButton(EXECUTIVE_LABEL, variant="primary", elem_classes="fp-download")
-                pdf = gr.DownloadButton(DETAILED_LABEL, variant="secondary", elem_classes="fp-download")
-            gr.Markdown('Optional: **Inspect Report** makes one additional AI call and counts toward the daily AI limit. '
-                        'It is available when AI runs are enabled and configured. The result is an uncalibrated AI '
-                        'review; a human remains responsible for sign-off.')
-            inspect_button = gr.Button('Inspect Report', interactive=False)
-            assurance_view = gr.HTML()
-            with gr.Accordion("Technical details", open=False):
-                technical = gr.HTML()
-                log = gr.File(label="Run log (log.json)", interactive=False)
-                plain = gr.Markdown()
+        with gr.Column() as report_output:
+            message = gr.Markdown()
+            with gr.Accordion('View processing details', open=False):
+                progress = gr.Markdown(elem_classes="fp-progress")
+            with gr.Column(visible=False, elem_id='fund-review-results') as results:
+                with gr.Tabs():
+                    with gr.Tab("Overview"):
+                        overview = gr.HTML()
+                    with gr.Tab("Performance & Risk"):
+                        performance = gr.HTML()
+                    with gr.Tab("Portfolio & Research"):
+                        portfolio = gr.HTML()
+                    with gr.Tab("Evidence & Actions"):
+                        evidence = gr.HTML()
+                with gr.Row():
+                    executive_pdf = gr.DownloadButton(EXECUTIVE_LABEL, variant="primary", elem_classes="fp-download")
+                    pdf = gr.DownloadButton(DETAILED_LABEL, variant="secondary", elem_classes="fp-download")
+                gr.Markdown('Optional: **Inspect Report** makes one additional AI call and counts toward the daily AI limit. '
+                            'It is available when AI runs are enabled and configured. The result is an uncalibrated AI '
+                            'review; a human remains responsible for sign-off.')
+                inspect_button = gr.Button('Inspect Report', interactive=False)
+                assurance_view = gr.HTML()
+                with gr.Accordion("Technical details", open=False):
+                    technical = gr.HTML()
+                    log = gr.File(label="Run log (log.json)", interactive=False)
+                    plain = gr.Markdown()
+
+        with gr.Column(visible=False) as chat_panel:
+            gr.Markdown('**AI Chatbot (Beta)** — prepare your fund evidence once, then ask follow-up questions. '
+                        'A main factsheet is required; price history, KID and peers are optional. '
+                        'This mode does not run the full reporting or independent investment review process. '
+                        'Each answer uses one AI call and counts towards the daily limit. '
+                        'The most recent six turns are used for follow-up context; prepared evidence stays available.')
+            chat_state = gr.State(None, time_to_live=cleanup[1])
+            prepare_chat = gr.Button('Prepare fund evidence', variant='primary')
+            chat_summary = gr.Markdown('Add fund documents or select a test case, then prepare the evidence.')
+            conversation = gr.Chatbot(label='Fund conversation', height=400, sanitize_html=True)
+            chat_question = gr.Textbox(label='Ask about this fund', lines=2, interactive=False,
+                                       placeholder='How closely has the fund followed its benchmark?')
+            chat_send = gr.Button('Send question', interactive=False)
+            chat_status = gr.Markdown()
+            clear_chat = gr.Button('New conversation', size='sm')
 
         def benchmark_details(selected, name, currency, confirmed, pricing):
             files = [e for e in selected if e['role'] == BENCHMARK]
@@ -1152,6 +1171,88 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                            gr.update(interactive=bool(item.assurance_handle) and live_demo_allowed()))
 
         private = {"api_visibility": "private"}
+        def choose_application_mode(value):
+            reporting = value == REPORTING_MODE
+            return ([gr.update(visible=reporting)] * 7 + [gr.update(visible=not reporting)])
+
+        application_mode.change(choose_application_mode, application_mode,
+            [review_type, review_help, question, run, reporting_help, report_output, attachment_status, chat_panel],
+            queue=False, **private)
+
+        def chat_inputs(state, table, demo_id, name, currency, confirmed, pricing, busy, validate_files=True):
+            if busy:
+                return [], {}, ['Files are being processed. Please wait.']
+            selected, error = apply_roles(state or [], table)
+            if error:
+                return [], {}, [error]
+            demo = find_demo(demo_id) if demo_id else None
+            issues = (validate('Prepare fund evidence', selected, bool(demo and demo.fallback), require_prices=False)
+                      if validate_files else [])
+            benchmark, problems = benchmark_details(selected, name, currency, confirmed, pricing)
+            return selected, benchmark, issues + problems
+
+        chat_file_inputs = [entries, attachments, demo_state, benchmark_name, benchmark_currency,
+                            benchmark_confirmed, benchmark_pricing, upload_busy]
+
+        async def on_prepare_chat(state, table, demo_id, name, currency, confirmed, pricing, busy, current):
+            from fund_performance.chatbot import evidence_key, prepare_session
+            selected, benchmark, issues = chat_inputs(state, table, demo_id, name, currency, confirmed, pricing, busy)
+            if issues:
+                yield None, '\n'.join('- ' + issue for issue in issues), [], gr.update(), gr.update(interactive=False), gr.update(interactive=False)
+                return
+            try:
+                key = evidence_key(selected, benchmark)
+            except OSError:
+                yield None, 'An input file is unavailable. Upload it again.', [], gr.update(interactive=True), gr.update(interactive=False), gr.update(interactive=False)
+                return
+            pending = current if current and current.get('key') == key and not current.get('invalidated') else {'key': key}
+            yield pending, 'Preparing fund evidence… documents are read once. Please wait.', gr.skip(), gr.update(interactive=False), gr.update(interactive=False), gr.update(interactive=False)
+            prepared, summary = await prepare_session(selected, benchmark, pending, limits)
+            yield prepared, summary, (prepared or {}).get('history', []), gr.update(interactive=True), gr.update(interactive=bool(prepared)), gr.update(interactive=bool(prepared))
+
+        async def on_chat_question(state, table, demo_id, name, currency, confirmed, pricing, busy, current, asked):
+            from fund_performance.chatbot import reply
+            selected, benchmark, issues = chat_inputs(state, table, demo_id, name, currency, confirmed, pricing, busy, validate_files=False)
+            if issues:
+                yield None, [], '\n'.join(issues), gr.update(value=asked, interactive=False), gr.update(interactive=False)
+                return
+            yield gr.skip(), gr.skip(), 'Checking the prepared evidence…', gr.update(interactive=False), gr.update(interactive=False)
+            prepared, history, status = await reply(selected, benchmark, current, asked, limits)
+            completed = status.startswith('Response complete')
+            yield prepared, history, status, gr.update(value='' if completed else asked, interactive=bool(prepared)), gr.update(interactive=bool(prepared))
+
+        def invalidate_chat(state, table, demo_id, name, currency, confirmed, pricing, busy, current):
+            from fund_performance.chatbot import evidence_key
+            if not current:
+                return (gr.skip(),) * 5
+            selected, benchmark, issues = chat_inputs(state, table, demo_id, name, currency, confirmed, pricing, busy, validate_files=False)
+            try:
+                unchanged = current and not issues and current.get('key') == evidence_key(selected, benchmark)
+            except OSError:
+                unchanged = False
+            if unchanged:
+                return (gr.skip(),) * 5
+            if current:
+                current['invalidated'] = True  # Revoke any answer/preparation still in flight for these inputs.
+            return None, 'Inputs changed. Prepare fund evidence before chatting.', [], gr.update(interactive=False), gr.update(value='', interactive=False)
+
+        def new_conversation(current):
+            return (current | {'history': []} if current else None), [], '', ''
+
+        prepare_chat.click(on_prepare_chat, chat_file_inputs + [chat_state],
+                           [chat_state, chat_summary, conversation, prepare_chat, chat_send, chat_question],
+                           concurrency_id='review-assurance', concurrency_limit=1, **private)
+        for trigger in (chat_send.click, chat_question.submit):
+            trigger(on_chat_question, chat_file_inputs + [chat_state, chat_question],
+                    [chat_state, conversation, chat_status, chat_question, chat_send],
+                    concurrency_id='review-assurance', concurrency_limit=1, **private)
+        for control in (entries, attachments, demo_state, benchmark_name, benchmark_currency,
+                        benchmark_confirmed, benchmark_pricing, upload_busy):
+            control.change(invalidate_chat, chat_file_inputs + [chat_state],
+                           [chat_state, chat_summary, conversation, chat_send, chat_question],
+                           queue=False, **private)
+        clear_chat.click(new_conversation, chat_state, [chat_state, conversation, chat_question, chat_status],
+                         concurrency_id='review-assurance', concurrency_limit=1, **private)
         mutation = {"concurrency_id": "attachment-mutations", "concurrency_limit": 1}
         review_type.change(lambda t: REVIEW_TYPES[t][2], review_type, question, **private)
         add.click(lambda: gr.update(visible=True), outputs=add_menu, **private)

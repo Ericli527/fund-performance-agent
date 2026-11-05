@@ -291,11 +291,13 @@ async def run_review(folder: Path, question: str = DEFAULT_QUESTION, out_root: P
                      offline: bool = False, thresholds: Thresholds | None = None,
                      settings: RunSettings | None = None, runners: Runners | None = None,
                      intake: dict | None = None, on_step: ProgressFn | None = None,
-                     chart_evidence: dict | None = None) -> RunResult:
+                     chart_evidence: dict | None = None, evidence_only: bool = False) -> RunResult:
     """ One review. `intake` is the documents route (intake.read_documents + code's self-check of the values):
     the Extractor and Mandate agents have already run, so they are not run again. `on_step` gets a short message
     as each step starts, for the page's progress line """
     started = time.monotonic()
+    if evidence_only:
+        offline = True  # Intake is reused; preparation never starts research, judgement or reporting agents.
     t = thresholds or load_thresholds()
     s = settings or load_settings()
     r = runners or Runners()
@@ -314,7 +316,7 @@ async def run_review(folder: Path, question: str = DEFAULT_QUESTION, out_root: P
         with review_trace as tr:
             trace_id = getattr(tr, "trace_id", None)
             log.run["trace_id"] = trace_id if trace_id and trace_id != "no-op" else None
-            result = await _run(folder, question, run_dir, offline, t, s, r, log, text_log, intake, chart_evidence)
+            result = await _run(folder, question, run_dir, offline, t, s, r, log, text_log, intake, chart_evidence, evidence_only)
         log.finish("ok")
         return result
     except RunStopped as e:
@@ -386,7 +388,7 @@ def pages_read(found) -> list[dict]:
 
 async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thresholds, s: RunSettings,
                r: Runners, log: RunLog, text_log: list[str], intake: dict | None = None,
-               chart_evidence: dict | None = None) -> RunResult:
+               chart_evidence: dict | None = None, evidence_only: bool = False) -> RunResult:
     flags: list[DataFlag] = [DataFlag(**f) for f in (intake or {}).get("flags", [])]
     review_exposures = (intake or {}).get("portfolio_exposures")
     standalone_context = None
@@ -520,8 +522,12 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         profile=profile.model_dump(mode="json"), factsheet=factsheet,
         exposures=review_exposures)
     if offline:
-        flags.append(DataFlag(check="run", level="info", message=OFFLINE_NOTE))
-        log.end(step, "skipped", notes=["offline run"])
+        if evidence_only:
+            promises = list((intake or {}).get('promises', []))
+            log.end(step, "skipped", notes=['chat preparation: reuse any intake mandate evidence'])
+        else:
+            flags.append(DataFlag(check="run", level="info", message=OFFLINE_NOTE))
+            log.end(step, "skipped", notes=["offline run"])
     elif intake:
         promises = list(intake.get("promises", []))
         log.end(step, outputs={"promises": len(promises)},
@@ -621,6 +627,12 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         facts["manager_questions"] = []
     text_log += [f"Suggested conclusion: {x}" for x in facts["suggested_conclusion"]["left_out"]]
     log.end(step, outputs={"ratings": {p.name: p.rating for p in card.pillars.values()}, "verdict": card.verdict})
+
+    if evidence_only:
+        context = {'fund_profile': profile.model_dump(mode='json'), 'fund_context': context_brief,
+                   'portfolio_exposures': review_exposures, 'research': [], 'question': question}
+        (run_dir / 'facts.json').write_text(json.dumps(facts, indent=1, ensure_ascii=False), encoding='utf-8')
+        return RunResult(None, run_dir, log, facts=facts, flags=flags, presentation_context=context)
 
     # 7. Web research results: wait for the Search Agent, then code vets each summary against the facts
     vetted: list[dict] = []

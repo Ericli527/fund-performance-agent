@@ -316,8 +316,7 @@ def _descendants(block):
 def test_results_are_hidden_until_a_review_finishes():
     from fund_performance.web import DETAILED_LABEL, EXECUTIVE_LABEL
     ui = build_ui()
-    results = next(c for c in ui.blocks.values() if isinstance(c, gr.Column) and
-                   any(isinstance(x, gr.DownloadButton) and x.label == DETAILED_LABEL for x in _descendants(c)))
+    results = next(c for c in ui.blocks.values() if isinstance(c, gr.Column) and c.elem_id == 'fund-review-results')
     assert results.visible is False
     labels = {x.label for x in _descendants(results) if isinstance(x, gr.DownloadButton)}
     assert labels == {DETAILED_LABEL, EXECUTIVE_LABEL}                     # both reports offered after a review
