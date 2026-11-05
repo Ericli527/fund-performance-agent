@@ -39,9 +39,13 @@ hypothetical market-close NAV used to compare with the index ("Fund PNAV"); "ind
   not the benchmark's or a hypothetical PNAV pricing time; use null if the fund's time is not stated.
 - performance_fee: false only if the documents say there is none ("None", "N/A", "Nil", "0%"); true only if they
   say one is charged; else null. "Excludes performance fees (where applicable)" says neither.
-- exposures: only explicitly reported fund holdings, sector, geographic or currency allocations, not benchmark
-  constituents. Give the exact source quotation. A weight is optional when not stated. Identify whether the
-  observation concerns the fund, benchmark, a peer, or is unclear; never infer holdings from an index.
+- exposures: capture reported top stocks/holdings, industry/sector, geographic/country, market-cap,
+  currency, asset-class and concentration breakdowns from factsheet/KID tables. Use categories holdings,
+  sectors, regions, market_cap, currencies, asset_classes or concentration. Preserve benchmark/index tables
+  too, with subject=benchmark; never relabel their weights as fund holdings. Use subject=fund only when
+  the table identifies fund weights, otherwise unknown. Quote one exact row, including the name and value,
+  not the entire multi-row table. A percentage sign may appear only in the table heading; retain the printed
+  row unchanged. A weight is optional when not stated. Never infer holdings or weights from index membership.
 - document_summary: a source-aware narrative of material fund identity, strategy, portfolio, returns, risk,
   charges and disclosures. Include figures with their periods and distinguish fund, benchmark and peers.
 - return_evidence: also list directly quoted fund or benchmark returns that may have been missed in series,
@@ -122,7 +126,7 @@ class ExtractedProfile(_Strict):
 
 
 class ExtractedExposure(_Strict):
-    category: Literal["holdings", "sectors", "regions", "currencies", "asset_classes", "concentration", "portfolio_description"]
+    category: Literal["holdings", "sectors", "regions", "currencies", "asset_classes", "concentration", "portfolio_description", "market_cap"]
     name: str
     weight_pct: float | None = None
     quote: str

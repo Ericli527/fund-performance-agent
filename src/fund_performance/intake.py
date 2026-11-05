@@ -282,7 +282,7 @@ async def read_peer(path: Path, run: RunFn | None = None) -> tuple[dict, Extract
 async def read_documents(factsheet: Path, kid: Path | None = None, peer_factsheets: list[Path] | Path | None = None,
                          run_extractor: RunFn | None = None, run_mandate: RunFn | None = None,
                          run_peer: RunFn | None = None, peers_config: PeersConfig | None = None,
-                         supporting_documents: list[Path] | None = None) -> dict:
+                         supporting_documents: list[Path] | None = None, on_fund_context=None) -> dict:
     """ Read the documents with the Extractor and Mandate agents; return the table to confirm and what else the run
     needs (a plain dict, so the page can keep it between the two clicks). Without peer factsheets, the approved
     peers for the fund's benchmark (config/peers.yaml) are read """
@@ -301,6 +301,9 @@ async def read_documents(factsheet: Path, kid: Path | None = None, peer_factshee
     draft = dict(extracted.profile_draft)
     exposures = source_checked_exposures(extracted.exposures, docs)
     context = build_fund_context(extracted.document_summary, draft, fs, exposures, list(docs), recovered=recovered)
+    context['benchmark_composition'] = source_checked_exposures(extracted.exposures, docs, subject='benchmark')
+    if on_fund_context is not None:
+        on_fund_context(context)  # Chat can start independent current research while mandate/peers finish.
     log = [f"Extractor Agent read: {', '.join(docs)}"]
 
     mandate: MandateOutput | None = None

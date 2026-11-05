@@ -142,5 +142,5 @@ def render_investment_value(result: dict) -> str:
     if result['pricing_basis'] == 'fund_pnav':
         text += ' PNAV is a market-close comparison estimate, not a price at which investors deal.'
     return (text + '\n\nThis illustration follows the supplied return’s income treatment, assumes no further contributions or withdrawals, and excludes investor-level taxes. '
-            'It uses the available review-period figures, not a live account balance or a forecast; provisional source figures still need verification.'
+            'It uses the available review-period figures, not a live account balance or a forecast.'
             f"\n\n**Sources:** Prepared fund return [{escape(result['source_reference'])}]; Python cash-value calculation.")

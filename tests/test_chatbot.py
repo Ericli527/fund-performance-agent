@@ -26,6 +26,8 @@ ANSWER = {'status': 'answered', 'answer': 'The published ongoing charge is 0.23%
 def limits(tmp_path, monkeypatch):
     monkeypatch.delenv('FUND_REVIEW_OFFLINE', raising=False)
     monkeypatch.delenv('DISABLE_LIVE_AI', raising=False)
+    # Earlier dotenv tests may leave a dummy key: these fixtures inject their model runners.
+    monkeypatch.setattr('fund_performance.agents.base.api_key_present', lambda: False)
     return AiLimits(WebSettings(max_ai_runs_per_day=20, max_ai_runs_at_once=2), tmp_path / 'limits.json')
 
 
@@ -48,7 +50,7 @@ def test_answer_is_cited_qualified_and_uses_one_tool_free_call():
     runner = FakeRun(ANSWER)
     text = run(answer_question(CATALOGUE, 'What does it cost?', run=runner))
     assert '0.23%' in text and 'fund_identity' in text and 'Peer fee competitiveness' in text
-    assert 'not a signed investment decision' in text and len(runner.prompts) == 1
+    assert 'analyst judgement and sign-off are required' in text and len(runner.prompts) == 1
     assert 'career' not in INSTRUCTIONS and 'Python will' in INSTRUCTIONS
 
 
@@ -118,7 +120,7 @@ def test_document_only_preparation_uses_one_intake_without_inventing_price_metri
         return await fake_reader(*args, **kwargs)
     bundle = run(prepare_evidence([{'id': 'fund', 'path': factsheet, 'role': FACTSHEET}], {}, tmp_path, reader=reader))
     assert len(calls) == 1 and 'published_figures' in bundle['catalogue']
-    assert 'No price history' in bundle['summary'] and 'provisional' in bundle['summary']
+    assert 'No price history' in bundle['summary'] and 'Data extracted using AI' in bundle['summary']
     assert 'scorecard' not in bundle['catalogue']
     assert all(not f['name'].startswith(('comparison.', 'fund.vol.'))
                for f in bundle['catalogue']['published_figures']['figures'])
