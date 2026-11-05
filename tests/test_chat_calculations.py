@@ -94,9 +94,6 @@ def test_calculator_never_replaces_missing_fund_return_with_benchmark_or_pnav(ca
 
 
 @pytest.mark.parametrize('question,options', [
-    ('How much would £10,000 be?', {'additional_annual_fee_pct': 0.5}),
-    ('£10,000 over 5 years with a service fee of 0.5%', {'additional_annual_fee_pct': 0.5}),
-    ('£10,000 with a separate 0.4% annual platform fee', {'additional_annual_fee_pct': 0.5}),
     ('What is the fund performance?', {}),
     ('What would £10,000 be over ten years?', {}),
     ('What would EUR 10,000 be over 5 years?', {}),
@@ -104,6 +101,19 @@ def test_calculator_never_replaces_missing_fund_return_with_benchmark_or_pnav(ca
 def test_missing_or_mismatched_user_assumptions_are_not_invented(question, options, catalogue):
     with pytest.raises(ValueError):
         investment_value(catalogue, request(**options), question)
+
+
+@pytest.mark.parametrize('question', [
+    'How much would £10,000 be?',
+    '£10,000 over 5 years with a service fee of 0.5%',
+    '£10,000 with a separate 0.4% annual platform fee',
+])
+def test_unknown_fee_does_not_suppress_known_base_value_or_authorise_a_guessed_rate(question, catalogue):
+    result = investment_value(catalogue, request(additional_annual_fee_pct=0.5), question)
+    assert result['ending_value'] == '18830.00' and result['additional_annual_fee_pct'] is None
+    assert result['service_fee_unconfirmed'] is True
+    text = render_investment_value(result)
+    assert '£18,830.00' in text and 'value above excludes it' in text
 
 
 def test_conflicting_source_currency_is_rejected(catalogue):

@@ -83,6 +83,7 @@ def investment_value(catalogue: dict, request: InvestmentValueRequest, question:
     if request.pricing_basis == 'fund_pnav' and not re.search(r'PNAV|market.close', user_text, re.I):
         raise ValueError('For an investment value, use the dealing-NAV return. A market-close PNAV estimate needs an explicit request and is not a dealing price.')
     fee = request.additional_annual_fee_pct
+    fee_unconfirmed = False
     if fee is not None:
         fee_text = question if re.search(r'fee|charge|OCF', question, re.I) else user_text
         separate = re.search(r'platform|service|advis[eo]r|broker|additional', fee_text, re.I)
@@ -91,7 +92,7 @@ def investment_value(catalogue: dict, request: InvestmentValueRequest, question:
         if not separate and re.search(r'ongoing|OCF|fund (?:fee|charge)', question, re.I):
             fee = None  # A mislabelled OCF request must not double-charge or suppress the valid base illustration.
         elif not separate or not annual or Decimal(str(fee)) not in rates:
-            raise ValueError('For an additional platform or service fee, provide its separate annual percentage. I will not assume a fee or deduct the fund ongoing charge twice.')
+            fee, fee_unconfirmed = None, True  # Still provide the known fund value, clearly before this unknown fee.
     figure, reference, kind = _return(catalogue, request.years, request.pricing_basis)
     value = figure.get('exact') if figure.get('exact') is not None else figure.get('value')
     if not isinstance(value, (float, int)) or isinstance(value, bool) or not math.isfinite(value) or not -100 <= value <= 1_000_000:
@@ -111,7 +112,7 @@ def investment_value(catalogue: dict, request: InvestmentValueRequest, question:
                 'return_pct': value, 'return_kind': kind, 'years': request.years,
                 'pricing_basis': request.pricing_basis, 'source_reference': reference,
                 'as_of_date': identity.get('as_of_date') or (catalogue.get(f'performance:{request.years}y') or {}).get('as_of_date'),
-                'additional_annual_fee_pct': fee}
+                'additional_annual_fee_pct': fee, 'service_fee_unconfirmed': fee_unconfirmed}
 
 
 def render_investment_value(result: dict) -> str:
@@ -128,6 +129,9 @@ def render_investment_value(result: dict) -> str:
         text += (f"\n\nThis includes your separate **{result['additional_annual_fee_pct']:g}% annual service fee**, "
                  f"modelled as a year-end percentage deduction: an illustrative reduction of **{money('additional_fee_impact')}** "
                  f"from {money('before_service_fee')}. Actual charges depend on the provider’s calculation and payment timing.")
+    elif result['service_fee_unconfirmed']:
+        text += ('\n\nI could not confirm a separate annual service-fee rate from your question, so the value above excludes it. '
+                 'Please confirm the provider’s annual percentage and I can include it; I have not assumed a fee.')
     else:
         text += '\n\nNo separate platform or service fee has been assumed. If you mean an additional service charge, provide its annual percentage and I can include it.'
     if result['pricing_basis'] == 'fund_pnav':
