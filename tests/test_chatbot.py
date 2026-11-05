@@ -49,7 +49,7 @@ def test_answer_is_cited_qualified_and_uses_one_tool_free_call():
     text = run(answer_question(CATALOGUE, 'What does it cost?', run=runner))
     assert '0.23%' in text and 'fund_identity' in text and 'Peer fee competitiveness' in text
     assert 'not a signed investment decision' in text and len(runner.prompts) == 1
-    assert 'career' not in INSTRUCTIONS and 'do not calculate' in INSTRUCTIONS.lower()
+    assert 'career' not in INSTRUCTIONS and 'Python will' in INSTRUCTIONS
 
 
 @pytest.mark.parametrize('changes', [
@@ -193,6 +193,7 @@ def test_validated_json_prepares_chat_financial_catalogue_without_model_calls(tm
     finally:
         AI_CALLS.reset(token)
     assert not calls and 'performance:5y' in bundle['catalogue'] and 'scorecard' in bundle['catalogue']
+    assert any(f['name'] == 'fund_nav.cum.5y' for f in bundle['catalogue']['investment_returns']['figures'])
     assert '9.8%' in bundle['summary'] and 'No web research' in bundle['catalogue']['evidence_limits']['research']
     assert not list(tmp_path.rglob('*.pdf'))
 
