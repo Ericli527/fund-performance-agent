@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from fund_performance.agents.base import RunFn, model_kwargs, run_structured, run_with_fresh_client
 from fund_performance.communication import COMMUNICATION_STYLE
 from fund_performance.number_guard import check_numbers
+from fund_performance.chat_calculations import InvestmentValueRequest, investment_value, render_investment_value
 
 MAX_QUESTION = 2000
 RECENT_MESSAGES = 12
@@ -18,8 +19,17 @@ Answer only questions about the prepared fund evidence, its mandate, returns, ch
 financial terminology. Be clear that you are AI if asked. Normally use two to five substantive sentences in
 professional, friendly British English, with light bold emphasis or short bullets when useful.
 Use only the supplied current-fund evidence catalogue. Cite exact catalogue IDs in evidence_references.
-Financial figures must already exist in that evidence, with the same unit, dates, currency and pricing basis.
-Do not calculate new financial metrics, invent facts, infer missing peer fees or compare incompatible returns.
+Fund figures must already exist in that evidence, with the same unit, dates, currency and pricing basis.
+For basic cash-value, growth or additional-service-fee questions, populate calculation_request: Python will
+calculate and render the result from a stored one-, three- or five-year fund return and the user's amount.
+Do not refuse a valid calculation merely because the resulting cash value is not yet in the catalogue.
+Prefer the dealing-NAV return for an investor's cash value; use PNAV only when the user explicitly requests
+an illustrative market-close comparison. Python prefers cumulative returns and compounds annualised returns.
+Fund NAV returns already reflect ongoing fund charges: never subtract OCF again. A separate platform/service
+fee needs its own explicitly stated annual percentage. If that fee is missing, still calculate the fund value
+and explain that an additional fee can be included when supplied. This arithmetic is not a new investment
+recommendation or personalised buy/sell advice; hypothetical cash illustrations are in scope.
+Do not invent a return, perform mental arithmetic, infer peer fees or compare incompatible returns.
 Separate published or AI-extracted provisional figures, Python calculations, quantitative scorecard indications,
 independent AI judgement (if supplied) and human approval. A missing peer does not invalidate all fund evidence.
 No full investment assessment or independent quality review is performed in this chat preparation. Do not propose
@@ -45,6 +55,7 @@ class ChatAnswer(BaseModel):
     limitations: list[str] = Field(max_length=4)
     security_issue: bool
     proposes_investment_decision: bool = Field(description='True if proposing a new rating, buy/sell decision or approval rather than explaining supplied evidence.')
+    calculation_request: InvestmentValueRequest | None = None
 
 
 async def answer_question(catalogue: dict, question: str, history: list[dict] | None = None,
@@ -72,6 +83,13 @@ async def answer_question(catalogue: dict, question: str, history: list[dict] | 
         return 'A new investment recommendation needs the Reporting workflow, independent review and human sign-off. I can explain the prepared fund evidence here.'
     if out.status == 'out_of_scope':
         return 'I am an AI assistant for fund evidence. I can explain this fund’s mandate, performance, fees and risks. Please keep questions within that scope.'
+    if out.calculation_request is not None:
+        try:
+            calculated = investment_value(catalogue, out.calculation_request, question, history)
+        except ValueError as error:
+            return str(error)
+        # The free-text model draft is not displayed for calculations. Python owns every derived amount.
+        return render_investment_value(calculated)
     # Claims are checked against cited evidence, never numbers supplied by the question or conversation.
     if (set(refs) - set(catalogue) or (out.status == 'answered' and not refs)
             or check_numbers(prose, {ref: catalogue[ref] for ref in refs if ref in catalogue})

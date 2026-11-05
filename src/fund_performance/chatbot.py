@@ -97,6 +97,8 @@ async def prepare_evidence(entries: list[dict], benchmark: dict, out_root: Path,
                 shared.get('portfolio_exposures'), shared.get('fund_context') or context)
             catalogue = package['evidence_catalogue']
             catalogue['fund_identity'] = package['fund_identity_and_terms']
+            catalogue['investment_returns'] = {'figures': [f for f in result.facts.get('figures', [])
+                if f.get('name', '').startswith(('fund_nav.cum.', 'fund_nav.ann.', 'fund_pnav.cum.', 'fund_pnav.ann.'))]}
             from fund_performance.presentation import headline_metrics
             highlights = [f'{m.label}: {m.value} ({m.period}); {m.source}.' for m in headline_metrics(result.facts)]
             notice = 'Published figures and Python calculations are available; quantitative scorecard indications are preliminary.'
@@ -120,7 +122,7 @@ async def prepare_evidence(entries: list[dict], benchmark: dict, out_root: Path,
             notice += ' Benchmark documents are retained for Reporting mode; they are not vetted research in this beta.'
         catalogue['methodology'] = GLOSSARY.copy()
         catalogue['service_scope'] = {'identity': 'AI fund evidence assistant (Beta)',
-            'limits': 'No new investment ratings, web searches, full report, human approval or independent quality review in chat.'}
+            'limits': 'Bounded Python cash illustrations are supported. No new investment ratings, web searches, full report, human approval or independent quality review in chat.'}
         catalogue['evidence_limits'] = {'notice': notice, 'flags': (intake or {}).get('flags', []),
                                       'research': 'No web research was performed for this chat.',
                                       'verification': 'AI extraction and text matching are not independent verification.'}
