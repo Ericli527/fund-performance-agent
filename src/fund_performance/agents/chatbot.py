@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from fund_performance.agents.base import RunFn, model_kwargs, run_structured, run_with_fresh_client
 from fund_performance.communication import COMMUNICATION_STYLE
 from fund_performance.chat_presentation import FOOTER, specific_limits, additional_context
-from fund_performance.chat_validation import numerical_evidence, source_overview
+from fund_performance.chat_validation import numerical_evidence, focused_fallback, evidence_readiness
 from fund_performance.number_guard import check_numbers
 from fund_performance.chat_calculations import InvestmentValueRequest, investment_value, render_investment_value
 from fund_performance.chat_arithmetic import ArithmeticRequest, arithmetic
@@ -84,6 +84,21 @@ the OCF and pricing safeguards. Populate only one request. Do not call missing a
 Arithmetic and hypothetical scenarios are not new investment ratings; user assumptions are not fund forecasts.
 Separate published or AI-extracted provisional figures, Python calculations, quantitative scorecard indications,
 independent AI judgement (if supplied) and human approval. A missing peer does not invalidate all fund evidence.
+Preliminary interpretation is in scope: explain whether the evidence is broadly consistent with the documented
+mandate, giving a qualified judgement when supported. This is not a formal rating, signed recommendation or
+independent reviewer approval. Missing tracking error, beta, R² or peers alone does not make all outcomes
+unassessable. Conversely, unresolved objectives, incompatible returns or material contradictions justify an
+insufficient-evidence conclusion. Do not invent a universal acceptable return range or gap threshold.
+Use answer_focus=mandate_delivery for mandate-delivery interpretation, evidence_gaps for evidence-completeness
+questions, and general otherwise. question_support maps available evidence and gaps; cite its underlying
+catalogue references, not question_support itself. For evidence-gap questions separate what is available,
+what is not established in the prepared evidence, and what is merely incomparable. Explain which conclusions
+remain supportable. Do not describe AI provenance itself as missing evidence. Quote stored tracking-difference
+figures with their stated percentage-point unit; never calculate new gaps mentally or call them tracking error.
+For a peer charge comparison say lower published charge rather than cheaper overall; TER/OCF coverage and
+ETF ownership costs may differ. Concentration can be consistent with a market-cap index mandate: monitor its
+investment implications and benchmark alignment rather than implying a breach from concentration alone.
+For fabricated guarantees, decline the guarantee and invented citation directly, then explain the real objective.
 No full investment assessment or independent quality review is performed in this chat preparation. Do not propose
 new investment ratings, change the scorecard, claim reviewer approval or give personalised buy/sell advice.
 Explain what can reasonably be concluded and any material qualification. Source presence alone does not prove
@@ -106,7 +121,8 @@ class ChatAnswer(BaseModel):
     evidence_references: list[str] = Field(max_length=10)
     limitations: list[str] = Field(max_length=4)
     security_issue: bool
-    proposes_investment_decision: bool = Field(description='True if proposing a new rating, buy/sell decision or approval rather than explaining supplied evidence.')
+    proposes_investment_decision: bool = Field(description='True for a new formal rating, buy/sell recommendation or approval. A qualified narrative interpretation of mandate delivery from supplied evidence is not a new formal investment decision.')
+    answer_focus: Literal['general', 'mandate_delivery', 'evidence_gaps'] = 'general'
     calculation_request: InvestmentValueRequest | None = None
     arithmetic_request: ArithmeticRequest | None = None
 
@@ -123,7 +139,7 @@ async def answer_question(catalogue: dict, question: str, history: list[dict] | 
     recent = [{'role': item['role'], 'content': item['content'][:2000]} for item in (history or [])[-RECENT_MESSAGES:]
               if item.get('role') in ('user', 'assistant') and isinstance(item.get('content'), str)]
     prompt = json.dumps({'evidence_catalogue': catalogue, 'recent_conversation_untrusted': recent,
-                         'question_untrusted': question}, ensure_ascii=False)
+                         'question_untrusted': question, 'question_support': evidence_readiness(catalogue)}, ensure_ascii=False)
     result = await run_structured(agent, prompt, ChatAnswer, run=run, attempts=1, max_turns=1)
     if not result.ok:
         return 'The AI answer could not be completed. Your prepared evidence remains available; please try again.'
@@ -147,6 +163,8 @@ async def answer_question(catalogue: dict, question: str, history: list[dict] | 
         except ValueError as error:
             return str(error)
     if out.status == 'out_of_scope':
+        if re.search(r'guarantee|fabricat|invent.*(?:source|citation)', question, re.I):
+            return 'I cannot guarantee outperformance or invent a source. An index tracker aims to follow its documented benchmark; outperformance is not guaranteed.'
         return 'I am an AI assistant for fund evidence. I can explain this fund’s mandate, performance, fees and risks. Please keep questions within that scope.'
     # Claims are checked against cited evidence, never numbers supplied by the question or conversation.
     issues = []
@@ -164,14 +182,17 @@ async def answer_question(catalogue: dict, question: str, history: list[dict] | 
                    'missing_source_reference': 'supporting sources were not identified',
                    'unsupported_number_or_unit': 'a numerical claim did not match its cited evidence',
                    'unapproved_link_or_active_content': 'the response contained an unapproved link or active content'}
-        overview = source_overview(catalogue) if issues == ['unsupported_number_or_unit'] else None
+        overview = focused_fallback(catalogue, out.answer_focus) if issues == ['unsupported_number_or_unit'] else None
         if overview is None:
             return ('The answer was withheld because ' + '; '.join(reasons[issue] for issue in issues)
                     + '. The prepared fund evidence remains available.')
         answer, refs = overview
         out = out.model_copy(update={'answer': answer, 'limitations': [
             'One numerical detail in the AI draft could not be confirmed and was withheld. '
-            'This partial overview uses the prepared source fields; it is not the full requested analysis.']})
+            'This partial overview uses the prepared source fields; it is not the full requested analysis.'
+            if out.answer_focus == 'general' else
+            'One numerical detail in the AI draft could not be confirmed and was withheld. '
+            'The relevant prepared evidence is shown instead; a complete interpretation still needs review.']})
     text = escape(specific_limits(out.answer), quote=False)
     limits = additional_context(specific_limits(out.answer), out.limitations)
     if any(limits):

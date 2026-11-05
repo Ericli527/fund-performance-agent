@@ -166,3 +166,38 @@ may explain plausible exposure channels without claiming measured fund-return at
 The November no-source report could not be matched to private Render logs in development.
 The provider-date false-negative is reproduced with realistic mocked metadata; actual Render
 credential status, credits and live search coverage remain to be checked in that environment.
+
+
+### Preliminary interpretation and evidence questions
+
+Chat may interpret whether reported outcomes are broadly consistent with a fund's documented
+mandate. This is a qualified narrative, not a new formal rating, recommendation or approval.
+A compact `question_support` map identifies existing performance references, selected gaps
+and comparison limitations; its figures remain in the original cited catalogue. Missing
+tracking error or peers does not automatically invalidate the available mandate/return evidence.
+Unclear objectives, incompatible returns and material contradictions still limit conclusions.
+
+The response identifies its focus as general, mandate delivery or evidence gaps. If numerical
+validation alone fails, the entire invalid draft is discarded. For the latter two focuses,
+show relevant prepared performance/charge evidence and unresolved gaps/comparability rather
+than only a generic identity overview. No replacement investment judgement is manufactured.
+Security and citation failures still suppress the answer. No extra model call is introduced.
+
+Focused acceptance questions (mocked representative inputs; not live-model quality benchmarks):
+
+- **Mandate delivery:** with annual fund/benchmark returns of 11.31%/11.60%, a stored tracking
+  difference of -0.29 pp and missing tracking error, provide a preliminary interpretation with
+  valuation/consistency qualifications. Never impose a universal acceptable return-gap threshold.
+- **Evidence gaps:** distinguish available mandate, returns and charges from missing metrics
+  and USD-versus-GBP peer incompatibility. Do not say the peer is absent when it is supplied.
+- **Recent trends:** use vetted dated research and explain plausible exposure channels;
+  post-review news is current context, not information available at the historical review date.
+  Lack of measured attribution must not prevent a qualified market-context explanation.
+- **Investment growth:** calculate a GBP 10,000 five-year illustration from the stored NAV
+  return using the existing Python calculator; do not deduct OCF twice or assume a service fee.
+- **Unsupported claims:** discard an invalid figure and keep relevant source evidence without
+  inventing a positive judgement. Citation/security checks remain blocking.
+
+Normal answers still use one structured model request with existing model settings. The
+support map adds bounded context, not a search or review loop. Live response quality and
+before/after token costs have not been benchmarked in the development environment.
