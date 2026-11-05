@@ -15,13 +15,14 @@ _PROVENANCE = re.compile(
 
 def specific_limits(text: str) -> str:
     """Remove only recognised, stand-alone provenance clauses; keep substantive qualifications intact."""
-    paragraphs = []
-    for paragraph in text.split('\n\n'):
-        clauses = re.split(r'(?<=[.!?;])\s+', paragraph.strip())
+    # Some drafts put category bullets inline; ordinary dashes and negative figures are unchanged.
+    text = re.sub(r'[ \t]+[-•][ \t]+(?=\*\*[^*\n]{1,80}:\*\*)', '\n- ', text)
+    lines = []
+    for line in text.split('\n'):
+        clauses = re.split(r'(?<=[.!?;])[ \t]+', line)
         kept = [part for part in clauses if not (_GENERIC.fullmatch(part.strip(' ;')) or _PROVENANCE.fullmatch(part.strip(' ;')))]
-        if kept:
-            paragraphs.append(' '.join(kept))
-    return '\n\n'.join(paragraphs)
+        lines.append(' '.join(kept))
+    return '\n'.join(lines).strip()
 
 
 _SCOPE_WORDS = set('the table tables label labels labelled labeled and accompanying note notes leave leaves '
