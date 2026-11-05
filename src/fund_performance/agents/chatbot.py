@@ -1,5 +1,6 @@
 """Bounded, evidence-grounded fund questions; no tools, new ratings or side effects."""
 import json
+import logging
 import re
 from html import escape
 from typing import Literal
@@ -9,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from fund_performance.agents.base import RunFn, model_kwargs, run_structured, run_with_fresh_client
 from fund_performance.communication import COMMUNICATION_STYLE
+from fund_performance.chat_presentation import FOOTER, specific_limits
 from fund_performance.number_guard import check_numbers
 from fund_performance.chat_calculations import InvestmentValueRequest, investment_value, render_investment_value
 from fund_performance.chat_arithmetic import ArithmeticRequest, arithmetic
@@ -19,7 +21,21 @@ INSTRUCTIONS = """You are the Fund Performance Agent's AI Chatbot (Beta), an AI 
 Answer only questions about the prepared fund evidence, its mandate, returns, charges, risks, peers and relevant
 financial terminology, as well as basic arithmetic. Be clear that you are AI if asked. Normally use two to five substantive sentences in
 professional, friendly British English, with light bold emphasis or short bullets when useful.
-Use only the supplied current-fund evidence catalogue. Cite exact catalogue IDs in evidence_references.
+Use only the supplied current-fund evidence catalogue.
+For composition, use fund_composition and fund_context: top stocks, industries/sectors, geography and market
+capitalisation. Describe available index/benchmark tables as benchmark composition, not actual fund weights.
+Do not say all composition is missing merely because the tables are index-labelled. If a table is absent,
+identify that specific gap. Explain how the documented replication strategy relates to index exposures without
+assuming identical holdings. Preserve table dates, source scope and weights; do not estimate missing weights.
+Current research is supplied under research:* with publication dates and research_availability. Use it for
+recent trends, news and regulatory context. Distinguish current news from the historical fund-review date;
+post-review news was not information available at that review date. Limited coverage is not no research.
+News is context, not proof of fund-specific attribution or that a regulation applies to this share class.
+Evidence limits should identify specific missing information, date coverage, comparability or uncertainty.
+Do not repeat generic AI-extraction verification warnings in the answer or limitations: Python adds one final
+AI/professional-review notice. Preserve material caveats such as provisional recovered figures, incompatible
+returns and illustrative market-close prices that are not dealing prices. Do not call data verified merely
+because generic provenance is presented in a footer. Cite exact catalogue IDs in evidence_references.
 Fund figures must already exist in that evidence, with the same unit, dates, currency and pricing basis.
 For basic cash-value, growth or additional-service-fee questions, populate calculation_request: Python will
 calculate and render the result from a stored one-, three- or five-year fund return and the user's amount.
@@ -101,28 +117,53 @@ async def answer_question(catalogue: dict, question: str, history: list[dict] | 
         except ValueError as error:
             return str(error)
         # The free-text model draft is not displayed for calculations. Python owns every derived amount.
-        return render_investment_value(calculated)
+        return render_investment_value(calculated) + '\n\n' + FOOTER
     if out.arithmetic_request is not None:
         try:
-            return arithmetic(catalogue, out.arithmetic_request, question, history)
+            return arithmetic(catalogue, out.arithmetic_request, question, history) + '\n\n' + FOOTER
         except ValueError as error:
             return str(error)
     if out.status == 'out_of_scope':
         return 'I am an AI assistant for fund evidence. I can explain this fund’s mandate, performance, fees and risks. Please keep questions within that scope.'
     # Claims are checked against cited evidence, never numbers supplied by the question or conversation.
-    if (set(refs) - set(catalogue) or (out.status == 'answered' and not refs)
-            or check_numbers(prose, {ref: catalogue[ref] for ref in refs if ref in catalogue})
-            or re.search(r'<[^>]+>|!?\[[^\]]*\]\([^)]*\)|https?://|```', prose)):
-        return ('The answer did not pass the source or numerical checks and has been withheld. '
-                'Please check the prepared evidence or ask a more specific question.')
-    text = escape(out.answer, quote=False)
-    if out.limitations:
-        text += '\n\n**Evidence limits:** ' + ' '.join(escape(item, quote=False) for item in out.limitations if item.strip())
+    issues = []
+    if set(refs) - set(catalogue):
+        issues.append('unknown_source_reference')
+    if out.status == 'answered' and not refs:
+        issues.append('missing_source_reference')
+    if check_numbers(prose, {ref: catalogue[ref] for ref in refs if ref in catalogue}):
+        issues.append('unsupported_number_or_unit')
+    if re.search(r'<[^>]+>|!?\[[^\]]*\]\([^)]*\)|https?://|```', prose):
+        issues.append('unapproved_link_or_active_content')
+    if issues:
+        logging.getLogger(__name__).warning('Chat response withheld: %s', ','.join(issues))
+        reasons = {'unknown_source_reference': 'a source reference could not be verified',
+                   'missing_source_reference': 'supporting sources were not identified',
+                   'unsupported_number_or_unit': 'a numerical claim did not match its cited evidence',
+                   'unapproved_link_or_active_content': 'the response contained an unapproved link or active content'}
+        return ('The answer was withheld because ' + '; '.join(reasons[issue] for issue in issues)
+                + '. The prepared fund evidence remains available. Please try a more specific question.')
+    text = escape(specific_limits(out.answer), quote=False)
+    limits = [specific_limits(item) for item in out.limitations]
+    if any(limits):
+        text += '\n\n**Evidence limits:** ' + ' '.join(escape(item, quote=False) for item in limits if item)
     if refs:
         labels = {'fund_identity': 'Fund identity and charges', 'fund_context': 'Fund context brief',
+                  'fund_composition': 'Fund and benchmark composition', 'research_availability': 'Research coverage',
                   'published_figures': 'Published financial figures', 'peer_documents': 'Uploaded peer evidence',
                   'evidence_limits': 'Evidence checks and limits', 'methodology': 'Financial terminology',
                   'scorecard': 'Python quantitative scorecard', 'peers': 'Peer comparisons',
                   'risk_quality': 'Risk and evidence quality', 'mandate': 'Fund mandate', 'service_scope': 'Beta scope'}
-        text += '\n\n**Sources:** ' + ', '.join(escape(f'{labels.get(ref, ref)} [{ref}]', quote=False) for ref in refs)
-    return text + '\n\n*AI explanation for human review; not a signed investment decision.*'
+        from urllib.parse import quote
+        from fund_performance.chat_research import public_url
+        sources = []
+        for ref in refs:
+            source = catalogue[ref]
+            label = escape(f'{labels.get(ref, ref)} [{ref}]', quote=False)
+            if ref.startswith('research:') and isinstance(source, dict) and public_url(source.get('url', '')):
+                label = '[' + escape(str(source.get('title') or ref), quote=False).replace('[', '').replace(']', '') + ']('
+                label += quote(source['url'], safe=':/?=&%#@+~.-_') + ')'
+                label += ' — ' + escape(str(source.get('date') or 'date unavailable'), quote=False) + f' [{ref}]'
+            sources.append(label)
+        text += '\n\n**Sources:** ' + ', '.join(sources)
+    return text + '\n\n' + FOOTER

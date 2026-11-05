@@ -269,7 +269,8 @@ def _check_summary(planned: PlannedSearch):
 
 
 async def search_one(planned: PlannedSearch, run: RunFn | None = None,
-                     fund_context: dict | None = None, review_context: str = "", retrieve=None) -> tuple[dict | None, str]:
+                     fund_context: dict | None = None, review_context: str = "", retrieve=None,
+                     include_excerpt: bool = False) -> tuple[dict | None, str]:
     """ One search, once: no retries (spec 8). Returns the summary, or None and the reason it was left out """
     excerpts = None
     # Injected model runners retain existing offline fixtures; injected retrieval can exercise both boundaries.
@@ -292,6 +293,10 @@ async def search_one(planned: PlannedSearch, run: RunFn | None = None,
             return None, 'Search summary excluded: its source was not returned by Tavily.'
         if excerpts is not None:
             result.output['retrieval_provider'] = 'tavily'
+            if include_excerpt:
+                source = next(item for item in excerpts if item['url'] == result.output['url'])
+                result.output['source_excerpt'] = source['content']
+                result.output['retrieved_publication_date'] = source.get('published_date')
             limit = 'Search excerpt only; the full source page was not retrieved.'
             result.output['limitations'] = (result.output.get('limitations') or '') + (' ' if result.output.get('limitations') else '') + limit
         return result.output, f"Searched ({'Tavily basic' if excerpts is not None else 'injected runner'}): {planned.query}"

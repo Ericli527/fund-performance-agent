@@ -134,5 +134,5 @@ def arithmetic(catalogue: dict, request: ArithmeticRequest, question: str, histo
     if details:
         text += '**Inputs used:**\n' + '\n'.join('- ' + escape(item) for item in details) + '\n\n'
     text += '**Calculation:** ' + escape(request.expression.replace('**', '^').replace('*', '×').replace('/', '÷'))
-    text += '\n\nCalculated by Python from the inputs shown. User assumptions are hypothetical; provisional source figures require verification. This is not a forecast or investment recommendation.'
+    text += '\n\nCalculated by Python from the inputs shown. User assumptions are hypothetical. This is not a forecast or investment recommendation.'
     return text

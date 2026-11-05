@@ -15,15 +15,20 @@ def _post(**kwargs):
     return requests.post(ENDPOINT, **kwargs)
 
 
-def search(query: str) -> tuple[list[dict], str | None]:
+def search(query: str, *, start_date: str | None = None, end_date: str | None = None,
+           topic: str | None = None) -> tuple[list[dict], str | None]:
     load_env()
     key = os.getenv('TAVILY_API_KEY', '').strip()
     if not key:
         return [], 'Tavily search is unavailable: TAVILY_API_KEY is not configured.'
+    options = {'query': query, 'search_depth': 'basic', 'max_results': MAX_RESULTS,
+               'include_answer': False, 'include_raw_content': False}
+    if start_date: options['start_date'] = start_date
+    if end_date: options['end_date'] = end_date
+    if topic: options['topic'] = topic
     try:
         response = _post(headers={'Authorization': f'Bearer {key}'},
-                         json={'query': query, 'search_depth': 'basic', 'max_results': MAX_RESULTS,
-                               'include_answer': False, 'include_raw_content': False},
+                         json=options,
                          timeout=(5, 20), allow_redirects=False)
         if response.status_code != 200:
             return [], f'Tavily search is unavailable (HTTP {response.status_code}).'

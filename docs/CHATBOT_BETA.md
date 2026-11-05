@@ -12,7 +12,7 @@ optional for chat. Reporting still requires its existing inputs.
 
 Document preparation reuses the existing Extractor, Mandate Agent, peer extraction
 and self-check. With prices, the existing Python controller prepares calculations
-and its quantitative scorecard, stopping before research, investment judgement,
+and its quantitative scorecard, stopping before reporting research, investment judgement,
 independent review and PDF generation. Without prices, published figures and document
 context still support the basic cash illustrations below; no price history,
 compatible observation series or scorecard is invented. Confirmed benchmark series retain the existing identity and
@@ -26,6 +26,43 @@ or expiring the session loses chat context; transcripts are not written to disk.
 Completed Reporting narratives, research and independent recommendations are not
 automatically imported into chat in this first beta; chat preparation is a separate,
 explicit action. Existing chat context survives mode switches while inputs are unchanged.
+
+## Current research and composition
+
+**Prepare evidence and recent research** starts five independent Tavily basic searches in parallel,
+using the existing Search Agent to summarise retrieved excerpts: market trends, macro policy,
+portfolio-relevant news, material index/market changes and regulatory updates. Searches start
+once the main fund context exists, overlapping mandate and peer processing where possible.
+They cover the preceding 90 days as at the preparation date in London, not the historical
+fund review period. Routine fund profiles/factsheets are excluded; Reporting's existing
+historical research rules are unchanged.
+
+Each kept source needs a returned URL, a trusted publisher (the relevant regulator for the
+regulatory search), a recent source-supported date, substantive current context and summary
+figures supported by the retrieved excerpt. Duplicate URLs are removed. Five searches do not
+guarantee five usable sources. Missing credentials, timeouts and rejected sources leave the
+fund evidence available, with a coverage count and structured exclusion reasons in session
+state. Summaries are excerpt-based; Python checks cannot establish semantic correctness or
+fund-specific causality. No extra search-planning or rewriting model call is added.
+
+Follow-up questions and **New conversation** reuse research. Explicitly preparing again
+refreshes five searches without re-extracting unchanged documents, and clears old conversation
+so changed source IDs cannot refer to old articles. Research requires AI access and research
+to be enabled. Current news is labelled separately from historical fund evidence; post-review
+publications must not be represented as known at the fund review date.
+
+Extraction retains top-stock, industry/sector, geography, market-cap and concentration tables.
+Source matching accepts exact single rows when the percentage unit is in the table heading;
+ambiguous multi-row quotations remain excluded. Index/benchmark composition is retained
+separately from fund exposures, with source, page and provisional classification. No fund
+weights are inferred from index membership. Tables absent from the source remain absent.
+Scanned/image-only PDFs still depend on the existing document reader; no OCR was added.
+
+The supplied Fidelity photo was visually inspected: its percentage columns are labelled
+**Index**, and percentages appear in headings rather than each row. This explains why the
+old fund-only/inline-percentage checks could discard them. The private original PDF and live
+extraction trace were not available for reproducing that particular run. Synthetic mocked
+fixtures exercise the same layout and extraction-to-chat flow.
 
 ## Answer safeguards and cost
 
@@ -50,7 +87,7 @@ no flows. This is the impact on ending value, not a reconstruction of actual fee
 paid. If that separate fee is missing, provide the known fund value and ask for the
 additional annual rate. For example, £10,000 with an 88.3% cumulative return becomes
 £18,830 before any separate service fee, with the fund's ongoing charge already reflected.
-Show the source date, return basis and provisional status; this is not a live balance
+Show the source date and return basis; preserve provisional status internally and the closing AI notice; this is not a live balance
 or future forecast. Calculations do not change the scorecard or independent ratings.
 
 Other basic questions use a general arithmetic request rather than a template for
@@ -69,9 +106,9 @@ and formula selection; this does not replace independent investment review.
 
 Each question makes at most one structured, tool-free AI call using the existing
 Reporting model settings and environment overrides. No additional model configuration,
-web search, rewrite loop or contact/lead-recording tool is introduced. Daily AI limits
+rewrite loop or contact/lead-recording tool is introduced for answers. Current research runs only during preparation. Daily AI limits
 and concurrency limits apply. Document preparation has its usual extraction calls;
-validated JSON preparation makes none. SDK usage metadata is retained in session
+validated JSON preparation makes no extraction calls; enabled research adds up to five Search Agent calls and five Tavily basic searches. SDK usage metadata is retained in session
 state without logging prompts or source text. Chat answer tracing is disabled.
 
 The assistant uses only the prepared catalogue and the most recent six turns as
@@ -79,7 +116,10 @@ untrusted conversational context. The UI retains up to twenty turns. Unknown cit
 unsupported numerical claims detectable by the existing numerical guard, active HTML
 and generated links are withheld. Scope, security and investment-decision flags
 produce fixed safe responses. AI extraction remains provisional; text matching is
-not independent source verification. Missing evidence should lead to an actionable
+not independent source verification. Generic AI provenance appears once in a closing notice,
+not repeatedly as missing evidence. Specific missing data, contradictory sources, price-basis
+limitations and source-specific provisional recovery still need explanation. Numerical/citation
+failures show a specific reason, with only reason codes logged (no private answer text). Missing evidence should lead to an actionable
 qualification, never an invented comparison or a blanket negative investment rating.
 
 This is evidence Q&A, not an independently reviewed investment recommendation. The

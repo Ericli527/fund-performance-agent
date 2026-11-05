@@ -1,5 +1,6 @@
 """Prepare one session's evidence once; follow-up questions do not reread documents or run reports."""
 import asyncio
+import copy
 import hashlib
 import json
 import logging
@@ -54,17 +55,27 @@ def brief(bundle: dict) -> str:
         f'**{label}:** {escape(str(value))}' for label, value in terms if value)
     text += '\n\n**Inputs:** ' + ', '.join(escape(name) for name in bundle['input_files'])
     if profile.get('ocf_pct') is not None:
-        text += f"\n\n**Published ongoing charge (OCF):** {profile['ocf_pct']:g}% a year; verify the source."
+        text += f"\n\n**Published ongoing charge (OCF):** {profile['ocf_pct']:g}% a year."
     if bundle.get('highlights'):
         text += '\n\n**Available financial evidence**\n' + '\n'.join('- ' + escape(line) for line in bundle['highlights'])
     text += '\n\n' + bundle['notice']
-    text += '\n\nFigures extracted by AI remain provisional. Verify the source documents before sign-off. '
-    text += 'Preparation does not run research, an independent investment assessment, quality review or PDF reporting.'
+    research = bundle.get('research') or {}
+    if research.get('searches_requested'):
+        text += (f"\n\n**Recent research:** {research['source_count']} vetted source(s) retained from five parallel searches, "
+                 f"covering {research['window_start']} to {research['as_of_date']}. "
+                 'Current news is separate from the historical fund review. Prepare again to refresh; follow-up questions reuse these sources.')
+        if research['source_count'] < 5:
+            text += ' Some searches returned no usable dated source; coverage is incomplete.'
+    else:
+        text += '\n\n**Recent research:** Not run (AI/research disabled, unavailable or not requested).'
+    text += '\n\nPreparation does not run an independent investment assessment, quality review or PDF reporting.'
+    from fund_performance.chat_presentation import FOOTER
+    text += '\n\n' + FOOTER
     return text
 
 
-async def prepare_evidence(entries: list[dict], benchmark: dict, out_root: Path,
-                           reader=read_documents, review=run_review) -> dict:
+async def _prepare_evidence(entries: list[dict], benchmark: dict, out_root: Path,
+                           reader=read_documents, review=run_review, on_fund_context=None) -> dict:
     # Import locally to share the existing safe input copier without a module import cycle.
     from fund_performance.web import prepare_inputs
     price, factsheet, kid, peers, jsons = engine_inputs(entries)
@@ -75,6 +86,8 @@ async def prepare_evidence(entries: list[dict], benchmark: dict, out_root: Path,
             prepare_inputs(([price] if price else []) + jsons, folder)
         else:
             options = {'supporting_documents': [Path(p) for p in supporting_inputs(entries)]} if supporting_inputs(entries) else {}
+            if on_fund_context is not None:
+                options['on_fund_context'] = on_fund_context
             intake = await reader(Path(factsheet), Path(kid) if kid else None, [Path(p) for p in peers], **options)
             built = self_check(intake)
             if built.problems:
@@ -88,6 +101,8 @@ async def prepare_evidence(entries: list[dict], benchmark: dict, out_root: Path,
             raise ValueError('A fund profile is required. Add a readable main factsheet or validated fund profile.')
         profile = read_json(files['fund_profile'])
         context = (intake or {}).get('fund_context') or build_fund_context(profile=profile.model_dump(mode='json'))
+        if on_fund_context is not None:
+            on_fund_context(context)
         if price:
             request_intake = (intake or {}) | {'benchmark_inputs': benchmark} if intake or benchmark.get('series') else None
             result = await review(folder, 'Prepare evidence for fund questions', out_root=out_root,
@@ -120,9 +135,15 @@ async def prepare_evidence(entries: list[dict], benchmark: dict, out_root: Path,
             notice = 'No price history was supplied. Price-derived statistics, benchmark-relative calculations and scorecard ratings were not run.'
         if benchmark.get('documents'):
             notice += ' Benchmark documents are retained for Reporting mode; they are not vetted research in this beta.'
+        catalogue['fund_composition'] = {
+            'fund': context.get('portfolio_exposures'),
+            'benchmark': context.get('benchmark_composition'),
+            'as_of_date': context.get('document_date') or profile.as_of_date.isoformat(),
+            'interpretation': 'Benchmark/index weights describe the index, not independently verified fund holdings. '
+                              'Explain available tables and their scope; never say all composition is absent when index tables exist.'}
         catalogue['methodology'] = GLOSSARY.copy()
         catalogue['service_scope'] = {'identity': 'AI fund evidence assistant (Beta)',
-            'limits': 'Bounded Python cash illustrations are supported. No new investment ratings, web searches, full report, human approval or independent quality review in chat.'}
+            'limits': 'Bounded Python cash illustrations are supported. No new investment ratings, on-demand web searches, full report, human approval or independent quality review in chat.'}
         catalogue['evidence_limits'] = {'notice': notice, 'flags': (intake or {}).get('flags', []),
                                       'research': 'No web research was performed for this chat.',
                                       'verification': 'AI extraction and text matching are not independent verification.'}
@@ -132,34 +153,83 @@ async def prepare_evidence(entries: list[dict], benchmark: dict, out_root: Path,
         return bundle
 
 
+def with_research(bundle: dict, research: dict) -> dict:
+    result = copy.deepcopy(bundle)
+    catalogue = result['catalogue']
+    for key in list(catalogue):
+        if key.startswith('research:'):
+            del catalogue[key]
+    for i, source in enumerate(research['sources'], 1):
+        catalogue[f'research:{i}'] = source
+    result['research'] = research
+    catalogue['research_availability'] = {key: value for key, value in research.items() if key != 'sources'}
+    catalogue['evidence_limits']['research'] = (f"{research['source_count']} vetted current sources; "
+        f"{research['window_start']} to {research['as_of_date']}. These are current context, not historical fund performance evidence.")
+    result['summary'] = brief(result)
+    return result
+
+
+async def prepare_evidence(entries: list[dict], benchmark: dict, out_root: Path,
+                           reader=read_documents, review=run_review, *, research_enabled=False,
+                           research_run=None, retrieve=None) -> dict:
+    from fund_performance.chat_research import current_research
+    task = None
+    def start(context):
+        nonlocal task
+        if task is None:
+            seed = dict(context.get('fund_facts') or {})
+            seed['as_of_date'] = seed.get('as_of_date') or context.get('document_date')
+            task = asyncio.create_task(current_research(seed, context.get('portfolio_exposures'),
+                                                       run=research_run, retrieve=retrieve))
+    try:
+        bundle = await _prepare_evidence(entries, benchmark, out_root, reader, review,
+                                        on_fund_context=start if research_enabled else None)
+        return with_research(bundle, await task) if task else bundle
+    finally:
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
 async def prepare_session(selected: list[dict], benchmark: dict, state: dict, limits,
-                          reader=None, review=None) -> tuple[dict | None, str]:
+                          reader=None, review=None, research_run=None, retrieve=None) -> tuple[dict | None, str]:
     """`state` is a session-local revocable preparation token, never a global evidence cache."""
     from fund_performance.agents.base import AI_CALLS, api_key_present
     from fund_performance.config import load_settings
-    if state.get('bundle') and matches(state, selected, benchmark):
+    cached = bool(state.get('bundle') and matches(state, selected, benchmark))
+    research_enabled = (not ai_disabled() and load_settings().research.enabled
+                        and (api_key_present() or research_run is not None))
+    if cached and not research_enabled:
         return state, state['bundle']['summary']
-    needs_ai = not engine_inputs(selected)[4]
+    needs_ai = not cached and not engine_inputs(selected)[4]
     if needs_ai and (ai_disabled() or (reader is None and not api_key_present())):
         return None, 'AI document reading is unavailable. Use validated demo inputs or configure the AI service.'
-    if needs_ai and (refused := limits.start()):
+    if (needs_ai or research_enabled) and (refused := limits.start()):
         return None, refused
     calls = []
     token = AI_CALLS.set(calls)
     try:
         options = ({'reader': reader} if reader else {}) | ({'review': review} if review else {})
+        options |= {'research_enabled': research_enabled, 'research_run': research_run, 'retrieve': retrieve}
         with tempfile.TemporaryDirectory(prefix='fund-chat-calculations-') as output:
-            bundle = await asyncio.wait_for(prepare_evidence(selected, benchmark, Path(output), **options),
-                timeout=load_settings().timeouts_seconds.extractor * 4)
+            if cached:
+                from fund_performance.chat_research import current_research
+                bundle = state['bundle']
+                composition = bundle['catalogue'].get('fund_composition') or {}
+                research = await current_research(bundle['profile'], composition.get('fund'), run=research_run, retrieve=retrieve)
+                bundle = with_research(bundle, research)
+            else:
+                bundle = await asyncio.wait_for(prepare_evidence(selected, benchmark, Path(output), **options),
+                    timeout=load_settings().timeouts_seconds.extractor * 4)
         if not matches(state, selected, benchmark):
             return None, 'Inputs changed during preparation. Prepare the new fund evidence before chatting.'
-        return state | {'bundle': bundle, 'history': [], 'usage': calls}, bundle['summary']
+        return state | {'bundle': bundle, 'history': [], 'usage': (state.get('usage') or []) + calls}, bundle['summary']
     except Exception as error:
         logging.getLogger(__name__).warning('Chat evidence preparation failed (%s)', type(error).__name__)
         return None, 'The evidence could not be prepared. Check the inputs and try again; your attachments are unchanged.'
     finally:
         AI_CALLS.reset(token)
-        if needs_ai:
+        if needs_ai or research_enabled:
             limits.finish()
 
 

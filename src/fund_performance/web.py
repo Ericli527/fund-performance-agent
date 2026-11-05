@@ -1010,10 +1010,11 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             gr.Markdown('**AI Chatbot (Beta)** — prepare your fund evidence once, then ask follow-up questions. '
                         'A main factsheet is required; price history, KID and peers are optional. '
                         'This mode does not run the full reporting or independent investment review process. '
-                        'Each answer uses one AI call and counts towards the daily limit. '
+                        'Preparation runs five parallel searches for recent market news and regulatory updates when AI is enabled. '
+                        'Each answer uses one AI call; preparation and answers count towards the daily limit. '
                         'The most recent six turns are used for follow-up context; prepared evidence stays available.')
             chat_state = gr.State(None, time_to_live=cleanup[1])
-            prepare_chat = gr.Button('Prepare fund evidence', variant='primary')
+            prepare_chat = gr.Button('Prepare evidence and recent research', variant='primary')
             chat_summary = gr.Markdown('Add fund documents or select a test case, then prepare the evidence.')
             conversation = gr.Chatbot(label='Fund conversation', height=400, sanitize_html=True)
             chat_question = gr.Textbox(label='Ask about this fund', lines=2, interactive=False,
@@ -1206,7 +1207,7 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                 yield None, 'An input file is unavailable. Upload it again.', [], gr.update(interactive=True), gr.update(interactive=False), gr.update(interactive=False)
                 return
             pending = current if current and current.get('key') == key and not current.get('invalidated') else {'key': key}
-            yield pending, 'Preparing fund evidence… documents are read once. Please wait.', gr.skip(), gr.update(interactive=False), gr.update(interactive=False), gr.update(interactive=False)
+            yield pending, 'Preparing evidence and five recent-context searches… Documents are read once; searches run in parallel when enabled. Prepare again to refresh research and start a new conversation.', gr.skip(), gr.update(interactive=False), gr.update(interactive=False), gr.update(interactive=False)
             prepared, summary = await prepare_session(selected, benchmark, pending, limits)
             yield prepared, summary, (prepared or {}).get('history', []), gr.update(interactive=True), gr.update(interactive=bool(prepared)), gr.update(interactive=bool(prepared))
 
