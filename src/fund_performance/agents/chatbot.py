@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from fund_performance.agents.base import RunFn, model_kwargs, run_structured, run_with_fresh_client
 from fund_performance.communication import COMMUNICATION_STYLE
 from fund_performance.chat_presentation import FOOTER, specific_limits
+from fund_performance.chat_validation import numerical_evidence, source_overview
 from fund_performance.number_guard import check_numbers
 from fund_performance.chat_calculations import InvestmentValueRequest, investment_value, render_investment_value
 from fund_performance.chat_arithmetic import ArithmeticRequest, arithmetic
@@ -22,8 +23,18 @@ Answer only questions about the prepared fund evidence, its mandate, returns, ch
 financial terminology, as well as basic arithmetic. Be clear that you are AI if asked. Normally use two to five substantive sentences in
 professional, friendly British English, with light bold emphasis or short bullets when useful.
 Use only the supplied current-fund evidence catalogue.
+A general question such as "Tell me about the fund" is in scope: explain its identity, documented objective,
+benchmark, charges and any supplied peers. Do not require a more specific question. Distinguish peer identity
+from eligibility/comparability and omit optional figures you cannot support. Cite every catalogue entry used;
+raw source returns are percentages even when their JSON keys are periods such as 5y. Preserve cumulative versus
+annualised, fund versus benchmark/peer, currency, dates and pricing basis. Do not convert units or scale fund
+sizes mentally: quote the source's units or use the Python arithmetic request.
 For composition, use fund_composition and fund_context: top stocks, industries/sectors, geography and market
-capitalisation. Describe available index/benchmark tables as benchmark composition, not actual fund weights.
+capitalisation. Read scope excerpts and explanatory notes, not just column labels. "Index" alone does not
+establish benchmark-only scope. Where the source note identifies the tables as fund composition, describe
+factsheet-reported composition. Keep explicitly benchmark-only tables separate. If attribution conflicts,
+explain the narrow ambiguity and the available breakdown, rather than confidently relabelling it or denying
+that composition exists.
 Do not say all composition is missing merely because the tables are index-labelled. If a table is absent,
 identify that specific gap. Explain how the documented replication strategy relates to index exposures without
 assuming identical holdings. Preserve table dates, source scope and weights; do not estimate missing weights.
@@ -131,7 +142,7 @@ async def answer_question(catalogue: dict, question: str, history: list[dict] | 
         issues.append('unknown_source_reference')
     if out.status == 'answered' and not refs:
         issues.append('missing_source_reference')
-    if check_numbers(prose, {ref: catalogue[ref] for ref in refs if ref in catalogue}):
+    if check_numbers(prose, numerical_evidence(catalogue, refs)):
         issues.append('unsupported_number_or_unit')
     if re.search(r'<[^>]+>|!?\[[^\]]*\]\([^)]*\)|https?://|```', prose):
         issues.append('unapproved_link_or_active_content')
@@ -141,8 +152,14 @@ async def answer_question(catalogue: dict, question: str, history: list[dict] | 
                    'missing_source_reference': 'supporting sources were not identified',
                    'unsupported_number_or_unit': 'a numerical claim did not match its cited evidence',
                    'unapproved_link_or_active_content': 'the response contained an unapproved link or active content'}
-        return ('The answer was withheld because ' + '; '.join(reasons[issue] for issue in issues)
-                + '. The prepared fund evidence remains available. Please try a more specific question.')
+        overview = source_overview(catalogue) if issues == ['unsupported_number_or_unit'] else None
+        if overview is None:
+            return ('The answer was withheld because ' + '; '.join(reasons[issue] for issue in issues)
+                    + '. The prepared fund evidence remains available.')
+        answer, refs = overview
+        out = out.model_copy(update={'answer': answer, 'limitations': [
+            'One numerical detail in the AI draft could not be confirmed and was withheld. '
+            'This partial overview uses the prepared source fields; it is not the full requested analysis.']})
     text = escape(specific_limits(out.answer), quote=False)
     limits = [specific_limits(item) for item in out.limitations]
     if any(limits):

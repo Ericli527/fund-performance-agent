@@ -230,7 +230,8 @@ def test_tavily_current_dates_are_optional_and_explicit(monkeypatch):
 
 def test_numeric_validation_reason_is_specific_without_logging_private_answer(caplog):
     text = asyncio.run(answer_question(CATALOGUE, 'Fees?', run=FakeRun(ANSWER | {'answer': 'Private draft: 99.99%.'})))
-    assert 'a numerical claim did not match its cited evidence' in text
+    assert 'numerical detail in the AI draft could not be confirmed' in text
+    assert 'Source-based fund overview' in text and '99.99' not in text
     assert 'unsupported_number_or_unit' in caplog.text and 'Private draft' not in caplog.text
 
 

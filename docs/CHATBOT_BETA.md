@@ -59,8 +59,10 @@ weights are inferred from index membership. Tables absent from the source remain
 Scanned/image-only PDFs still depend on the existing document reader; no OCR was added.
 
 The supplied Fidelity photo was visually inspected: its percentage columns are labelled
-**Index**, and percentages appear in headings rather than each row. This explains why the
-old fund-only/inline-percentage checks could discard them. The private original PDF and live
+**Index**, but the explanatory note describes the tables as fund composition. Extraction must
+read both together, retain the note as a source-matched scope excerpt, and avoid confidently
+reclassifying these tables from one column label. Percentages appear in headings rather than
+each row; the earlier inline-percentage check could discard valid rows. The private original PDF and live
 extraction trace were not available for reproducing that particular run. Synthetic mocked
 fixtures exercise the same layout and extraction-to-chat flow.
 
@@ -131,3 +133,14 @@ non-confidential documents should be supplied, as in the existing application.
 
 Normal CI uses mocked responses. Live compatibility and answer quality require a
 separate, bounded check in an environment with authorised API access.
+
+### Numerical validation and partial overviews
+
+Chat adapts known extracted return/risk and peer-return fields to their schema percentage units
+within the cited source only. A number stored as `{"5y": 88.3}` must not be rejected solely
+because the answer writes `88.3%`. This changes no financial values or global number guard.
+If only numerical validation fails, the whole generated draft is discarded and replaced by
+a clearly labelled, source-based partial overview of identity, objective, benchmark, charges
+and supplied peer identity/eligibility terms. It does not invent an investment judgement,
+claim to answer a more specific question fully, or retain any failed model claim. Source,
+security or active-content failures still suppress the response. No retry/model call is added.

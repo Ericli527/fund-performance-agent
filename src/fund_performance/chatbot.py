@@ -138,9 +138,11 @@ async def _prepare_evidence(entries: list[dict], benchmark: dict, out_root: Path
         catalogue['fund_composition'] = {
             'fund': context.get('portfolio_exposures'),
             'benchmark': context.get('benchmark_composition'),
+            'scope_unconfirmed': context.get('unattributed_composition'),
             'as_of_date': context.get('document_date') or profile.as_of_date.isoformat(),
-            'interpretation': 'Benchmark/index weights describe the index, not independently verified fund holdings. '
-                              'Explain available tables and their scope; never say all composition is absent when index tables exist.'}
+            'interpretation': 'Use headings and source scope excerpts together. Describe fund-labelled tables as factsheet-reported '
+                              'composition, not independently verified holdings. Index is not by itself proof of benchmark-only scope. '
+                              'Keep explicitly benchmark-only tables separate. Explain conflicting attribution briefly; do not discard their figures.'}
         catalogue['methodology'] = GLOSSARY.copy()
         catalogue['service_scope'] = {'identity': 'AI fund evidence assistant (Beta)',
             'limits': 'Bounded Python cash illustrations are supported. No new investment ratings, on-demand web searches, full report, human approval or independent quality review in chat.'}

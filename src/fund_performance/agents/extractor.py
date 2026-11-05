@@ -42,8 +42,14 @@ hypothetical market-close NAV used to compare with the index ("Fund PNAV"); "ind
 - exposures: capture reported top stocks/holdings, industry/sector, geographic/country, market-cap,
   currency, asset-class and concentration breakdowns from factsheet/KID tables. Use categories holdings,
   sectors, regions, market_cap, currencies, asset_classes or concentration. Preserve benchmark/index tables
-  too, with subject=benchmark; never relabel their weights as fund holdings. Use subject=fund only when
-  the table identifies fund weights, otherwise unknown. Quote one exact row, including the name and value,
+  too, with subject=benchmark when explicitly identified as benchmark composition. Read headings, column
+  labels AND explanatory notes together. The word "Index" alone in an index-fund factsheet does not establish
+  that a table is benchmark-only. If the explanatory note says the tables describe the fund's composition or
+  investments, retain this as factsheet-reported fund composition (subject=fund) and quote that note exactly
+  in scope_quote. Do not claim independently verified holdings. For conflicting/unclear attribution use
+  subject=unknown with the relevant scope_quote, rather than inventing certainty or dropping the table.
+  For market_cap capture the actual printed size bands and their weights, not just totals/unclassified rows.
+  Keep printed band names (e.g. >10bn) exactly; do not insert a currency symbol absent from the row. Quote one exact row, including the name and value,
   not the entire multi-row table. A percentage sign may appear only in the table heading; retain the printed
   row unchanged. A weight is optional when not stated. Never infer holdings or weights from index membership.
 - document_summary: a source-aware narrative of material fund identity, strategy, portfolio, returns, risk,
@@ -130,6 +136,7 @@ class ExtractedExposure(_Strict):
     name: str
     weight_pct: float | None = None
     quote: str
+    scope_quote: str | None = None
     subject: Literal["fund", "benchmark", "peer", "unknown"] = "unknown"
 
 
