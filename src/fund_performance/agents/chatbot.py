@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from fund_performance.agents.base import RunFn, model_kwargs, run_structured, run_with_fresh_client
 from fund_performance.communication import COMMUNICATION_STYLE
-from fund_performance.chat_presentation import FOOTER, specific_limits
+from fund_performance.chat_presentation import FOOTER, specific_limits, additional_context
 from fund_performance.chat_validation import numerical_evidence, source_overview
 from fund_performance.number_guard import check_numbers
 from fund_performance.chat_calculations import InvestmentValueRequest, investment_value, render_investment_value
@@ -32,7 +32,9 @@ sizes mentally: quote the source's units or use the Python arithmetic request.
 For composition, use fund_composition and fund_context: top stocks, industries/sectors, geography and market
 capitalisation. Read scope excerpts and explanatory notes, not just column labels. "Index" alone does not
 establish benchmark-only scope. Where the source note identifies the tables as fund composition, describe
-factsheet-reported composition. Keep explicitly benchmark-only tables separate. If attribution conflicts,
+factsheet-reported composition: "The factsheet reports ...". Do not manufacture a fund-versus-index
+warning from the word Index alone when the explanatory note identifies fund composition. Keep explicitly
+benchmark-only tables separate. If source attribution is genuinely unresolved and material,
 explain the narrow ambiguity and the available breakdown, rather than confidently relabelling it or denying
 that composition exists.
 Do not say all composition is missing merely because the tables are index-labelled. If a table is absent,
@@ -47,7 +49,10 @@ exposures; do not require proven fund-return attribution to provide useful quali
 sources survived, use research_availability.message and search diagnostics to distinguish failed retrieval,
 failed summaries and sources excluded by validation. Explain the actual supplied reason and remedy, rather
 than implying no research was attempted or no relevant events occurred. Never invent news to fill a gap.
-Evidence limits should identify specific missing information, date coverage, comparability or uncertainty.
+Limitations are optional: use an empty list when there is no additional material qualification.
+Include only specific gaps that change what the user can conclude, with a short practical explanation.
+Do not repeat anything already explained in the answer, particularly table-label caveats. Preserve genuine
+unresolved contradictions, missing data, date coverage and comparability limits; explain each once in plain English.
 Do not repeat generic AI-extraction verification warnings in the answer or limitations: Python adds one final
 AI/professional-review notice. Preserve material caveats such as provisional recovered figures, incompatible
 returns and illustrative market-close prices that are not dealing prices. Do not call data verified merely
@@ -166,9 +171,9 @@ async def answer_question(catalogue: dict, question: str, history: list[dict] | 
             'One numerical detail in the AI draft could not be confirmed and was withheld. '
             'This partial overview uses the prepared source fields; it is not the full requested analysis.']})
     text = escape(specific_limits(out.answer), quote=False)
-    limits = [specific_limits(item) for item in out.limitations]
+    limits = additional_context(specific_limits(out.answer), out.limitations)
     if any(limits):
-        text += '\n\n**Evidence limits:** ' + ' '.join(escape(item, quote=False) for item in limits if item)
+        text += '\n\n**Important context:** ' + ' '.join(escape(item, quote=False) for item in limits if item)
     if refs:
         labels = {'fund_identity': 'Fund identity and charges', 'fund_context': 'Fund context brief',
                   'fund_composition': 'Fund and benchmark composition', 'research_availability': 'Research coverage',
