@@ -1020,7 +1020,7 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             chat_question = gr.Textbox(label='Ask about this fund', lines=2, interactive=False,
                                        placeholder='How closely has the fund followed its benchmark?')
             gr.Examples(examples=[[question] for question in OVERSIGHT_QUESTIONS], inputs=chat_question,
-                        label='Questions for investment oversight', cache_examples=False)
+                        label='Questions for investment oversight', cache_examples=False, api_visibility='private')
             chat_send = gr.Button('Send question', interactive=False)
             chat_status = gr.Markdown()
             clear_chat = gr.Button('New conversation', size='sm')

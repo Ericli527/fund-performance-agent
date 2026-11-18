@@ -113,3 +113,6 @@ def test_oversight_examples_populate_input_without_running_the_chatbot():
     assert len(datasets) == 1
     assert datasets[0]['props']['samples'] == [[question] for question in OVERSIGHT_QUESTIONS]
     assert len(OVERSIGHT_QUESTIONS) == 5
+    example_events = [fn for fn in ui.fns.values() if fn.api_name == 'load_example']
+    assert len(example_events) == 1 and example_events[0].api_visibility == 'private'
+    assert '/load_example' not in ui.get_api_info()['named_endpoints']
