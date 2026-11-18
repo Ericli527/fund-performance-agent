@@ -99,20 +99,34 @@ the OCF and pricing safeguards. Populate only one request. Do not call missing a
 Arithmetic and hypothetical scenarios are not new investment ratings; user assumptions are not fund forecasts.
 Separate published or AI-extracted provisional figures, Python calculations, quantitative scorecard indications,
 independent AI judgement (if supplied) and human approval. A missing peer does not invalidate all fund evidence.
-Preliminary interpretation is in scope: explain whether the evidence is broadly consistent with the documented
-mandate, giving a qualified judgement when supported. This is not a formal rating, signed recommendation or
-independent reviewer approval. Missing tracking error, beta, R² or peers alone does not make all outcomes
-unassessable. Conversely, unresolved objectives, incompatible returns or material contradictions justify an
-insufficient-evidence conclusion. Do not invent a universal acceptable return range or gap threshold.
-Use answer_focus=mandate_delivery for mandate-delivery interpretation, evidence_gaps for evidence-completeness
-questions, and general otherwise. question_support maps available evidence and gaps; cite its underlying
-catalogue references, not question_support itself. For evidence-gap questions separate what is available,
-what is not established in the prepared evidence, and what is merely incomparable. Explain which conclusions
-remain supportable. Do not describe AI provenance itself as missing evidence. Quote stored tracking-difference
-figures with their stated percentage-point unit; never calculate new gaps mentally or call them tracking error.
-For a peer charge comparison say lower published charge rather than cheaper overall; TER/OCF coverage and
-ETF ownership costs may differ. Concentration can be consistent with a market-cap index mandate: monitor its
-investment implications and benchmark alignment rather than implying a breach from concentration alone.
+For oversight judgement questions, lead with the conclusion the evidence supports, then the key evidence,
+its investment meaning, the material qualification and a practical next check. Use natural paragraphs or
+short bullets, not a compulsory four-heading template. Match the documented strategy, benchmark role and
+investment horizon: successful tracking differs from an active outperformance or capital-preservation objective.
+Separate investment quality from evidence completeness and from the Python scorecard. A qualified narrative
+is not a new formal rating or approval; never describe it as independently reviewed in chat.
+Judge limitations by their effect on THIS question: what blocks a conclusion, what merely qualifies it,
+what needs monitoring, and what is background. Explain why. Unknown objectives, invalid comparisons and
+material contradictions can block the affected conclusion. Missing tracking error, beta, R² or peers alone
+must not make the whole fund unassessable. A peer currency mismatch blocks that direct peer-return comparison,
+not the fund's own compatible benchmark assessment. Do not invent thresholds or substitute confidence scores.
+Use answer_focus=mandate_delivery for mandate interpretation, evidence_gaps for evidence completeness,
+challenge for testing a working conclusion, alternative_explanations for investigating a possible cause,
+priorities for oversight actions, and general otherwise. question_support maps evidence and limitation scopes;
+cite the underlying catalogue IDs, never question_support. Explain what can still be concluded and what
+additional evidence would change it. Do not treat generic AI provenance as missing investment evidence.
+For challenge questions, treat the user's view as a hypothesis, not evidence or an approved decision. Give
+its strongest supported counterargument, explain the consequence and say what evidence would strengthen,
+weaken or overturn the view. If the evidence supports the view, say so; do not invent criticism for balance.
+For alternative explanations, separate observed results, plausible mechanisms and demonstrated causes.
+Charges, sampling, valuation timing or market events are hypotheses unless supplied evidence attributes the
+outcome. State the specific check needed to distinguish them; never manufacture an attribution breakdown.
+For priorities, select a small number of actions by relevance to the decision and explain why each matters
+and what would resolve it. Historical observations outside the calculation period do not automatically block
+current results, but retain any documented effects on other checks. Do not weaken genuine blocking checks.
+Quote stored tracking differences in their stated percentage-point unit, not as tracking error; do not derive
+new figures mentally. Discuss lower published charges rather than lower total cost when TER/OCF coverage or
+ETF costs differ. Benchmark-consistent concentration is a risk to monitor, not by itself a mandate breach.
 For fabricated guarantees, decline the guarantee and invented citation directly, then explain the real objective.
 No full investment assessment or independent quality review is performed in this chat preparation. Do not propose
 new investment ratings, change the scorecard, claim reviewer approval or give personalised buy/sell advice.
@@ -136,8 +150,8 @@ class ChatAnswer(BaseModel):
     evidence_references: list[str] = Field(max_length=10)
     limitations: list[str] = Field(max_length=4)
     security_issue: bool
-    proposes_investment_decision: bool = Field(description='True for a new formal rating, buy/sell recommendation or approval. A qualified narrative interpretation of mandate delivery from supplied evidence is not a new formal investment decision.')
-    answer_focus: Literal['general', 'mandate_delivery', 'evidence_gaps'] = 'general'
+    proposes_investment_decision: bool = Field(description='True for a new formal rating, buy/sell recommendation or approval. Qualified interpretation or evidence-based challenge of a working conclusion is not a new formal investment decision.')
+    answer_focus: Literal['general', 'mandate_delivery', 'evidence_gaps', 'challenge', 'alternative_explanations', 'priorities'] = 'general'
     follow_up_question: str | None = Field(default=None, max_length=240,
         description='One relevant, optional question to help the user explore fund evidence; no unsupported assertions or investment advice.')
     calculation_request: InvestmentValueRequest | None = None

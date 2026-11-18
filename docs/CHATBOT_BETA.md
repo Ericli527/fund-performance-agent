@@ -231,3 +231,42 @@ need the financial reminder. Substantive responses end with one short note:
 It is a single Markdown line and may wrap naturally on a narrow screen; no nowrap styling
 or horizontal overflow is introduced. Focused mocked checks validate rendering and safeguards,
 not live model wording or a browser visual inspection.
+
+
+## Oversight reasoning: Stage 1 and initial Stage 2
+
+For judgement questions, the existing chatbot connects a supported conclusion to its evidence,
+investment meaning, material qualification and practical next check. It does not force every
+answer into a four-heading template. The documented strategy, benchmark role and investment
+horizon guide the interpretation; there is no universal acceptable return-gap threshold.
+
+The bounded evidence map prioritises available periods matching the documented horizon and
+identifies which part of an assessment a limitation affects. Missing tracking error qualifies
+tracking-consistency analysis, not automatically every return or mandate conclusion. Currency
+mismatches constrain the affected peer comparison; existing benchmark-validation failures
+remain blocking for those comparisons. Published charges and own outcomes remain describable
+without peers, without inventing relative competitiveness. Python supplies availability/scope
+metadata, not investment ratings or a new numerical materiality model.
+
+Three additional response focuses support a small Stage 2 question set:
+
+- **Challenge:** test a working conclusion against the strongest supported counterargument.
+  Explain what would strengthen, weaken or overturn it. User statements remain hypotheses;
+  do not automatically agree, disagree or invent negative evidence for balance.
+- **Alternative explanations:** distinguish observed outcomes, plausible mechanisms and
+  demonstrated causes. Identify what would test timing, charge or sampling explanations;
+  never manufacture a performance-attribution breakdown.
+- **Priorities:** select a small number of oversight actions and explain their relevance and
+  resolution. Retain historical technical records without treating their age alone as proof
+  of a current-period calculation error. Genuine blocking checks remain in force.
+
+Five example questions are selectable in Chat mode, covering Stage 1 interpretation/gaps and
+these three Stage 2 modes. Selecting one fills the question box; only sending starts an answer.
+No extra agent, model call, automatic search, revision loop or sign-off is introduced. If a
+numerical claim fails, the invalid draft is discarded and the relevant focus shows available
+source evidence and unresolved checks; it does not invent a replacement judgement.
+
+Formal investment ratings/approval remain in Reporting and human sign-off. Shared report
+editing, a persistent review working record and chat-to-report drafting are later stages,
+not part of this change. Focused tests use synthetic evidence and mocked model responses;
+they verify handling and safeguards, not live investment-judgement quality or browser layout.

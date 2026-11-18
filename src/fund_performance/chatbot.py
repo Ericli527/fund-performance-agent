@@ -21,6 +21,13 @@ from fund_performance.io import read_json, read_peers
 from fund_performance.precedence import apply_precedence
 
 REPORTING_MODE, CHAT_MODE = 'Fund Review (Reporting)', 'AI Chatbot (Beta)'
+OVERSIGHT_QUESTIONS = [
+    'Is the fund broadly delivering its mandate? Explain the evidence, material qualification and next step.',
+    'What can we conclude now, and which evidence gaps actually affect that conclusion?',
+    'What is the strongest evidence against a favourable assessment of this fund?',
+    'Could valuation timing or charges explain the return gap, and what evidence would test that?',
+    'Which two issues matter most before sign-off, and why?',
+]
 
 
 def ai_disabled() -> bool:

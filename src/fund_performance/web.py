@@ -936,7 +936,7 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
         gr.HTML("<div class='fp-header'><h1>Fund Performance Review</h1>"
                 "<p>Ask a question about a fund and review the evidence.</p></div>")
         gr.HTML(f"<div class='fp-notice' role='note'>{PUBLIC_DATA_HTML}</div>")
-        from fund_performance.chatbot import REPORTING_MODE, CHAT_MODE
+        from fund_performance.chatbot import REPORTING_MODE, CHAT_MODE, OVERSIGHT_QUESTIONS
         application_mode = gr.Radio([REPORTING_MODE, CHAT_MODE], value=REPORTING_MODE, label='Application mode')
         review_type = gr.Radio([(_card(v), v) for v in REVIEW_TYPES], value=DEFAULT_REVIEW, show_label=False,
                                container=False, elem_classes="fp-cards", label="Question type")
@@ -1019,6 +1019,8 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             conversation = gr.Chatbot(label='Fund conversation', height=400, sanitize_html=True)
             chat_question = gr.Textbox(label='Ask about this fund', lines=2, interactive=False,
                                        placeholder='How closely has the fund followed its benchmark?')
+            gr.Examples(examples=[[question] for question in OVERSIGHT_QUESTIONS], inputs=chat_question,
+                        label='Questions for investment oversight', cache_examples=False)
             chat_send = gr.Button('Send question', interactive=False)
             chat_status = gr.Markdown()
             clear_chat = gr.Button('New conversation', size='sm')
