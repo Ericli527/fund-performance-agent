@@ -1,8 +1,24 @@
 """One provenance notice; evidence limits describe specific gaps, not repeated AI boilerplate."""
 import re
 
-FOOTER = ('*Data extracted using AI. AI explanation for human review, not professional investment advice; '
-          'analyst judgement and sign-off are required.*')
+FOOTER = '*AI-assisted information—not investment advice. Analyst review required.*'
+NAV_EXPLANATION = ("NAV (net asset value) per unit is the value of a fund's assets, less its liabilities, "
+                   "divided by its units. It underlies the fund's dealing price at its stated valuation time.")
+PNAV_EXPLANATION = ("Here, PNAV is an illustrative estimate of the fund's value at the index's market close, "
+                    "used to compare returns at matching times. It is not a price investors can deal at.")
+
+
+def conversational_reply(question: str) -> str | None:
+    """Exact social turns only: mixed greetings/questions still require the normal evidence checks."""
+    text = question.strip().casefold()
+    if re.fullmatch(r'(?:hi|hello|hey)(?: there)?[!.? ]*|good (?:morning|afternoon|evening)[!.? ]*', text):
+        return ("Hello! I can help explain the prepared fund evidence, explore performance, fees or risks, "
+                "and calculate simple investment illustrations. What would you like to explore?")
+    if re.fullmatch(r'(?:thanks|thank you|many thanks|thanks very much)[!. ]*', text):
+        return "You're welcome! Let me know if you'd like to explore anything else about the fund."
+    return None
+
+
 _GENERIC = re.compile(
     r'^(?:AI[- ]extracted (?:figures|data|information)|(?:the |these )?(?:extracted )?(?:figures|data|information)) '
     r'(?:(?:are |remain )?provisional(?: and )?)?'

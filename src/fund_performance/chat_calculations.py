@@ -5,6 +5,8 @@ from decimal import Decimal, ROUND_HALF_UP, localcontext
 from html import escape
 from typing import Literal
 
+from fund_performance.chat_presentation import NAV_EXPLANATION, PNAV_EXPLANATION
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -126,7 +128,8 @@ def render_investment_value(result: dict) -> str:
     period = f"{result['years']} years" + (f" to {escape(result['as_of_date'])}" if result.get('as_of_date') else '')
     kind = 'cumulative' if result['return_kind'] == 'cum' else 'annualised'
     basis = 'dealing-NAV' if result['pricing_basis'] == 'fund_nav' else 'illustrative market-close PNAV'
-    text = (f"Using the **{result['return_pct']:g}% {kind} {basis} return** over {period}, "
+    explanation = NAV_EXPLANATION if result['pricing_basis'] == 'fund_nav' else PNAV_EXPLANATION
+    text = explanation + '\n\n' + (f"Using the **{result['return_pct']:g}% {kind} {basis} return** over {period}, "
             f"**{money('principal')} would have grown to about {money('ending_value')}**, "
             f"a {'gain' if Decimal(result['gain']) >= 0 else 'loss'} of **{symbol}{abs(Decimal(result['gain'])):,.2f}**. "
             'The fund’s ongoing charge is already reflected in NAV returns, so it is not deducted again.')

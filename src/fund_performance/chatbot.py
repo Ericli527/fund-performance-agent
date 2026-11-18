@@ -247,6 +247,11 @@ async def reply(selected: list[dict], benchmark: dict, state: dict | None, quest
     history = list(state.get('history') or [])
     if not question.strip() or len(question) > MAX_QUESTION:
         return state, history, 'Please ask a fund question of up to 2,000 characters.'
+    from fund_performance.chat_presentation import conversational_reply
+    if social := conversational_reply(question):
+        history = (history + [{'role': 'user', 'content': escape(question, quote=False)},
+                              {'role': 'assistant', 'content': social}])[-40:]
+        return state | {'history': history}, history, 'Response complete.'
     if ai_disabled() or (run is None and not api_key_present()):
         return state, history, 'AI chat is unavailable in this environment. The prepared evidence remains available.'
     if refused := limits.start():

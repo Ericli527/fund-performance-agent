@@ -201,3 +201,30 @@ Focused acceptance questions (mocked representative inputs; not live-model quali
 Normal answers still use one structured model request with existing model settings. The
 support map adds bounded context, not a search or review loop. Live response quality and
 before/after token costs have not been benchmarked in the development environment.
+
+
+### Conversational explanations
+
+Exact greetings and thanks are handled locally, without citations, model calls or AI-run budget
+usage. Mixed messages such as "Hi, what does the fund charge?" still use the normal financial
+answer path and its source checks. Input-change/session checks continue to apply.
+
+For metric questions, the existing chatbot first explains what the measure means, then gives
+its sourced figure, period and pricing basis, and interprets it in plain English. NAV is the
+net asset value per unit underlying the dealing price at the stated valuation time. PNAV in
+this app is an illustrative market-close estimate for comparison, not a dealing price. Cash
+illustrations also explain their pricing term before presenting the Python-calculated result.
+The shared PDF glossary, financial formulas, model settings and independent-review workflow
+are unchanged.
+
+The same structured answer may supply one optional guiding question, for example offering a
+simple illustration or a supported benchmark comparison. It is checked for unsupported
+numbers, active content and unapproved links; a failed optional question is omitted without
+suppressing a valid answer. The question is not a second model call. Greetings/thanks do not
+need the financial reminder. Substantive responses end with one short note:
+
+*AI-assisted information—not investment advice. Analyst review required.*
+
+It is a single Markdown line and may wrap naturally on a narrow screen; no nowrap styling
+or horizontal overflow is introduced. Focused mocked checks validate rendering and safeguards,
+not live model wording or a browser visual inspection.
