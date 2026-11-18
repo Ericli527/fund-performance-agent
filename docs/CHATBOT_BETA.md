@@ -211,8 +211,11 @@ answer path and its source checks. Input-change/session checks continue to apply
 
 For metric questions, the existing chatbot first explains what the measure means, then gives
 its sourced figure, period and pricing basis, and interprets it in plain English. NAV is the
-net asset value per unit underlying the dealing price at the stated valuation time. PNAV in
-this app is an illustrative market-close estimate for comparison, not a dealing price. Cash
+net asset value per unit underlying the dealing price at the stated valuation time. Lead with
+**fund dealing value**, introducing NAV in brackets only where useful. Likewise, lead with
+**estimated market-close value** for PNAV, which is an illustrative comparison estimate, not
+a dealing price. Ordinary investment-growth answers use the fund dealing return and do not
+introduce PNAV unless the question needs a market-close or pricing-time comparison. Cash
 illustrations also explain their pricing term before presenting the Python-calculated result.
 The shared PDF glossary, financial formulas, model settings and independent-review workflow
 are unchanged.

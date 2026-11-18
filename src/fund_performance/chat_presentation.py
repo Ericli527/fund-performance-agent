@@ -2,10 +2,10 @@
 import re
 
 FOOTER = '*AI-assisted information—not investment advice. Analyst review required.*'
-NAV_EXPLANATION = ("NAV (net asset value) per unit is the value of a fund's assets, less its liabilities, "
-                   "divided by its units. It underlies the fund's dealing price at its stated valuation time.")
-PNAV_EXPLANATION = ("Here, PNAV is an illustrative estimate of the fund's value at the index's market close, "
-                    "used to compare returns at matching times. It is not a price investors can deal at.")
+NAV_EXPLANATION = ("The fund dealing value is the value per unit used as the basis for buying or selling "
+                   "at the fund's valuation time. Its technical name is net asset value (NAV).")
+PNAV_EXPLANATION = ("The estimated market-close value (PNAV) estimates the fund's value when its index closes, "
+                    "so returns can be compared at the same time. Investors cannot buy or sell at this estimate.")
 
 
 def conversational_reply(question: str) -> str | None:

@@ -50,7 +50,7 @@ def test_metric_definition_precedes_figures_and_one_useful_question_is_shown():
     assert text.endswith(FOOTER) and len(FOOTER) < 90 and '\n' not in FOOTER
     assert 'what it measures' in INSTRUCTIONS
     assert NAV_EXPLANATION in INSTRUCTIONS and PNAV_EXPLANATION in INSTRUCTIONS
-    assert 'not a price investors can deal at' in INSTRUCTIONS
+    assert 'Investors cannot buy or sell at this estimate' in INSTRUCTIONS
     assert len(runner.prompts) == 1 and json.loads(runner.prompts[0])['question_untrusted'].startswith('Explain')
 
 
@@ -74,6 +74,8 @@ def test_calculated_cash_answer_defines_nav_and_adds_a_safe_question():
                     'calculation_request': {'principal': 10000, 'currency': 'GBP', 'years': 5},
                     'follow_up_question': 'Would you like to include a separate annual platform fee?'}
     text = asyncio.run(answer_question(catalogue, 'What would £10,000 invested for 5 years be worth?', run=FakeRun(out)))
-    assert text.index('NAV (net asset value)') < text.index('£18,830.00')
+    assert text.startswith('The fund dealing value')
+    assert text.index('net asset value (NAV)') < text.index('£18,830.00')
+    assert 'PNAV' not in text
     assert 'not deducted again' in text and out['follow_up_question'] in text
     assert text.count(FOOTER) == 1

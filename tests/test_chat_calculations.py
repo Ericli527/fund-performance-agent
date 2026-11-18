@@ -33,7 +33,8 @@ def test_screenshot_question_gets_cash_value_without_double_charging_ocf(catalog
     result = investment_value(catalogue, request(), QUESTION)
     assert result['ending_value'] == '18830.00' and result['gain'] == '8830.00'
     text = render_investment_value(result)
-    assert '£18,830.00' in text and '88.3% cumulative dealing-NAV' in text
+    assert '£18,830.00' in text and '88.3% cumulative return' in text
+    assert 'fund dealing value' in text and 'PNAV' not in text
     assert 'not deducted again' in text and 'No separate platform or service fee has been assumed' in text
     assert '2026-09-30' in text and 'not a live account balance or a forecast' in text
     assert catalogue == original
@@ -90,7 +91,10 @@ def test_calculator_never_replaces_missing_fund_return_with_benchmark_or_pnav(ca
         investment_value(catalogue, request(pricing_basis='fund_pnav'), QUESTION)
     result = investment_value(catalogue, request(pricing_basis='fund_pnav'), 'Illustrate £10,000 over 5 years using market-close PNAV.')
     assert result['ending_value'] == '19090.00'
-    assert 'not a price at which investors deal' in render_investment_value(result)
+    text = render_investment_value(result)
+    assert text.startswith('The estimated market-close value (PNAV)')
+    assert 'Investors cannot buy or sell at this estimate' in text
+    assert '£19,090.00' in text
 
 
 @pytest.mark.parametrize('question,options', [

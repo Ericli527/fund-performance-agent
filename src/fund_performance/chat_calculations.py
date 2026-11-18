@@ -88,7 +88,7 @@ def investment_value(catalogue: dict, request: InvestmentValueRequest, question:
     if periods and request.years not in periods:
         raise ValueError('The requested period does not match the selected return. Please use an available one-, three- or five-year period.')
     if request.pricing_basis == 'fund_pnav' and not re.search(r'PNAV|market.close', user_text, re.I):
-        raise ValueError('For an investment value, use the dealing-NAV return. A market-close PNAV estimate needs an explicit request and is not a dealing price.')
+        raise ValueError('For an investment value, use the fund dealing return (NAV). An estimated market-close value (PNAV) needs an explicit request and is not a dealing price.')
     fee = request.additional_annual_fee_pct
     fee_unconfirmed = False
     if fee is not None:
@@ -127,12 +127,12 @@ def render_investment_value(result: dict) -> str:
     money = lambda key: symbol + f"{Decimal(result[key]):,.2f}"
     period = f"{result['years']} years" + (f" to {escape(result['as_of_date'])}" if result.get('as_of_date') else '')
     kind = 'cumulative' if result['return_kind'] == 'cum' else 'annualised'
-    basis = 'dealing-NAV' if result['pricing_basis'] == 'fund_nav' else 'illustrative market-close PNAV'
+    basis = 'fund dealing value' if result['pricing_basis'] == 'fund_nav' else 'estimated market-close value'
     explanation = NAV_EXPLANATION if result['pricing_basis'] == 'fund_nav' else PNAV_EXPLANATION
-    text = explanation + '\n\n' + (f"Using the **{result['return_pct']:g}% {kind} {basis} return** over {period}, "
+    text = explanation + '\n\n' + (f"Using the **{result['return_pct']:g}% {kind} return**, based on the **{basis}**, over {period}, "
             f"**{money('principal')} would have grown to about {money('ending_value')}**, "
             f"a {'gain' if Decimal(result['gain']) >= 0 else 'loss'} of **{symbol}{abs(Decimal(result['gain'])):,.2f}**. "
-            'The fund’s ongoing charge is already reflected in NAV returns, so it is not deducted again.')
+            'The fund’s ongoing charge is already reflected in this fund return, so it is not deducted again.')
     if result['additional_annual_fee_pct'] is not None:
         text += (f"\n\nThis includes your separate **{result['additional_annual_fee_pct']:g}% annual service fee**, "
                  f"modelled as a year-end percentage deduction: an illustrative reduction of **{money('additional_fee_impact')}** "
@@ -142,8 +142,6 @@ def render_investment_value(result: dict) -> str:
                  'Please confirm the provider’s annual percentage and I can include it; I have not assumed a fee.')
     else:
         text += '\n\nNo separate platform or service fee has been assumed. If you mean an additional service charge, provide its annual percentage and I can include it.'
-    if result['pricing_basis'] == 'fund_pnav':
-        text += ' PNAV is a market-close comparison estimate, not a price at which investors deal.'
     return (text + '\n\nThis illustration follows the supplied return’s income treatment, assumes no further contributions or withdrawals, and excludes investor-level taxes. '
             'It uses the available review-period figures, not a live account balance or a forecast.'
             f"\n\n**Sources:** Prepared fund return [{escape(result['source_reference'])}]; Python cash-value calculation.")
