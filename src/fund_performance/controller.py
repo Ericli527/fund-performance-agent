@@ -21,7 +21,7 @@ The extractor runs before the data checks because the repeated-price check compa
 import asyncio
 from dataclasses import asdict, dataclass, field
 from typing import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import re
 from pathlib import Path
@@ -709,6 +709,15 @@ async def _run(folder: Path, question: str, run_dir: Path, offline: bool, t: Thr
         flags += doc_flags
         text_log += doc_log
         research_step.outputs["benchmark_documents_kept"] = len(doc_sources)
+
+    if not offline and s.research.enabled:
+        from fund_performance.shibui import market_context
+        # Daily closing observations on the review date itself can follow a fund's valuation time.
+        external = await market_context(profile.benchmark_name, profile.as_of_date - timedelta(days=1),
+                                        historical=True)
+        if external:
+            vetted += with_timing([external], profile)
+            text_log.append('Shibui MCP supplied SPY market context for the assessment')
 
     # Keep qualitative judgement in a separate artifact; it never changes the scorecard or the facts used by reports.
     step = log.start("investment_assessment", ["scorecard", "mandate", "vetted research"], announce=not offline)

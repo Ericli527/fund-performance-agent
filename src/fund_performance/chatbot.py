@@ -19,6 +19,7 @@ from fund_performance.glossary import GLOSSARY
 from fund_performance.intake import read_documents, self_check, write_inputs
 from fund_performance.io import read_json, read_peers
 from fund_performance.precedence import apply_precedence
+from fund_performance.shibui import CHAT_REF
 
 REPORTING_MODE, CHAT_MODE = 'Fund Review (Reporting)', 'AI Chatbot (Beta)'
 OVERSIGHT_QUESTIONS = [
@@ -75,6 +76,8 @@ def brief(bundle: dict) -> str:
             text += ' ' + research.get('message', 'Some searches returned no usable dated source; coverage is incomplete.')
     else:
         text += '\n\n**Recent research:** Not run (AI/research disabled, unavailable or not requested).'
+    if external := bundle['catalogue'].get(CHAT_REF):
+        text += '\n\n**US equity market context:** ' + external['summary']
     text += '\n\nPreparation does not run an independent investment assessment, quality review or PDF reporting.'
     from fund_performance.chat_presentation import FOOTER
     text += '\n\n' + FOOTER
@@ -166,7 +169,7 @@ def with_research(bundle: dict, research: dict) -> dict:
     result = copy.deepcopy(bundle)
     catalogue = result['catalogue']
     for key in list(catalogue):
-        if key.startswith('research:'):
+        if key.startswith('research:') or key == CHAT_REF:
             del catalogue[key]
     for i, source in enumerate(research['sources'], 1):
         catalogue[f'research:{i}'] = source
@@ -231,6 +234,15 @@ async def prepare_session(selected: list[dict], benchmark: dict, state: dict, li
             else:
                 bundle = await asyncio.wait_for(prepare_evidence(selected, benchmark, Path(output), **options),
                     timeout=load_settings().timeouts_seconds.extractor * 4)
+        if not matches(state, selected, benchmark):
+            return None, 'Inputs changed during preparation. Prepare the new fund evidence before chatting.'
+        if not ai_disabled() and load_settings().research.enabled:
+            from fund_performance.chat_research import current_day
+            from fund_performance.shibui import market_context
+            external = await market_context(bundle['profile'].get('benchmark_name'), current_day(), historical=False)
+            if external:
+                bundle['catalogue'][CHAT_REF] = external
+                bundle['summary'] = brief(bundle)
         if not matches(state, selected, benchmark):
             return None, 'Inputs changed during preparation. Prepare the new fund evidence before chatting.'
         return state | {'bundle': bundle, 'history': [], 'usage': (state.get('usage') or []) + calls}, bundle['summary']
