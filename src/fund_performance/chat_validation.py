@@ -85,6 +85,9 @@ def evidence_readiness(catalogue: dict) -> dict:
     mandate = ((catalogue.get('mandate') or {}).get('mandate') or {}).get('values') or {}
     performance = [ref for ref in ('performance:5y', 'performance:3y', 'performance:1y')
                    if catalogue.get(ref)]
+    preferred = f"performance:{mandate.get('time_horizon_years')}y"
+    if preferred in performance:
+        performance = [preferred] + [ref for ref in performance if ref != preferred]
     financial = (catalogue.get('fund_context') or {}).get('financial_evidence') or {}
     tracking = any((catalogue[ref].get('tracking_error') or {}).get('value') is not None for ref in performance)
     if (catalogue.get('fund_context') or {}).get('sources'):
@@ -98,25 +101,41 @@ def evidence_readiness(catalogue: dict) -> dict:
         gaps.append('The fund valuation time is not established; exact pricing-time alignment needs confirmation.')
     if identity.get('ocf_pct') is None:
         gaps.append('The ongoing charge is not established in the prepared charge fields.')
+    scopes = {}
+    if not (mandate.get('objective_text') or identity.get('objective_text')):
+        scopes['mandate'] = 'Establish the documented objective before claiming mandate delivery; a structured-field gap alone does not prove the source lacks it.'
+    if not tracking:
+        scopes['tracking_consistency'] = 'Missing tracking error limits consistency analysis, not every return or mandate conclusion; relevance depends on the strategy.'
+    if not identity.get('pricing_point'):
+        scopes['valuation_alignment'] = 'Confirm valuation times before asserting exact timing comparability; reported fund outcomes remain describable.'
+    if identity.get('ocf_pct') is None:
+        scopes['charges'] = 'Missing published charges limits the charge assessment; do not assume a fee or infer overall investment quality.'
     comparability = []
     peer_ref = 'peers' if (catalogue.get('peers') or {}).get('peers') else 'peer_documents'
     peers = (catalogue.get(peer_ref) or {}).get('peers') or []
+    if not peers:
+        scopes['relative_competitiveness'] = 'No prepared peer comparison establishes relative competitiveness; own published charges and outcomes remain assessable.'
     for peer in peers:
         currency = peer.get('currency')
         if identity.get('currency') and currency and currency != identity['currency']:
+            scopes['peer_returns'] = 'The currency difference limits direct peer performance comparison, not the fund’s own compatible benchmark evidence.'
             comparability.append(f"Peer returns are in {currency}, while the fund is in {identity['currency']}; do not compare them directly.")
         if peer.get('investor_type') == 'institutional' or peer.get('minimum_investment'):
+            scopes['peer_access'] = 'Eligibility affects whether this peer is an investable alternative, not the fund mandate evidence.'
             comparability.append('Peer share-class eligibility and minimum investment need checking.')
     blocked = {ref: catalogue[ref]['unavailable']['benchmark_return_a_year'] for ref in performance
                if (catalogue[ref].get('unavailable') or {}).get('benchmark_return_a_year')}
-    return {'performance_references': performance,
+    if blocked:
+        scopes['benchmark_comparison'] = 'Existing validation prevents the affected benchmark comparison; do not reconstruct rejected figures or infer mandate success from them.'
+    return {'strategy_context': {key: mandate.get(key) for key in ('objective_type', 'benchmark_role', 'time_horizon_years')},
+            'limitation_scopes': scopes,
+            'oversight_references': [ref for ref in ('risk_quality', 'scorecard', 'fund_composition') if ref in catalogue],
+            'performance_references': performance,
             'published_figures_reference': 'published_figures' if (catalogue.get('published_figures') or {}).get('figures') else None,
             'missing_or_unestablished': gaps,
             'comparison_limits': list(dict.fromkeys(comparability)), 'unavailable_comparisons': blocked,
             'peer_reference': peer_ref if peers else None,
-            'interpretation': 'Missing secondary metrics or peers do not automatically prevent a preliminary mandate interpretation. '
-                              'Use the documented objective and compatible returns; no universal acceptable return gap is implied. '
-                              'Missing evidence is separate from investment quality and from a comparison limitation.'}
+            'interpretation': 'This is an evidence-availability map, not a rating or an exhaustive source audit; check the original catalogue before drawing conclusions.'}
 
 
 def focused_fallback(catalogue: dict, focus: str) -> tuple[str, list[str]] | None:
@@ -141,7 +160,8 @@ def focused_fallback(catalogue: dict, focus: str) -> tuple[str, list[str]] | Non
             sentence = f"**{ref.split(':')[1][0]}-year annualised return:** fund {fund_value}"
             sentence += f'; benchmark {benchmark_value}' if benchmark_value else '; no comparable benchmark figure is established'
             date = _plain(row.get('as_of_date'))
-            basis = _plain(row.get('fund_benchmark_basis'))
+            prepared_basis = row.get('fund_benchmark_basis')
+            basis = {'fund_nav': 'fund dealing value', 'fund_pnav': 'estimated market-close value, not a dealing price'}.get(prepared_basis) or _plain(prepared_basis)
             sentence += (f' (as at {date})' if date else '') + (f'; prepared basis: {basis}' if basis else '') + '.'
             facts.append(sentence)
             refs.append(ref)
@@ -152,7 +172,11 @@ def focused_fallback(catalogue: dict, focus: str) -> tuple[str, list[str]] | Non
         refs.append('fund_identity')
     if not facts:
         return source_overview(catalogue)
-    title = 'Evidence available for mandate assessment' if focus == 'mandate_delivery' else 'Available evidence and remaining gaps'
+    title = {'mandate_delivery': 'Evidence available for mandate assessment',
+             'evidence_gaps': 'Available evidence and remaining gaps',
+             'challenge': 'Evidence for testing the working conclusion',
+             'alternative_explanations': 'Evidence for investigating possible explanations',
+             'priorities': 'Evidence and unresolved checks for oversight'}.get(focus, 'Available evidence and remaining gaps')
     text = '**' + title + '**\n\n' + '\n'.join('- ' + fact for fact in facts)
     gaps = ready['missing_or_unestablished']
     if gaps:
