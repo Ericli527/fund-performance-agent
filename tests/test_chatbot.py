@@ -50,7 +50,7 @@ def test_answer_is_cited_qualified_and_uses_one_tool_free_call():
     runner = FakeRun(ANSWER)
     text = run(answer_question(CATALOGUE, 'What does it cost?', run=runner))
     assert '0.23%' in text and 'fund_identity' in text and 'Peer fee competitiveness' in text
-    assert 'analyst judgement and sign-off are required' in text and len(runner.prompts) == 1
+    assert 'Analyst review required' in text and len(runner.prompts) == 1
     assert 'career' not in INSTRUCTIONS and 'Python will' in INSTRUCTIONS
 
 
@@ -120,7 +120,7 @@ def test_document_only_preparation_uses_one_intake_without_inventing_price_metri
         return await fake_reader(*args, **kwargs)
     bundle = run(prepare_evidence([{'id': 'fund', 'path': factsheet, 'role': FACTSHEET}], {}, tmp_path, reader=reader))
     assert len(calls) == 1 and 'published_figures' in bundle['catalogue']
-    assert 'No price history' in bundle['summary'] and 'Data extracted using AI' in bundle['summary']
+    assert 'No price history' in bundle['summary'] and 'Analyst review required' in bundle['summary']
     assert 'scorecard' not in bundle['catalogue']
     assert all(not f['name'].startswith(('comparison.', 'fund.vol.'))
                for f in bundle['catalogue']['published_figures']['figures'])
