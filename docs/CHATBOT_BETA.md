@@ -270,3 +270,18 @@ Formal investment ratings/approval remain in Reporting and human sign-off. Share
 editing, a persistent review working record and chat-to-report drafting are later stages,
 not part of this change. Focused tests use synthetic evidence and mocked model responses;
 they verify handling and safeguards, not live investment-judgement quality or browser layout.
+
+### Optional Shibui market context
+
+Set `FUND_SHIBUI_ENABLED=true` in the app environment to opt in. The app needs outbound HTTPS access to
+`mcp.shibui.finance`. The public endpoint does not require a Shibui key. The initial mapping supports the
+plain S&P 500 and NUK benchmark labels. It uses a fixed public SPY identifier, a bounded SELECT for up to
+three closes, and an eight-second deadline. Review the provider's usage terms before enabling it for others.
+
+Chat preparation uses a current snapshot and reuses it for follow-up questions. The Investment Analyst
+receives a separate snapshot capped at the day before the review date, so there is no assumption that
+review-date closing prices were available at the fund's valuation time. Each snapshot is labelled as
+SPY ETF market context. Python passes only the observed direction and dates to the models. Raw closes
+are excluded because a number match alone cannot verify the instrument or measure a claim names.
+This pilot does not calculate fund or index returns, infer fund holdings, or change the scorecard.
+If the endpoint or data is unavailable, the existing evidence remains usable.

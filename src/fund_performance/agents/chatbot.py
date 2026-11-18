@@ -13,6 +13,7 @@ from fund_performance.communication import COMMUNICATION_STYLE
 from fund_performance.chat_presentation import FOOTER, NAV_EXPLANATION, PNAV_EXPLANATION, conversational_reply, specific_limits, additional_context
 from fund_performance.chat_validation import numerical_evidence, focused_fallback, evidence_readiness
 from fund_performance.number_guard import check_numbers
+from fund_performance.shibui import CHAT_REF
 from fund_performance.chat_calculations import InvestmentValueRequest, investment_value, render_investment_value
 from fund_performance.chat_arithmetic import ArithmeticRequest, arithmetic
 
@@ -60,6 +61,8 @@ assuming identical holdings. Preserve table dates, source scope and weights; do 
 Current research is supplied under research:* with publication dates and research_availability. Use it for
 recent trends, news and regulatory context. Distinguish current news from the historical fund-review date;
 post-review news was not information available at that review date. Limited coverage is not no research.
+Shibui SPY direction, if supplied, describes a separate US-listed ETF. Keep its stated dates and use it only as
+broad current market context. Never infer fund or official benchmark performance or an ETF price from it.
 News is context, not proof of fund-specific attribution or that a regulation applies to this share class.
 For recent-trend questions, explain vetted developments and their plausible transmission through documented
 exposures; do not require proven fund-return attribution to provide useful qualified market context. If no
@@ -250,6 +253,7 @@ async def answer_question(catalogue: dict, question: str, history: list[dict] | 
                   'published_figures': 'Published financial figures', 'peer_documents': 'Uploaded peer evidence',
                   'evidence_limits': 'Evidence checks and limits', 'methodology': 'Financial terminology',
                   'scorecard': 'Python quantitative scorecard', 'peers': 'Peer comparisons',
+                  CHAT_REF: 'Shibui Finance · SPY market context',
                   'risk_quality': 'Risk and evidence quality', 'mandate': 'Fund mandate', 'service_scope': 'Beta scope'}
         from urllib.parse import quote
         from fund_performance.chat_research import public_url
@@ -257,7 +261,7 @@ async def answer_question(catalogue: dict, question: str, history: list[dict] | 
         for ref in refs:
             source = catalogue[ref]
             label = escape(f'{labels.get(ref, ref)} [{ref}]', quote=False)
-            if ref.startswith('research:') and isinstance(source, dict) and public_url(source.get('url', '')):
+            if (ref.startswith('research:') or ref == CHAT_REF) and isinstance(source, dict) and public_url(source.get('url', '')):
                 label = '[' + escape(str(source.get('title') or ref), quote=False).replace('[', '').replace(']', '') + ']('
                 label += quote(source['url'], safe=':/?=&%#@+~.-_') + ')'
                 label += ' — ' + escape(str(source.get('date') or 'date unavailable'), quote=False) + f' [{ref}]'

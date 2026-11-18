@@ -213,6 +213,9 @@ The research availability summary distinguishes retrieved, excluded and vetted e
 not retrieved or unavailable when vetted sources are supplied. A source can be available but insufficient for a
 particular claim or period. A publication after the review date may describe past events or later developments, but
 was not available at that date. Preserve these distinctions and qualify limited date coverage or relevance.
+
+If a Shibui SPY source is supplied, use it only as dated US equity market context. It describes a separate ETF,
+and cannot establish fund NAV, benchmark returns, tracking quality, or performance attribution.
 """
 
 
