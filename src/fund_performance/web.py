@@ -937,6 +937,7 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                 "<p>Ask a question about a fund and review the evidence.</p></div>")
         gr.HTML(f"<div class='fp-notice' role='note'>{PUBLIC_DATA_HTML}</div>")
         from fund_performance.chatbot import REPORTING_MODE, CHAT_MODE, OVERSIGHT_QUESTIONS
+        from fund_performance.chat_views import VIEW_QUESTIONS
         application_mode = gr.Radio([REPORTING_MODE, CHAT_MODE], value=REPORTING_MODE, label='Application mode')
         review_type = gr.Radio([(_card(v), v) for v in REVIEW_TYPES], value=DEFAULT_REVIEW, show_label=False,
                                container=False, elem_classes="fp-cards", label="Question type")
@@ -1010,17 +1011,17 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             gr.Markdown('**AI Chatbot (Beta)** — prepare your fund evidence once, then ask follow-up questions. '
                         'A main factsheet is required; price history, KID and peers are optional. '
                         'This mode does not run the full reporting or independent investment review process. '
-                        'Preparation runs five parallel searches for recent market news and regulatory updates when AI is enabled. '
-                        'Each answer uses one AI call; preparation and answers count towards the daily limit. '
+                        'Preparation can gather a seven-day snapshot of market news and regulatory updates using five parallel searches. '
+                        'Research retrieval uses no model calls. Evidence-based answers use one AI call. '
                         'The most recent six turns are used for follow-up context; prepared evidence stays available.')
             chat_state = gr.State(None, time_to_live=cleanup[1])
-            prepare_chat = gr.Button('Prepare evidence and recent research', variant='primary')
+            prepare_chat = gr.Button('Prepare evidence / refresh research', variant='primary')
             chat_summary = gr.Markdown('Add fund documents or select a test case, then prepare the evidence.')
             conversation = gr.Chatbot(label='Fund conversation', height=400, sanitize_html=True)
             chat_question = gr.Textbox(label='Ask about this fund', lines=2, interactive=False,
                                        placeholder='How closely has the fund followed its benchmark?')
-            gr.Examples(examples=[[question] for question in OVERSIGHT_QUESTIONS], inputs=chat_question,
-                        label='Questions for investment oversight', cache_examples=False, api_visibility='private')
+            gr.Examples(examples=[[question] for question in VIEW_QUESTIONS + OVERSIGHT_QUESTIONS], inputs=chat_question,
+                        label='Explore the fund or start an oversight question', cache_examples=False, api_visibility='private')
             chat_send = gr.Button('Send question', interactive=False)
             chat_status = gr.Markdown()
             clear_chat = gr.Button('New conversation', size='sm')
@@ -1209,7 +1210,7 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                 yield None, 'An input file is unavailable. Upload it again.', [], gr.update(interactive=True), gr.update(interactive=False), gr.update(interactive=False)
                 return
             pending = current if current and current.get('key') == key and not current.get('invalidated') else {'key': key}
-            yield pending, 'Preparing evidence and five recent-context searches… Documents are read once; searches run in parallel when enabled. Prepare again to refresh research and start a new conversation.', gr.skip(), gr.update(interactive=False), gr.update(interactive=False), gr.update(interactive=False)
+            yield pending, 'Preparing fund evidence and checking for news from the past seven days… Searches run in parallel when enabled. Refreshing reuses unchanged documents and starts a new conversation.', gr.skip(), gr.update(interactive=False), gr.update(interactive=False), gr.update(interactive=False)
             prepared, summary = await prepare_session(selected, benchmark, pending, limits)
             yield prepared, summary, (prepared or {}).get('history', []), gr.update(interactive=True), gr.update(interactive=bool(prepared)), gr.update(interactive=bool(prepared))
 

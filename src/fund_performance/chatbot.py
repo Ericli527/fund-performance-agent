@@ -69,9 +69,9 @@ def brief(bundle: dict) -> str:
     text += '\n\n' + bundle['notice']
     research = bundle.get('research') or {}
     if research.get('searches_requested'):
-        text += (f"\n\n**Recent research:** {research['source_count']} vetted source(s) retained from five parallel searches, "
+        text += (f"\n\n**Past seven days:** {research['source_count']} dated source(s) retained from five parallel searches, "
                  f"covering {research['window_start']} to {research['as_of_date']}. "
-                 'Current news is separate from the historical fund review. Prepare again to refresh; follow-up questions reuse these sources.')
+                 'Current news is separate from the historical fund review. Prepare again to refresh this snapshot; follow-up questions reuse these sources.')
         if research['source_count'] < 5:
             text += ' ' + research.get('message', 'Some searches returned no usable dated source; coverage is incomplete.')
     else:
@@ -174,7 +174,8 @@ def with_research(bundle: dict, research: dict) -> dict:
     for i, source in enumerate(research['sources'], 1):
         catalogue[f'research:{i}'] = source
     result['research'] = research
-    catalogue['research_availability'] = {key: value for key, value in research.items() if key != 'sources'}
+    catalogue['research_availability'] = {key: research[key] for key in
+        ('window_start', 'as_of_date', 'refreshed_at', 'source_count', 'message') if key in research}
     catalogue['evidence_limits']['research'] = (f"{research['source_count']} vetted current sources; "
         f"{research['window_start']} to {research['as_of_date']}. These are current context, not historical fund performance evidence. "
         + research.get('message', ''))
@@ -184,16 +185,16 @@ def with_research(bundle: dict, research: dict) -> dict:
 
 async def prepare_evidence(entries: list[dict], benchmark: dict, out_root: Path,
                            reader=read_documents, review=run_review, *, research_enabled=False,
-                           research_run=None, retrieve=None) -> dict:
-    from fund_performance.chat_research import current_research
+                           retrieve=None) -> dict:
+    from fund_performance.chat_research import weekly_research
     task = None
     def start(context):
         nonlocal task
         if task is None:
             seed = dict(context.get('fund_facts') or {})
             seed['as_of_date'] = seed.get('as_of_date') or context.get('document_date')
-            task = asyncio.create_task(current_research(seed, context.get('portfolio_exposures'),
-                                                       run=research_run, retrieve=retrieve))
+            task = asyncio.create_task(weekly_research(seed, context.get('portfolio_exposures'),
+                                                      retrieve=retrieve))
     try:
         bundle = await _prepare_evidence(entries, benchmark, out_root, reader, review,
                                         on_fund_context=start if research_enabled else None)
@@ -205,13 +206,13 @@ async def prepare_evidence(entries: list[dict], benchmark: dict, out_root: Path,
 
 
 async def prepare_session(selected: list[dict], benchmark: dict, state: dict, limits,
-                          reader=None, review=None, research_run=None, retrieve=None) -> tuple[dict | None, str]:
+                          reader=None, review=None, retrieve=None) -> tuple[dict | None, str]:
     """`state` is a session-local revocable preparation token, never a global evidence cache."""
     from fund_performance.agents.base import AI_CALLS, api_key_present
     from fund_performance.config import load_settings
     cached = bool(state.get('bundle') and matches(state, selected, benchmark))
     research_enabled = (not ai_disabled() and load_settings().research.enabled
-                        and (api_key_present() or research_run is not None))
+                        and (api_key_present() or os.getenv('TAVILY_API_KEY', '').strip() or retrieve is not None))
     if cached and not research_enabled:
         return state, state['bundle']['summary']
     needs_ai = not cached and not engine_inputs(selected)[4]
@@ -223,13 +224,13 @@ async def prepare_session(selected: list[dict], benchmark: dict, state: dict, li
     token = AI_CALLS.set(calls)
     try:
         options = ({'reader': reader} if reader else {}) | ({'review': review} if review else {})
-        options |= {'research_enabled': research_enabled, 'research_run': research_run, 'retrieve': retrieve}
+        options |= {'research_enabled': research_enabled, 'retrieve': retrieve}
         with tempfile.TemporaryDirectory(prefix='fund-chat-calculations-') as output:
             if cached:
-                from fund_performance.chat_research import current_research
+                from fund_performance.chat_research import weekly_research
                 bundle = state['bundle']
                 composition = bundle['catalogue'].get('fund_composition') or {}
-                research = await current_research(bundle['profile'], composition.get('fund'), run=research_run, retrieve=retrieve)
+                research = await weekly_research(bundle['profile'], composition.get('fund'), retrieve=retrieve)
                 bundle = with_research(bundle, research)
             else:
                 bundle = await asyncio.wait_for(prepare_evidence(selected, benchmark, Path(output), **options),
@@ -267,9 +268,11 @@ async def reply(selected: list[dict], benchmark: dict, state: dict | None, quest
     if not question.strip() or len(question) > MAX_QUESTION:
         return state, history, 'Please ask a fund question of up to 2,000 characters.'
     from fund_performance.chat_presentation import conversational_reply
-    if social := conversational_reply(question):
+    from fund_performance.chat_views import weekly_unavailable
+    local_answer = conversational_reply(question) or weekly_unavailable(state['bundle']['catalogue'], question)
+    if local_answer:
         history = (history + [{'role': 'user', 'content': escape(question, quote=False)},
-                              {'role': 'assistant', 'content': social}])[-40:]
+                              {'role': 'assistant', 'content': local_answer}])[-40:]
         return state | {'history': history}, history, 'Response complete.'
     if ai_disabled() or (run is None and not api_key_present()):
         return state, history, 'AI chat is unavailable in this environment. The prepared evidence remains available.'

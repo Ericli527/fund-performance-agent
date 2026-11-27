@@ -29,27 +29,27 @@ explicit action. Existing chat context survives mode switches while inputs are u
 
 ## Current research and composition
 
-**Prepare evidence and recent research** starts five independent Tavily basic searches in parallel,
-using the existing Search Agent to summarise retrieved excerpts: market trends, macro policy,
-portfolio-relevant news, material index/market changes and regulatory updates. Searches start
-once the main fund context exists, overlapping mandate and peer processing where possible.
-They cover the preceding 90 days as at the preparation date in London, not the historical
-fund review period. Routine fund profiles/factsheets are excluded; Reporting's existing
-historical research rules are unchanged.
+**Prepare evidence / refresh research** starts five parallel Tavily basic searches for
+market trends, macro policy, portfolio news, material index or market changes and regulatory
+updates. Searches start once the main fund context exists and cover the latest seven calendar
+days in London, including the preparation date. They use no AI model. Reporting research is
+separate and keeps its existing historical review window.
 
-Each kept source needs a returned URL, a trusted publisher (the relevant regulator for the
-regulatory search), a recent source-supported date, substantive current context and summary
-figures supported by the retrieved excerpt. Duplicate URLs are removed. Five searches do not
-guarantee five usable sources. Missing credentials, timeouts and rejected sources leave the
-fund evidence available, with a coverage count and structured exclusion reasons in session
-state. Summaries are excerpt-based; Python checks cannot establish semantic correctness or
-fund-specific causality. No extra search-planning or rewriting model call is added.
+Python keeps at most one dated article per topic from the approved publishers. It excludes
+routine fund profiles, duplicates, out-of-window articles and results without a usable
+publication date. A seven-day brief shows the exact window, refresh time, coverage and up to
+four publisher-linked developments with their potential relevance to the fund. One chat model
+call interprets the prepared excerpts and documented exposures. Market context can motivate
+oversight questions, while fund-level attribution requires separate evidence. Publications
+after the fund review are labelled accordingly. No usable sources or a stale window results
+in a refresh message without a model call.
 
-Follow-up questions and **New conversation** reuse research. Explicitly preparing again
-refreshes five searches without re-extracting unchanged documents, and clears old conversation
-so changed source IDs cannot refer to old articles. Research requires AI access and research
-to be enabled. Current news is labelled separately from historical fund evidence; post-review
-publications must not be represented as known at the fund review date.
+Follow-ups and **New conversation** reuse the evidence. Explicitly refreshing reruns the five
+searches, keeps unchanged extracted documents and starts a new conversation since research
+reference IDs can change. Tavily requires its configured key and enabled research. Provider
+failures or partial coverage leave the fund evidence available and show the coverage status.
+Choose an overview or benchmark starter to see figures drawn from the prepared catalogue.
+The benchmark panel displays a return pair only when the evidence checks support it.
 
 Extraction retains top-stock, industry/sector, geography, market-cap and concentration tables.
 Source matching accepts exact single rows when the percentage unit is in the table heading;
@@ -158,7 +158,7 @@ Preparation and the chatbot catalogue expose per-search retrieval counts, proces
 and sanitised reason codes. The summary distinguishes missing credentials, authentication,
 rate/credit limits, connection failures, no results, failed summaries and validation exclusions.
 An all-empty research pass logs the reason codes without prompts, source text or credentials.
-Retry with **Prepare evidence and recent research**; unchanged documents are not re-extracted.
+Retry with **Prepare evidence / refresh research**; unchanged documents are not re-extracted.
 Five searches are still bounded, with no automatic retry or extra model call. Historical
 Reporting research keeps its existing search options and date rules. Current market context
 may explain plausible exposure channels without claiming measured fund-return attribution.

@@ -80,11 +80,16 @@ def test_incompatible_benchmark_is_not_recovered_or_given_a_positive_judgement()
     assert '11.6%' not in text and 'broadly consistent' not in text
 
 
-def test_current_research_supports_plausible_channels_without_measured_attribution():
+def test_current_research_supports_plausible_channels_without_measured_attribution(monkeypatch):
+    from datetime import date
+    from fund_performance import chat_views
+    monkeypatch.setattr(chat_views, 'current_day', lambda: date(2026, 11, 5))
     catalogue = CATALOGUE | {'research:1': {'summary': 'Technology earnings uncertainty increased.',
         'title': 'Technology update', 'url': 'https://reuters.com/markets/technology', 'date': '2026-10-30',
         'timing': 'after fund review; current context only'},
-        'research_availability': {'source_count': 1, 'message': 'One current source; coverage is partial.'}}
+        'research_availability': {'source_count': 1, 'message': 'One current source; coverage is partial.',
+                                  'window_start': '2026-10-30', 'as_of_date': '2026-11-05',
+                                  'refreshed_at': '2026-11-05T14:00+00:00'}}
     text, _ = ask('What recent trends could affect the fund?', {
         'answer': 'The recent technology earnings report suggests a possible source of equity volatility. '
                   'This is current market context published after the fund review, not measured fund-return attribution.',
