@@ -1,7 +1,7 @@
-"""Five current-context searches using the existing Search Agent and Tavily; no fund-page refresh loop."""
+"""Dated chat research from vetted publishers and bounded Tavily searches."""
 import asyncio
 import copy
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from functools import partial
 import ipaddress
 import logging
@@ -41,7 +41,7 @@ def public_url(url: str) -> bool:
         return False
 
 
-def plan(seed: dict, exposures: dict | None = None, as_of: date | None = None) -> list[dict]:
+def plan(seed: dict, exposures: dict | None = None, as_of: date | None = None, *, lookback: int = LOOKBACK_DAYS) -> list[dict]:
     today = as_of or current_day()
     benchmark = str(seed.get('benchmark_name') or '')
     market = ' '.join(w for w in benchmark.split() if w.lower().strip('()') not in MARKET_NOISE)
@@ -51,7 +51,7 @@ def plan(seed: dict, exposures: dict | None = None, as_of: date | None = None) -
              for row in (exposures or {}).get(category) or [] if row.get('name') and row.get('subject') not in ('peer', 'benchmark', 'unknown')]
     exposure = ' '.join(names[:2])[:70] or market
     authority, _ = AUTHORITIES.get(str(seed.get('isin') or '')[:2].upper(), ('IOSCO fund regulation', ('iosco.org',)))
-    window = f'{today - timedelta(days=LOOKBACK_DAYS):%Y-%m-%d} to {today:%Y-%m-%d}'
+    window = f'{today - timedelta(days=lookback):%Y-%m-%d} to {today:%Y-%m-%d}'
     topics = [('market_trends', f'{market} recent market trends volatility', 'Recent market conditions and risks relevant to the benchmark.'),
               ('macro_policy', f'{market} {asset} inflation interest rates currency news', 'Macro conditions, rates and currency transmission; not fund-specific attribution.'),
               ('portfolio_news', f'{exposure} earnings sector concentration latest news', 'Relevant portfolio/market developments; do not infer holdings from an index.'),
@@ -76,7 +76,7 @@ def _dated_in_excerpt(source: dict, when: date) -> bool:
     return any(value in text for value in variants)
 
 
-def vet(source: dict, item: dict, seed: dict, as_of: date) -> str | None:
+def vet(source: dict, item: dict, seed: dict, as_of: date, *, lookback: int = LOOKBACK_DAYS) -> str | None:
     if not public_url(source.get('url', '')):
         return 'unsafe_source_url'
     host = urlparse(source['url']).hostname.lower()
@@ -87,7 +87,7 @@ def vet(source: dict, item: dict, seed: dict, as_of: date) -> str | None:
         when = date.fromisoformat(source.get('date') or '')
     except ValueError:
         return 'publication_date_unavailable'
-    if not as_of - timedelta(days=LOOKBACK_DAYS) <= when <= as_of:
+    if not as_of - timedelta(days=lookback) <= when <= as_of:
         return 'source_outside_recent_window'
     if not _dated_in_excerpt(source, when):
         return 'publication_date_not_supported_by_retrieval'
@@ -195,3 +195,76 @@ def availability_message(result: dict) -> str:
     if count == 0:
         text += ' Recent news could not be prepared; this does not mean there were no relevant developments. Prepare again to retry; server configuration may need attention for provider errors.'
     return text
+
+
+async def weekly_research(seed: dict, exposures: dict | None = None, *, as_of: date | None = None,
+                          retrieve=None) -> dict:
+    """Collect a compact dated evidence snapshot without invoking a model."""
+    from fund_performance.tavily import failure_code, publication_date, search
+
+    today = as_of or current_day()
+    start = today - timedelta(days=6)  # Seven calendar dates, inclusive.
+    items = plan(seed, exposures, today, lookback=6)
+    reviewed = str(seed.get('as_of_date') or '')
+
+    async def collect(item):
+        domains = (AUTHORITIES.get(str(seed.get('isin') or '')[:2].upper(), ('', ('iosco.org',)))[1]
+                   if item['category'] == 'regulation' else NEWS_DOMAINS)
+        lookup = retrieve or partial(search, start_date=start.isoformat(),
+                                     end_date=(today + timedelta(days=1)).isoformat(),
+                                     topic='general' if item['category'] == 'regulation' else 'news',
+                                     include_domains=list(domains))
+        try:
+            rows, error = await asyncio.wait_for(asyncio.to_thread(lookup, item['query']), timeout=25)
+        except TimeoutError:
+            return [], 'search_timeout'
+        except OSError:
+            return [], 'search_failed'
+        if error or not rows:
+            return [], failure_code(error) if error else 'no_search_results'
+        sources, reason = [], None
+        for row in rows[:3]:
+            excerpt = ' '.join(row['content'].split())[:1000]
+            source = {
+                'url': row['url'], 'title': row.get('title') or '',
+                'date': publication_date(row.get('published_date')), 'date_basis': 'published',
+                'retrieved_publication_date': row.get('published_date'), 'source_excerpt': excerpt,
+            }
+            issue = vet(source, item, seed, today, lookback=6)
+            if issue:
+                reason = issue
+                continue
+            sources.append({
+                'url': source['url'], 'title': source['title'][:180],
+                'publisher': urlparse(source['url']).hostname.removeprefix('www.'),
+                'date': source['date'], 'date_basis': 'published', 'excerpt': excerpt,
+                'category': item['category'],
+                'timing': ('after fund review' if reviewed and source['date'] > reviewed
+                           else 'published by fund review date' if reviewed else 'fund review date unavailable'),
+            })
+        return sources, None if sources else reason
+
+    results = await asyncio.gather(*(collect(item) for item in items))
+    sources, seen_urls, seen_titles, diagnostics = [], set(), set(), []
+    for item, (candidates, reason) in zip(items, results):
+        kept = False
+        for source in candidates:
+            parsed = urlparse(same_url(source['url']))
+            url_key = (parsed.hostname, parsed.path.rstrip('/'))
+            title_key = re.sub(r'[^a-z0-9]+', ' ', source['title'].casefold()).strip()
+            if url_key in seen_urls or (title_key and title_key in seen_titles):
+                continue
+            seen_urls.add(url_key)
+            if title_key:
+                seen_titles.add(title_key)
+            sources.append(source)
+            kept = True
+            break  # Give each research topic room in the model's context.
+        diagnostics.append({'category': item['category'], 'status': 'kept' if kept else 'unavailable',
+                            'reason': None if kept else reason or 'duplicate_source'})
+    result = {'window_start': start.isoformat(), 'as_of_date': today.isoformat(),
+              'refreshed_at': datetime.now(timezone.utc).isoformat(timespec='minutes'),
+              'searches_requested': len(items), 'source_count': len(sources),
+              'sources': sources, 'searches': diagnostics}
+    result['message'] = availability_message(result)
+    return result

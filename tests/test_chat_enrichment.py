@@ -19,8 +19,8 @@ SEED = {'fund_name': 'Example US Index Fund', 'benchmark_name': 'S&P 500 Index',
         'isin': 'GB0000000000', 'as_of_date': '2026-09-30'}
 
 
-def excerpt(query):
-    category = next(item['category'] for item in research.plan(SEED, as_of=TODAY) if item['query'] == query)
+def excerpt(query, lookback=research.LOOKBACK_DAYS):
+    category = next(item['category'] for item in research.plan(SEED, as_of=TODAY, lookback=lookback) if item['query'] == query)
     host = 'fca.org.uk' if category == 'regulation' else 'reuters.com'
     return {'url': f'https://{host}/news/{category}', 'title': f'{category} update',
             'content': 'Published 30 October 2026. Market volatility and regulatory policy changed.',
@@ -111,15 +111,19 @@ def test_refresh_reuses_fund_extraction_and_followups_reuse_research(monkeypatch
     state['bundle']['highlights'] = []
     state['history'] = [{'role': 'user', 'content': 'Old question'}]
     before = copy.deepcopy(state)
-    runner = FakeRunBy(summary)
+    queries = []
     async def forbidden(*args, **kwargs):
         raise AssertionError('Prepared documents must not be extracted again')
+    def weekly_lookup(query):
+        queries.append(query)
+        return [excerpt(query, lookback=6)], None
     prepared, _ = asyncio.run(prepare_session(selected, {}, state, limits, reader=forbidden,
-                                             research_run=runner, retrieve=retrieve))
-    assert prepared['bundle']['research']['source_count'] == 5 and len(runner.prompts) == 5
+                                             retrieve=weekly_lookup))
+    assert prepared['bundle']['research']['source_count'] == 5 and len(queries) == 5
+    assert not prepared['usage']
     assert prepared['history'] == [] and state == before and limits.active == 0
     more, _, _ = asyncio.run(reply(selected, {}, prepared, 'Fees?', limits, run=FakeRun(ANSWER)))
-    assert len(runner.prompts) == 5 and more['bundle'] is prepared['bundle']
+    assert len(queries) == 5 and more['bundle'] is prepared['bundle']
 
 
 def test_research_starts_during_intake_and_cancellation_leaves_no_background_task(monkeypatch, tmp_path):
@@ -136,7 +140,7 @@ def test_research_starts_during_intake_and_cancellation_leaves_no_background_tas
         await asyncio.sleep(0)
         assert started
         raise ValueError('bad input')
-    monkeypatch.setattr(research, 'current_research', current)
+    monkeypatch.setattr(research, 'weekly_research', current)
     monkeypatch.setattr(chat, '_prepare_evidence', failed)
     with pytest.raises(ValueError):
         asyncio.run(chat.prepare_evidence([], {}, tmp_path, research_enabled=True))
@@ -173,11 +177,15 @@ def test_generic_ai_notice_once_but_actual_limit_and_pricing_warning_remain():
     assert 'requires source verification' not in text
 
 
-def test_vetted_research_can_be_cited_without_repeating_private_excerpt():
+def test_vetted_research_can_be_cited_without_repeating_private_excerpt(monkeypatch):
+    from fund_performance import chat_views
+    monkeypatch.setattr(chat_views, 'current_day', lambda: TODAY)
     catalogue = CATALOGUE | {'research:1': {'url': 'https://reuters.com/news/market', 'date': '2026-10-30',
                               'title': 'Market update', 'summary': 'Market volatility increased.', 'timing': 'after fund review'}}
     out = ANSWER | {'answer': 'Recent market volatility increased. This is current context, published after the fund review.',
                     'evidence_references': ['research:1'], 'limitations': []}
+    catalogue['research_availability'] = {'window_start': '2026-10-30', 'as_of_date': TODAY.isoformat(),
+                                          'source_count': 1, 'refreshed_at': '2026-11-05T14:00+00:00'}
     text = asyncio.run(answer_question(catalogue, 'Recent news?', run=FakeRun(out)))
     assert '[Market update](https://reuters.com/news/market)' in text and '2026-10-30' in text
     assert 'withheld' not in text
