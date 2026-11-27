@@ -48,8 +48,12 @@ Follow-ups and **New conversation** reuse the evidence. Explicitly refreshing re
 searches, keeps unchanged extracted documents and starts a new conversation since research
 reference IDs can change. Tavily requires its configured key and enabled research. Provider
 failures or partial coverage leave the fund evidence available and show the coverage status.
-Choose an overview or benchmark starter to see figures drawn from the prepared catalogue.
-The benchmark panel displays a return pair only when the evidence checks support it.
+The chat header shows the prepared fund, share class, currency and evidence date. Overview
+and benchmark answers use metric cards from the prepared catalogue. The benchmark view
+shows return pairs only when the evidence checks support them. Composition answers can
+show source-matched fund weights as allocation bars and a largest-holdings table. Unconfirmed
+attribution and missing weights stay in the narrative. Open **Sources and evidence** within
+the answer to inspect its citations.
 
 Extraction retains top-stock, industry/sector, geography, market-cap and concentration tables.
 Source matching accepts exact single rows when the percentage unit is in the table heading;
