@@ -56,14 +56,19 @@ def test_retrieval_failures_reach_the_chat_summary_without_calling_models(error,
 def test_searches_request_the_publishers_and_regulator_the_validator_accepts(monkeypatch):
     options = []
     def search(query, **kwargs):
-        options.append(kwargs)
+        options.append((query, kwargs))
         return [excerpt(query)], None
     monkeypatch.setattr(tavily, 'search', search)
     result = asyncio.run(research.current_research(SEED, as_of=TODAY, run=FakeRunBy(summary)))
     assert result['source_count'] == 5 and len(options) == 5
-    assert all('reuters.com' in item['include_domains'] for item in options[:4])
-    assert options[-1]['include_domains'] == ['fca.org.uk'] and options[-1]['topic'] == 'general'
-    assert all(item['start_date'] == '2026-08-07' and item['end_date'] == '2026-11-05' for item in options)
+    by_query = dict(options)
+    for planned in research.plan(SEED, as_of=TODAY):
+        item = by_query[planned['query']]
+        if planned['category'] == 'regulation':
+            assert item['include_domains'] == ['fca.org.uk'] and item['topic'] == 'general'
+        else:
+            assert 'reuters.com' in item['include_domains'] and item['topic'] == 'news'
+        assert item['start_date'] == '2026-08-07' and item['end_date'] == '2026-11-05'
 
 
 def test_transport_domain_filter_is_optional_and_not_added_to_reporting(monkeypatch):

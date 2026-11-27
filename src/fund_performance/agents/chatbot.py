@@ -289,7 +289,7 @@ async def answer_question(catalogue: dict, question: str, history: list[dict] | 
         if cards:
             text += '\n\n**Dated developments**\n\n' + '\n\n'.join(cards)
     elif not issues and (panel := fund_panel(catalogue, view)):
-        text = panel + '\n\n' + text
+        text = (text + '\n\n' + panel if view == 'composition' else panel + '\n\n' + text)
     limits = additional_context(specific_limits(out.answer), out.limitations)
     if any(limits):
         text += '\n\n**Important context:** ' + ' '.join(escape(item, quote=False) for item in limits if item)
@@ -313,5 +313,9 @@ async def answer_question(catalogue: dict, question: str, history: list[dict] | 
                 label += quote(source['url'], safe=':/?=&%#@+~.-_') + ')'
                 label += ' — ' + escape(str(source.get('date') or 'date unavailable'), quote=False) + f' [{ref}]'
             sources.append(label)
-        text += '\n\n**Sources:** ' + ', '.join(sources)
+        if view:
+            text += ('\n\n<details class="fp-chat-sources"><summary>Sources and evidence</summary>\n\n'
+                     + '\n'.join('- ' + source for source in sources) + '\n\n</details>')
+        else:
+            text += '\n\n**Sources:** ' + ', '.join(sources)
     return text + '\n\n' + FOOTER

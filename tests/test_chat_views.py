@@ -51,7 +51,8 @@ def test_weekly_answer_one_call_with_dated_links_and_stale_fallback(monkeypatch)
     prompt = json.loads(response.prompts[0])
     assert 'scorecard' not in prompt['evidence_catalogue']
     assert '2026-10-30 to 2026-11-05' in text and 'Coverage is partial' in text
-    assert '04 Nov 2026 · [reuters.com](https://reuters.com/markets/news)' in text
+    assert '04 Nov 2026</time>' in text and 'href="https://reuters.com/markets/news">reuters.com</a>' in text
+    assert '<summary>Sources and evidence</summary>' in text
     assert 'published after the fund review' in text and 'equity valuations' in text
 
     unsupported = FakeRun(ANSWER | {'answer': 'Interest rate expectations were a theme this week.',
@@ -73,7 +74,24 @@ def test_benchmark_panel_shows_only_comparable_returns_and_fund_basis():
            'benchmark_return_a_year': {'display': '11.60%'}, 'fund_benchmark_basis': 'fund_pnav'}
     catalogue = CATALOGUE | {'performance:5y': row}
     panel = chat_views.fund_panel(catalogue, 'benchmark')
-    assert 'Fund 11.31% · Benchmark 11.60%' in panel and 'illustrative' in panel
+    assert '<span>Fund return</span><strong>11.31%</strong>' in panel
+    assert '<span>Benchmark return</span><strong>11.60%</strong>' in panel and 'illustrative' in panel
     panel = chat_views.fund_panel(catalogue | {'performance:5y': row | {'benchmark_return_a_year': None}}, 'benchmark')
     assert 'comparable fund and benchmark return pair is unavailable' in panel
     assert '11.31%' not in panel
+
+
+def test_composition_charts_require_fund_weight_and_provenance():
+    def row(name, weight, subject='fund'):
+        return {'name': name, 'weight_pct': weight, 'subject': subject, 'source': 'factsheet, page 1'}
+
+    catalogue = {'fund_composition': {'as_of_date': '2026-09-30', 'fund': {
+        'sectors': [row('Technology & communications', 34.3), row('Benchmark-only', 76, 'benchmark'),
+                    row('Unweighted sector', None), {'name': 'Unsourced', 'weight_pct': 90, 'subject': 'fund'}],
+        'holdings': [row('<Example Corp>', 4.6)]
+    }}}
+    panel = chat_views.fund_panel(catalogue, 'composition')
+    assert 'value="34.3"' in panel and 'Technology &amp; communications' in panel
+    assert '&lt;Example Corp&gt;' in panel and '<table>' in panel
+    assert '2026-09-30' in panel
+    assert not any(name in panel for name in ('Benchmark-only', 'Unsourced', 'Unweighted sector'))

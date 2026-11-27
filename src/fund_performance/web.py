@@ -789,6 +789,53 @@ CSS = f"""
 
 .fp-run button, button.fp-run {{ width: 100%; font-size: 16px !important; font-weight: 600 !important;
   padding: 12px !important; }}
+/* Fund chat */
+#fund-chat {{ gap: 12px; }}
+.fp-chat-header {{ border-radius: 16px; padding: 18px 22px; background: #eaf2f7;
+  border: 1px solid #c6dade; color: #173444; overflow-wrap: anywhere; }}
+.fp-chat-header p {{ margin: 0 0 5px; font-size: 11px; font-weight: 700; letter-spacing: .09em; color: #32616b; }}
+.fp-chat-header h2 {{ margin: 0 0 6px; font-size: clamp(19px, 3vw, 25px); line-height: 1.2; }}
+.fp-chat-header div {{ font-size: 13px; }}
+#fp-chat-thread .message.bot {{ max-width: min(100%, 720px); width: 100%; border-color: #d2e0e4; }}
+#fp-chat-thread .message {{ overflow-wrap: anywhere; }}
+.fp-chat-metrics {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr));
+  gap: 8px; margin: 0 0 8px; }}
+.fp-chat-metric {{ display: flex; flex-direction: column; padding: 12px; border-radius: 10px; background: #eef5f5;
+  color: #173444; border-top: 2px solid #83aaa9; min-width: 0; }}
+.fp-chat-metric span {{ font-size: 12px; color: #375861; }}
+.fp-chat-metric strong {{ font-size: 20px; line-height: 1.3; }}
+.fp-chat-caption {{ font-size: 12.5px !important; }}
+.fp-chat-data {{ margin: 12px 0; overflow-x: auto; }}
+.fp-chat-data table {{ width: 100%; }}
+.fp-chat-data th:last-child, .fp-chat-data td:last-child {{ text-align: right; }}
+.fp-chat-allocation {{ display: grid; grid-template-columns: 1fr max-content; gap: 3px 9px; margin: 7px 0; }}
+.fp-chat-allocation progress {{ grid-column: 1 / -1; width: 100%; height: 8px; appearance: none;
+  overflow: hidden; border: 0; border-radius: 5px; background: #dce9e9; }}
+.fp-chat-allocation progress::-webkit-progress-bar {{ background: #dce9e9; }}
+.fp-chat-allocation progress::-webkit-progress-value {{ background: #34746f; }}
+.fp-chat-allocation progress::-moz-progress-bar {{ background: #34746f; }}
+.fp-chat-brief {{ display: grid; gap: 2px; margin-bottom: 10px; padding: 10px 12px; border-left: 3px solid #34746f; }}
+.fp-chat-brief span {{ font-size: 11px; letter-spacing: .08em; font-weight: 700; }}
+.fp-chat-brief small, .fp-chat-story div {{ font-size: 12px; }}
+.fp-chat-story {{ margin: 8px 0; padding: 10px 12px; border-inline-start: 2px solid #a9c7c4; }}
+#fp-chat-thread .fp-chat-story h4 {{ margin: 3px 0; font-size: 15px; }}
+#fp-chat-thread .fp-chat-story p {{ margin: 4px 0 0; }}
+.fp-chat-sources summary {{ cursor: pointer; font-weight: 600; }}
+.fp-chat-controls {{ gap: 8px; }}
+.fp-chat-composer {{ align-items: stretch !important; gap: 8px; flex-wrap: nowrap !important; }}
+.fp-chat-composer button {{ align-self: stretch; }}
+#fp-chat-starters {{ font-size: 13px; }}
+@media (max-width: 560px) {{
+  .fp-chat-header {{ padding: 14px; }}
+  .fp-chat-metrics {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+  .fp-chat-metric:last-child:nth-child(odd) {{ grid-column: 1 / -1; }}
+  .fp-chat-metric {{ padding: 8px; }}
+  #fp-chat-thread {{ height: 46dvh !important; }}
+  .fp-chat-composer {{ position: sticky; bottom: 0; z-index: 2; background: var(--body-background-fill); }}
+  .fp-chat-metric strong {{ font-size: 17px; }}
+  #fp-chat-thread .message.bot {{ padding-inline: 9px; }}
+}}
+
 /* Results dashboard (stage 2) */
 .fp-dashboard {{ display: flex; flex-direction: column; gap: 14px; color: #1d2733; font-size: 15px; line-height: 1.5; }}
 .fp-dashboard h2 {{ color: {NAVY_TEXT}; font-size: 22px; font-weight: 600; margin: 0; }}
@@ -937,7 +984,7 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                 "<p>Ask a question about a fund and review the evidence.</p></div>")
         gr.HTML(f"<div class='fp-notice' role='note'>{PUBLIC_DATA_HTML}</div>")
         from fund_performance.chatbot import REPORTING_MODE, CHAT_MODE, OVERSIGHT_QUESTIONS
-        from fund_performance.chat_views import VIEW_QUESTIONS
+        from fund_performance.chat_views import VIEW_QUESTIONS, fund_header
         application_mode = gr.Radio([REPORTING_MODE, CHAT_MODE], value=REPORTING_MODE, label='Application mode')
         review_type = gr.Radio([(_card(v), v) for v in REVIEW_TYPES], value=DEFAULT_REVIEW, show_label=False,
                                container=False, elem_classes="fp-cards", label="Question type")
@@ -1007,24 +1054,28 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
                     log = gr.File(label="Run log (log.json)", interactive=False)
                     plain = gr.Markdown()
 
-        with gr.Column(visible=False) as chat_panel:
-            gr.Markdown('**AI Chatbot (Beta)** — prepare your fund evidence once, then ask follow-up questions. '
-                        'A main factsheet is required; price history, KID and peers are optional. '
-                        'This mode does not run the full reporting or independent investment review process. '
-                        'Preparation can gather a seven-day snapshot of market news and regulatory updates using five parallel searches. '
-                        'Research retrieval uses no model calls. Evidence-based answers use one AI call. '
-                        'The most recent six turns are used for follow-up context; prepared evidence stays available.')
+        with gr.Column(visible=False, elem_id='fund-chat') as chat_panel:
             chat_state = gr.State(None, time_to_live=cleanup[1])
-            prepare_chat = gr.Button('Prepare evidence / refresh research', variant='primary')
-            chat_summary = gr.Markdown('Add fund documents or select a test case, then prepare the evidence.')
-            conversation = gr.Chatbot(label='Fund conversation', height=400, sanitize_html=True)
-            chat_question = gr.Textbox(label='Ask about this fund', lines=2, interactive=False,
-                                       placeholder='How closely has the fund followed its benchmark?')
-            gr.Examples(examples=[[question] for question in VIEW_QUESTIONS + OVERSIGHT_QUESTIONS], inputs=chat_question,
-                        label='Explore the fund or start an oversight question', cache_examples=False, api_visibility='private')
-            chat_send = gr.Button('Send question', interactive=False)
+            chat_heading = gr.HTML(fund_header(), container=False)
+            with gr.Row(elem_classes='fp-chat-controls'):
+                prepare_chat = gr.Button('Prepare evidence / refresh research', variant='primary', size='sm', min_width=185)
+                clear_chat = gr.Button('New conversation', size='sm', min_width=115)
+            with gr.Accordion('Prepared evidence and research coverage', open=False) as chat_evidence:
+                chat_summary = gr.Markdown('Add fund documents or select a test case, then prepare the evidence.')
+            conversation = gr.Chatbot(label='Fund conversation', height='min(62vh, 700px)', min_height=310,
+                                      sanitize_html=True, elem_id='fp-chat-thread',
+                                      placeholder='<strong>What would you like to know about this fund?</strong>'
+                                                  '<p>Try the overview, a benchmark comparison or the weekly market brief.</p>')
+            with gr.Row(elem_classes='fp-chat-composer'):
+                chat_question = gr.Textbox(label='Ask about this fund', show_label=False, lines=1, max_lines=4,
+                                           interactive=False, scale=8, placeholder='Ask about this fund')
+                chat_send = gr.Button('Send', interactive=False, variant='primary', scale=1, min_width=70)
             chat_status = gr.Markdown()
-            clear_chat = gr.Button('New conversation', size='sm')
+            gr.Examples(examples=[[question] for question in VIEW_QUESTIONS + OVERSIGHT_QUESTIONS],
+                        inputs=chat_question, label='Suggested questions',
+                        example_labels=['Fund overview', 'Benchmark', 'Weekly news', 'Holdings',
+                                        'Mandate delivery', 'Evidence gaps', 'Challenge', 'Timing and fees', 'Before sign-off'],
+                        cache_examples=False, api_visibility='private', elem_id='fp-chat-starters')
 
         def benchmark_details(selected, name, currency, confirmed, pricing):
             files = [e for e in selected if e['role'] == BENCHMARK]
@@ -1202,17 +1253,18 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
             from fund_performance.chatbot import evidence_key, prepare_session
             selected, benchmark, issues = chat_inputs(state, table, demo_id, name, currency, confirmed, pricing, busy)
             if issues:
-                yield None, '\n'.join('- ' + issue for issue in issues), [], gr.update(), gr.update(interactive=False), gr.update(interactive=False)
+                yield None, '\n'.join('- ' + issue for issue in issues), [], gr.update(), gr.update(interactive=False), gr.update(interactive=False), fund_header(), gr.update(open=True)
                 return
             try:
                 key = evidence_key(selected, benchmark)
             except OSError:
-                yield None, 'An input file is unavailable. Upload it again.', [], gr.update(interactive=True), gr.update(interactive=False), gr.update(interactive=False)
+                yield None, 'An input file is unavailable. Upload it again.', [], gr.update(interactive=True), gr.update(interactive=False), gr.update(interactive=False), fund_header(), gr.update(open=True)
                 return
             pending = current if current and current.get('key') == key and not current.get('invalidated') else {'key': key}
-            yield pending, 'Preparing fund evidence and checking for news from the past seven days… Searches run in parallel when enabled. Refreshing reuses unchanged documents and starts a new conversation.', gr.skip(), gr.update(interactive=False), gr.update(interactive=False), gr.update(interactive=False)
+            yield pending, 'Preparing fund evidence and checking for news from the past seven days… Searches run in parallel when enabled. Refreshing reuses unchanged documents and starts a new conversation.', gr.skip(), gr.update(interactive=False), gr.update(interactive=False), gr.update(interactive=False), gr.skip(), gr.update(open=True)
             prepared, summary = await prepare_session(selected, benchmark, pending, limits)
-            yield prepared, summary, (prepared or {}).get('history', []), gr.update(interactive=True), gr.update(interactive=bool(prepared)), gr.update(interactive=bool(prepared))
+            profile = (prepared or {}).get('bundle', {}).get('profile')
+            yield prepared, summary, (prepared or {}).get('history', []), gr.update(interactive=True), gr.update(interactive=bool(prepared)), gr.update(interactive=bool(prepared)), fund_header(profile), gr.update(open=not prepared)
 
         async def on_chat_question(state, table, demo_id, name, currency, confirmed, pricing, busy, current, asked):
             from fund_performance.chatbot import reply
@@ -1228,23 +1280,23 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
         def invalidate_chat(state, table, demo_id, name, currency, confirmed, pricing, busy, current):
             from fund_performance.chatbot import evidence_key
             if not current:
-                return (gr.skip(),) * 5
+                return (gr.skip(),) * 7
             selected, benchmark, issues = chat_inputs(state, table, demo_id, name, currency, confirmed, pricing, busy, validate_files=False)
             try:
                 unchanged = current and not issues and current.get('key') == evidence_key(selected, benchmark)
             except OSError:
                 unchanged = False
             if unchanged:
-                return (gr.skip(),) * 5
+                return (gr.skip(),) * 7
             if current:
                 current['invalidated'] = True  # Revoke any answer/preparation still in flight for these inputs.
-            return None, 'Inputs changed. Prepare fund evidence before chatting.', [], gr.update(interactive=False), gr.update(value='', interactive=False)
+            return None, 'Inputs changed. Prepare fund evidence before chatting.', [], gr.update(interactive=False), gr.update(value='', interactive=False), fund_header(), gr.update(open=True)
 
         def new_conversation(current):
             return (current | {'history': []} if current else None), [], '', ''
 
         prepare_chat.click(on_prepare_chat, chat_file_inputs + [chat_state],
-                           [chat_state, chat_summary, conversation, prepare_chat, chat_send, chat_question],
+                           [chat_state, chat_summary, conversation, prepare_chat, chat_send, chat_question, chat_heading, chat_evidence],
                            concurrency_id='review-assurance', concurrency_limit=1, **private)
         for trigger in (chat_send.click, chat_question.submit):
             trigger(on_chat_question, chat_file_inputs + [chat_state, chat_question],
@@ -1253,7 +1305,7 @@ def build_ui(limits: AiLimits | None = None) -> gr.Blocks:
         for control in (entries, attachments, demo_state, benchmark_name, benchmark_currency,
                         benchmark_confirmed, benchmark_pricing, upload_busy):
             control.change(invalidate_chat, chat_file_inputs + [chat_state],
-                           [chat_state, chat_summary, conversation, chat_send, chat_question],
+                           [chat_state, chat_summary, conversation, chat_send, chat_question, chat_heading, chat_evidence],
                            queue=False, **private)
         clear_chat.click(new_conversation, chat_state, [chat_state, conversation, chat_question, chat_status],
                          concurrency_id='review-assurance', concurrency_limit=1, **private)

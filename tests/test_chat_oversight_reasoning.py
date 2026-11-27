@@ -110,9 +110,10 @@ def test_oversight_examples_populate_input_without_running_the_chatbot():
     from fund_performance.chat_views import VIEW_QUESTIONS
     ui = build_ui()
     datasets = [component for component in ui.get_config_file()['components']
-                if component['type'] == 'dataset' and component['props'].get('label') == 'Explore the fund or start an oversight question']
+                if component['type'] == 'dataset' and component['props'].get('label') == 'Suggested questions']
     assert len(datasets) == 1
     assert datasets[0]['props']['samples'] == [[question] for question in VIEW_QUESTIONS + OVERSIGHT_QUESTIONS]
+    assert datasets[0]['props']['sample_labels'][:4] == ['Fund overview', 'Benchmark', 'Weekly news', 'Holdings']
     assert len(OVERSIGHT_QUESTIONS) == 5
     example_events = [fn for fn in ui.fns.values() if fn.api_name == 'load_example']
     assert len(example_events) == 1 and example_events[0].api_visibility == 'private'
